@@ -1,0 +1,29 @@
+{
+  "name": "college-event-manager",
+  "version": "1.0.0",
+  "description": "A MERN stack application for college event management with AI-powered motivation features",
+  "main": "index.js",
+  "scripts": {
+    "start": "concurrently \"npm run server\" \"npm run client\"",
+    "server": "cd backend && npm run dev",
+    "client": "cd frontend && npm start",
+    "install-all": "npm install && cd frontend && npm install && cd ../backend && npm install"
+  },
+  "keywords": [
+    "MERN",
+    "React",
+    "Node.js",
+    "MongoDB",
+    "Express",
+    "AI",
+    "Events"
+  ],
+  "author": "",
+  "license": "ISC",
+  "devDependencies": {
+    "concurrently": "^8.2.2"
+  },
+  "dependencies": {
+    "@google/generative-ai": "^0.24.0"
+  }
+}
