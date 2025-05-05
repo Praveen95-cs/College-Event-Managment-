@@ -1,0 +1,60 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    --color-primary: 139 92 246;
+    --color-secondary: 76 29 149;
+  }
+}
+
+body {
+  margin: 0;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 'Oxygen',
+    'Ubuntu', 'Cantarell', 'Fira Sans', 'Droid Sans', 'Helvetica Neue',
+    sans-serif;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  @apply bg-gray-900 text-gray-100;
+}
+
+code {
+  font-family: source-code-pro, Menlo, Monaco, Consolas, 'Courier New',
+    monospace;
+}
+
+/* Dark theme overrides */
+@layer components {
+  .card {
+    @apply bg-gray-800 border-gray-700;
+  }
+  
+  .input {
+    @apply bg-gray-800 border-gray-700 text-gray-100 placeholder-gray-400;
+  }
+  
+  .button-primary {
+    @apply bg-violet-600 hover:bg-violet-700 text-white;
+  }
+  
+  .button-secondary {
+    @apply bg-gray-700 hover:bg-gray-600 text-gray-100;
+  }
+  
+  .nav-link {
+    @apply text-gray-300 hover:text-white;
+  }
+  
+  .heading-primary {
+    @apply text-white;
+  }
+  
+  .heading-secondary {
+    @apply text-gray-200;
+  }
+  
+  .text-body {
+    @apply text-gray-300;
+  }
+} 
