@@ -12,7 +12,11 @@ const CreateEvent = () => {
     location: '',
     department: '',
     type: '',
-    capacity: ''
+    capacity: '',
+    highlights: '',
+    perks: '',
+    agenda: '',
+    certificateEnabled: true
   });
   const [photo, setPhoto] = useState(null);
   const [error, setError] = useState('');
@@ -224,6 +228,67 @@ const CreateEvent = () => {
                 min="1"
                 className="mt-1 block w-full rounded-md border-gray-700 bg-gray-800 text-gray-100 shadow-sm focus:border-violet-500 focus:ring-violet-500"
               />
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div>
+                <label htmlFor="highlights" className="block text-sm font-medium text-gray-300">
+                  Event Highlights
+                </label>
+                <textarea
+                  id="highlights"
+                  name="highlights"
+                  value={formData.highlights}
+                  onChange={handleChange}
+                  rows={3}
+                  placeholder="One highlight per line or comma separated"
+                  className="mt-1 block w-full rounded-md border-gray-700 bg-gray-800 text-gray-100 shadow-sm focus:border-violet-500 focus:ring-violet-500"
+                />
+              </div>
+
+              <div>
+                <label htmlFor="perks" className="block text-sm font-medium text-gray-300">
+                  Perks
+                </label>
+                <textarea
+                  id="perks"
+                  name="perks"
+                  value={formData.perks}
+                  onChange={handleChange}
+                  rows={3}
+                  placeholder="One perk per line or comma separated"
+                  className="mt-1 block w-full rounded-md border-gray-700 bg-gray-800 text-gray-100 shadow-sm focus:border-violet-500 focus:ring-violet-500"
+                />
+              </div>
+            </div>
+
+            <div>
+              <label htmlFor="agenda" className="block text-sm font-medium text-gray-300">
+                Event Agenda
+              </label>
+              <textarea
+                id="agenda"
+                name="agenda"
+                value={formData.agenda}
+                onChange={handleChange}
+                rows={4}
+                placeholder="List the session flow or agenda points"
+                className="mt-1 block w-full rounded-md border-gray-700 bg-gray-800 text-gray-100 shadow-sm focus:border-violet-500 focus:ring-violet-500"
+              />
+            </div>
+
+            <div className="flex items-center gap-3">
+              <input
+                type="checkbox"
+                id="certificateEnabled"
+                name="certificateEnabled"
+                checked={formData.certificateEnabled}
+                onChange={(e) => setFormData(prev => ({ ...prev, certificateEnabled: e.target.checked }))}
+                className="h-4 w-4 rounded border-gray-600 text-violet-600 focus:ring-violet-500"
+              />
+              <label htmlFor="certificateEnabled" className="text-sm font-medium text-gray-300">
+                Enable participation certificates
+              </label>
             </div>
 
             <div>

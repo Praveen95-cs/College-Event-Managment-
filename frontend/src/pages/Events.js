@@ -272,6 +272,16 @@ const Events = () => {
                       <TagIcon className="h-5 w-5 mr-2 text-gray-400" />
                       {event.type.charAt(0).toUpperCase() + event.type.slice(1)}
                     </div>
+                    {event.noveltyFeatures?.certificateEnabled && (
+                      <div className="inline-flex items-center rounded-full bg-violet-500/20 px-3 py-1 text-xs font-semibold text-violet-300">
+                        Certificate Ready
+                      </div>
+                    )}
+                    {event.noveltyFeatures?.highlights?.length > 0 && (
+                      <div className="text-xs text-gray-400">
+                        {event.noveltyFeatures.highlights[0]}
+                      </div>
+                    )}
                   </div>
                   <div className="mt-6">
                     {user?.role === 'student' && (

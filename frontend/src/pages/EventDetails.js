@@ -23,6 +23,7 @@ const EventDetails = () => {
   const [showMotivationForm, setShowMotivationForm] = useState(false);
   const [newQuote, setNewQuote] = useState({ text: '', author: '' });
   const [newTip, setNewTip] = useState('');
+  const backendUrl = process.env.REACT_APP_BACKEND_URL || 'http://localhost:5000';
 
   useEffect(() => {
     fetchEventDetails();
@@ -76,6 +77,52 @@ const EventDetails = () => {
       fetchEventDetails();
     } catch (error) {
       console.error('Error generating motivation content:', error);
+    }
+  };
+
+  const handleDownloadRegistrations = async () => {
+    try {
+      const token = localStorage.getItem('token');
+      const response = await axios.get(`${backendUrl}/api/registrations/event/${id}/export`, {
+        headers: {
+          Authorization: `Bearer ${token}`
+        },
+        responseType: 'blob'
+      });
+
+      const downloadUrl = window.URL.createObjectURL(new Blob([response.data]));
+      const link = document.createElement('a');
+      link.href = downloadUrl;
+      link.setAttribute('download', `${event.title.replace(/[^a-z0-9]/gi, '_').toLowerCase()}_registrations.xlsx`);
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      window.URL.revokeObjectURL(downloadUrl);
+    } catch (error) {
+      console.error('Error downloading registrations:', error);
+    }
+  };
+
+  const handleDownloadCertificate = async () => {
+    try {
+      const token = localStorage.getItem('token');
+      const response = await axios.get(`${backendUrl}/api/registrations/event/${id}/certificate`, {
+        headers: {
+          Authorization: `Bearer ${token}`
+        },
+        responseType: 'blob'
+      });
+
+      const downloadUrl = window.URL.createObjectURL(new Blob([response.data]));
+      const link = document.createElement('a');
+      link.href = downloadUrl;
+      link.setAttribute('download', `${event.title.replace(/[^a-z0-9]/gi, '_').toLowerCase()}_certificate.pdf`);
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      window.URL.revokeObjectURL(downloadUrl);
+    } catch (error) {
+      console.error('Error downloading certificate:', error);
     }
   };
 
@@ -217,6 +264,36 @@ const EventDetails = () => {
           </dl>
         </div>
 
+        <div className="border-t border-gray-200 px-4 py-5 sm:px-6">
+          <h4 className="text-lg font-medium text-gray-900 mb-4">Event Novelty Features</h4>
+          <div className="grid grid-cols-1 gap-6 lg:grid-cols-3">
+            <div className="bg-gray-50 rounded-lg p-4">
+              <h5 className="text-sm font-semibold text-gray-900 mb-3">Highlights</h5>
+              <ul className="space-y-2 text-sm text-gray-700 list-disc list-inside">
+                {(event.noveltyFeatures?.highlights?.length ? event.noveltyFeatures.highlights : ['Immersive campus experience', 'Interactive participation', 'Student recognition']).map((item, index) => (
+                  <li key={index}>{item}</li>
+                ))}
+              </ul>
+            </div>
+            <div className="bg-gray-50 rounded-lg p-4">
+              <h5 className="text-sm font-semibold text-gray-900 mb-3">Perks</h5>
+              <ul className="space-y-2 text-sm text-gray-700 list-disc list-inside">
+                {(event.noveltyFeatures?.perks?.length ? event.noveltyFeatures.perks : ['Networking opportunities', 'Hands-on learning', 'Event certificate']).map((item, index) => (
+                  <li key={index}>{item}</li>
+                ))}
+              </ul>
+            </div>
+            <div className="bg-gray-50 rounded-lg p-4">
+              <h5 className="text-sm font-semibold text-gray-900 mb-3">Agenda</h5>
+              <ul className="space-y-2 text-sm text-gray-700 list-disc list-inside">
+                {(event.noveltyFeatures?.agenda?.length ? event.noveltyFeatures.agenda : ['Welcome and registration', 'Main event sessions', 'Closing and awards']).map((item, index) => (
+                  <li key={index}>{item}</li>
+                ))}
+              </ul>
+            </div>
+          </div>
+        </div>
+
         {/* Motivation Section */}
         <div className="border-t border-gray-200 px-4 py-5 sm:px-6">
           <div className="flex justify-between items-center mb-4">
@@ -334,7 +411,15 @@ const EventDetails = () => {
 
         <div className="border-t border-gray-200 px-4 py-5 sm:px-6">
           {isAuthenticated && !isOrganizer && (
-            <div className="flex justify-end">
+            <div className="flex flex-col gap-3 sm:flex-row sm:justify-end">
+              {isAttending && (
+                <button
+                  onClick={handleDownloadCertificate}
+                  className="inline-flex items-center justify-center px-4 py-2 border border-violet-600 text-sm font-medium rounded-md text-violet-700 bg-violet-50 hover:bg-violet-100"
+                >
+                  Download Certificate
+                </button>
+              )}
               {isAttending ? (
                 <button
                   onClick={handleCancelBooking}
@@ -351,6 +436,17 @@ const EventDetails = () => {
                   {event.attendees.length >= event.capacity ? 'Event Full' : 'Book Event'}
                 </button>
               )}
+            </div>
+          )}
+
+          {(isOrganizer || isAdmin) && (
+            <div className="mt-4 flex justify-end">
+              <button
+                onClick={handleDownloadRegistrations}
+                className="inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md text-white bg-emerald-600 hover:bg-emerald-700"
+              >
+                Download Registrations Excel
+              </button>
             </div>
           )}
         </div>
