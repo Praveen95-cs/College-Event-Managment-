@@ -50,3 +50,4 @@ backend/.env.*
 backend/.git-backup/
 node_modules/
 backend/node_modules/
+backend/server.js.backup
