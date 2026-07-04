@@ -43,3 +43,10 @@ coverage
 ehthumbs.db
 Thumbs.db .env.txt
 /.env.txt
+/.env
+/.env.txt
+backend/.env
+backend/.env.*
+backend/.git-backup/
+node_modules/
+backend/node_modules/
