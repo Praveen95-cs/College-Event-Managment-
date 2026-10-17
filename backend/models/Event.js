@@ -15,7 +15,7 @@ const schema = new mongoose.Schema({
   highlights:[String], perks:[String], agenda:[String],
   certificateEnabled:{type:Boolean,default:true}
  },
- status:{type:String,enum:['pending','approved','rejected','upcoming','ongoing','completed','cancelled'],default:'pending'},
+ status:{type:String,enum:['pending','approved','rejected','upcoming','ongoing','completed','cancelled'],default:'approved'},
  photo:{type:String,default:''}
 },{timestamps:true});
 schema.virtual('isFull').get(function(){ return this.attendees.length >= this.capacity; });
