@@ -572,6 +572,18 @@ router.post('/:id/start', auth, async (req, res) => {
       }
     }
 
+/**
+ * Unbiased Fisher-Yates shuffle algorithm to guarantee uniform random permutations
+ */
+function fisherYatesShuffle(array) {
+  const arr = [...array];
+  for (let i = arr.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [arr[i], arr[j]] = [arr[j], arr[i]];
+  }
+  return arr;
+}
+
     // Check if participant ALREADY has an assignment
     let assignment = await AssessmentAssignment.findOne({
       competition: comp._id,
@@ -579,7 +591,23 @@ router.post('/:id/start', auth, async (req, res) => {
     });
 
     if (assignment) {
-      // Return existing assignment - NEVER regenerate questions!
+      // If assignment is in_progress and user hasn't submitted any answers or code yet,
+      // and their assigned questions are in the original pool order, randomize them now!
+      if (
+        assignment.status === 'in_progress' &&
+        (!assignment.answers || assignment.answers.length === 0) &&
+        (!assignment.codingSubmissions || assignment.codingSubmissions.length === 0)
+      ) {
+        const originalPoolIds = (comp.questionPool || []).map(q => q.questionId || q.problemId);
+        const isOriginalOrder = assignment.assignedQuestionIds.length > 1 &&
+          assignment.assignedQuestionIds.every((id, idx) => id === originalPoolIds[idx]);
+        if (isOriginalOrder) {
+          assignment.assignedQuestionIds = fisherYatesShuffle(assignment.assignedQuestionIds);
+          await assignment.save();
+        }
+      }
+
+      // Return existing assignment
       const sanitizedQuestions = comp.getSanitizedQuestions(assignment.assignedQuestionIds);
       return res.json({
         assignmentId: assignment._id,
@@ -605,15 +633,15 @@ router.post('/:id/start', auth, async (req, res) => {
       }
     }
 
-    // Generate balanced personalized question set for this participant
+    // Generate balanced personalized randomized question set for this participant
     const pool = comp.questionPool || [];
     if (pool.length === 0) {
       return res.status(400).json({ message: 'No questions available in this competition.' });
     }
 
     const targetCount = Math.min(comp.questionsPerParticipant || pool.length, pool.length);
-    // Shuffle pool deterministically based on participant ID or pseudo-random
-    const shuffled = [...pool].sort(() => Math.random() - 0.5);
+    // Use unbiased Fisher-Yates shuffle algorithm to guarantee every user receives a distinct randomized order and sample
+    const shuffled = fisherYatesShuffle(pool);
     const selected = shuffled.slice(0, targetCount);
     const assignedIds = selected.map(q => q.questionId || q.problemId);
 

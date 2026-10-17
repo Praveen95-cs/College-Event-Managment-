@@ -105,11 +105,18 @@ competitionSchema.virtual('isCurrentlyActive').get(function() {
 });
 
 // Helper method to sanitize question pool for participants (never expose answers or hidden tests)
+// Preserves the exact randomized assigned order of questionIds for each individual participant
 competitionSchema.methods.getSanitizedQuestions = function(questionIds = null) {
-  let pool = this.questionPool || [];
+  let pool = [];
   if (Array.isArray(questionIds) && questionIds.length > 0) {
-    const idSet = new Set(questionIds.map(String));
-    pool = pool.filter(q => idSet.has(String(q.questionId || q.problemId)));
+    const qMap = new Map();
+    (this.questionPool || []).forEach(q => {
+      qMap.set(String(q.questionId || q.problemId), q);
+    });
+    // Preserve the exact randomized sequence assigned to this participant
+    pool = questionIds.map(id => qMap.get(String(id))).filter(Boolean);
+  } else {
+    pool = this.questionPool || [];
   }
 
   return pool.map(q => {
