@@ -1,13 +1,13 @@
 services:
   - type: web
     name: college-event-manager
-    env: node
+    runtime: node
     plan: free
     region: oregon
     buildCommand: npm run render-build
     startCommand: npm run render-start
     healthCheckPath: /api/health
-    autoDeploy: true
+    autoDeployTrigger: commit
     envVars:
       - key: NODE_ENV
         value: production
