@@ -11,6 +11,12 @@ services:
     envVars:
       - key: NODE_ENV
         value: production
+      - key: CI
+        value: "false"
+      - key: DISABLE_ESLINT_PLUGIN
+        value: "true"
+      - key: GENERATE_SOURCEMAP
+        value: "false"
       - key: GEMINI_MODEL
         value: gemini-3.8-flash
       - key: JUDGE0_API_URL

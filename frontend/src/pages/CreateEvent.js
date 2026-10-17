@@ -1,7 +1,6 @@
 import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import axios from 'axios';
-import { useAuth } from '../contexts/AuthContext';
 import { getBackendUrl } from '../utils/apiConfig';
 
 const CreateEvent = () => {
@@ -22,7 +21,6 @@ const CreateEvent = () => {
   const [photo, setPhoto] = useState(null);
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
-  const { user } = useAuth();
   const navigate = useNavigate();
   const backendUrl = getBackendUrl();
 
