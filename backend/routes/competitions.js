@@ -1095,9 +1095,8 @@ router.get('/:id/my-result', auth, async (req, res) => {
       return res.status(400).json({ message: 'Assessment is still in progress' });
     }
 
-    // If competition has concluded or organizer enabled review, include question solutions
-    const isEnded = new Date() > comp.endTime || comp.status === 'completed';
-    const showSolutions = isEnded || comp.settings?.allowReview;
+    // Once an assessment has been submitted, allow participants to preview answers and explanations
+    const showSolutions = true;
 
     const questionMap = new Map();
     comp.questionPool.forEach(q => {
@@ -1115,8 +1114,9 @@ router.get('/:id/my-result', auth, async (req, res) => {
           type: 'coding',
           title: qDoc.title,
           description: qDoc.description,
-          difficulty: qDoc.difficulty,
-          marks: qDoc.marks,
+          topic: qDoc.topic || 'Algorithms',
+          difficulty: qDoc.difficulty || 'medium',
+          marks: qDoc.marks || 10,
           submission: codeSub ? {
             language: codeSub.language,
             code: codeSub.code,
@@ -1130,18 +1130,28 @@ router.get('/:id/my-result', auth, async (req, res) => {
       }
 
       const ans = assignment.answers.find(a => a.questionId === qId);
+      const isAttempted = ans && ans.selectedOption !== undefined && ans.selectedOption !== -1 && ans.selectedOption !== null;
+      const isCorrect = isAttempted && ans.selectedOption === qDoc.correctOption;
+
+      let explanationText = qDoc.explanation;
+      if (!explanationText && qDoc.options && qDoc.correctOption !== undefined && qDoc.options[qDoc.correctOption]) {
+        explanationText = `The correct answer is Option ${String.fromCharCode(65 + qDoc.correctOption)}: "${qDoc.options[qDoc.correctOption]}".`;
+      }
+
       return {
         questionId: qId,
         type: 'mcq',
         question: qDoc.question,
         options: qDoc.options,
-        difficulty: qDoc.difficulty,
-        marks: qDoc.marks,
-        selectedOption: ans?.selectedOption ?? -1,
-        isCorrect: ans?.isCorrect ?? false,
+        topic: qDoc.topic || 'General',
+        difficulty: qDoc.difficulty || 'medium',
+        marks: qDoc.marks || 1,
+        selectedOption: isAttempted ? ans.selectedOption : -1,
+        isAttempted,
+        isCorrect: isAttempted ? isCorrect : false,
         scoreAwarded: ans?.scoreAwarded ?? 0,
         correctOption: showSolutions ? qDoc.correctOption : undefined,
-        explanation: showSolutions ? qDoc.explanation : undefined
+        explanation: showSolutions ? (explanationText || 'No detailed explanation provided for this question.') : undefined
       };
     }).filter(Boolean);
 
