@@ -12,7 +12,6 @@ import CreateEvent from './pages/CreateEvent';
 import Profile from './pages/Profile';
 import AdminDashboard from './pages/AdminDashboard';
 import CommunityMessage from './components/CommunityMessage';
-import Payment from './pages/Payment';
 import About from './pages/About';
 import PrivacyPolicy from './pages/PrivacyPolicy';
 import Competitions from './pages/Competitions';
@@ -51,7 +50,7 @@ function AppShell() {
           <Route path="/events/:id" element={<EventDetails />} />
           <Route path="/community" element={<CommunityMessage />} />
           <Route path="/motivation" element={<Navigate to="/" replace />} />
-          <Route path="/payment" element={<Payment />} />
+          <Route path="/payment" element={<Navigate to="/events" replace />} />
           <Route path="/about" element={<About />} />
           <Route path="/privacy-policy" element={<PrivacyPolicy />} />
           <Route path="/competitions" element={<Competitions />} />

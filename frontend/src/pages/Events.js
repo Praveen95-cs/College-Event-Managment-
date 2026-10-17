@@ -269,7 +269,10 @@ const Events = () => {
       {selectedEvent && (
         <EventRegistration
           event={selectedEvent}
-          onClose={() => setSelectedEvent(null)}
+          onClose={() => {
+            setSelectedEvent(null);
+            fetchEvents();
+          }}
         />
       )}
     </div>
