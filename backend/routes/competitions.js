@@ -9,6 +9,7 @@ const Event = require('../models/Event');
 const Registration = require('../models/Registration');
 const geminiService = require('../services/geminiService');
 const codeExecutionService = require('../services/codeExecutionService');
+const { generateCompetitionCertificateStream } = require('../services/certificateService');
 
 /**
  * Health and status check for Gemini integration
@@ -103,6 +104,54 @@ router.get('/manage', auth, authorize('admin', 'organizer'), async (req, res) =>
   } catch (err) {
     console.error('Error in /manage:', err);
     res.status(500).json({ message: 'Failed to fetch competitions' });
+  }
+});
+
+/**
+ * Participant: Get all completed competition certificates with score & rank
+ */
+router.get('/my-certificates', auth, async (req, res) => {
+  try {
+    const assignments = await AssessmentAssignment.find({
+      user: req.user._id,
+      status: { $in: ['submitted', 'timed_out'] }
+    })
+      .populate({
+        path: 'competition',
+        select: 'title type event organizer startTime endTime description department',
+        populate: [
+          { path: 'organizer', select: 'name email' },
+          { path: 'event', select: 'title date location department' }
+        ]
+      })
+      .sort({ updatedAt: -1 });
+
+    const certList = assignments
+      .filter(a => a.competition)
+      .map(a => {
+        const comp = a.competition;
+        return {
+          assignmentId: a._id,
+          competitionId: comp._id,
+          title: comp.title,
+          type: comp.type,
+          score: a.score,
+          totalPossibleScore: a.totalPossibleScore || 100,
+          percentage: a.percentage || 0,
+          rank: a.rank,
+          status: a.status,
+          timeTakenSeconds: a.timeTakenSeconds,
+          submitTime: a.submitTime || a.updatedAt,
+          organizerName: comp.organizer?.name || 'Faculty Technical Chair',
+          department: comp.department || comp.event?.department || 'Computer Technology',
+          certificateId: `CERT-COMP-${new Date(comp.startTime || a.createdAt).getFullYear()}-${comp._id.toString().slice(-4).toUpperCase()}-${a._id.toString().slice(-4).toUpperCase()}`
+        };
+      });
+
+    res.json(certList);
+  } catch (err) {
+    console.error('Error in /my-certificates:', err);
+    res.status(500).json({ message: 'Failed to fetch competition certificates' });
   }
 });
 
@@ -1083,6 +1132,82 @@ router.get('/:id/my-result', auth, async (req, res) => {
     });
   } catch (err) {
     res.status(500).json({ message: 'Failed to fetch personal result' });
+  }
+});
+
+/**
+ * Participant: Download or preview verified Competition Merit Certificate with score
+ */
+router.get('/:id/certificate', auth, async (req, res) => {
+  try {
+    const comp = await Competition.findById(req.params.id)
+      .populate('organizer', 'name email department')
+      .populate('event', 'title date location department');
+
+    if (!comp) {
+      return res.status(404).json({ message: 'Competition not found' });
+    }
+
+    let assignment = await AssessmentAssignment.findOne({
+      competition: comp._id,
+      user: req.user._id
+    });
+
+    // If user is admin/organizer and hasn't participated, allow preview
+    if (!assignment && ['admin', 'organizer'].includes(req.user.role)) {
+      const maxScore = comp.questionPool?.reduce((sum, q) => sum + (q.marks || 1), 0) || 100;
+      assignment = {
+        _id: 'PREVIEW',
+        score: maxScore,
+        totalPossibleScore: maxScore,
+        percentage: 100,
+        rank: 1,
+        timeTakenSeconds: 420,
+        submitTime: new Date(),
+        status: 'submitted'
+      };
+    }
+
+    if (!assignment) {
+      return res.status(404).json({ message: 'No assessment record found for this competition.' });
+    }
+
+    if (assignment.status === 'in_progress') {
+      return res.status(400).json({ message: 'Assessment is still in progress. Please submit before downloading certificate.' });
+    }
+
+    const regNo = req.user.email?.split('@')[0] || req.user._id.toString().slice(-8).toUpperCase();
+    const certificateId = `CERT-COMP-${new Date(comp.startTime || comp.createdAt || Date.now()).getFullYear()}-${comp._id.toString().slice(-4).toUpperCase()}-${(assignment._id || req.user._id).toString().slice(-4).toUpperCase()}`;
+
+    const doc = generateCompetitionCertificateStream({
+      name: req.user.name,
+      regNo,
+      competitionTitle: comp.title,
+      type: comp.type,
+      score: assignment.score,
+      totalPossibleScore: assignment.totalPossibleScore || 100,
+      percentage: assignment.percentage || 0,
+      rank: assignment.rank,
+      timeTakenSeconds: assignment.timeTakenSeconds,
+      department: comp.department || comp.event?.department || req.user.department || 'Technical Department',
+      date: assignment.submitTime || comp.endTime || new Date(),
+      certificateId,
+      organizerName: comp.organizer?.name || 'Faculty Technical Chair'
+    });
+
+    const safeTitle = (comp.title || 'competition').replace(/[^a-z0-9]/gi, '_').toLowerCase();
+    res.setHeader('Content-Type', 'application/pdf');
+    if (req.query.inline === 'true') {
+      res.setHeader('Content-Disposition', `inline; filename="${safeTitle}_merit_certificate.pdf"`);
+    } else {
+      res.setHeader('Content-Disposition', `attachment; filename="${safeTitle}_merit_certificate.pdf"`);
+    }
+
+    doc.pipe(res);
+    doc.end();
+  } catch (err) {
+    console.error('Error generating competition certificate:', err);
+    res.status(500).json({ message: 'Failed to generate competition certificate' });
   }
 });
 

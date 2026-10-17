@@ -8,7 +8,9 @@ import {
   MagnifyingGlassIcon,
   ArrowLeftIcon,
   SparklesIcon,
-  UserCircleIcon
+  UserCircleIcon,
+  AcademicCapIcon,
+  EyeIcon
 } from '@heroicons/react/24/outline';
 import { getBackendUrl } from '../utils/apiConfig';
 
@@ -72,6 +74,40 @@ const Leaderboard = () => {
       window.URL.revokeObjectURL(url);
     } catch (err) {
       console.error('Export error:', err);
+    }
+  };
+
+  const [downloadingCert, setDownloadingCert] = useState(false);
+
+  const handleDownloadCertificate = async (openInTab = false) => {
+    try {
+      setDownloadingCert(true);
+      const token = localStorage.getItem('token');
+      const response = await axios.get(`${backendUrl}/api/competitions/${id}/certificate`, {
+        headers: { Authorization: `Bearer ${token}` },
+        responseType: 'blob'
+      });
+
+      const blob = new Blob([response.data], { type: 'application/pdf' });
+      const downloadUrl = window.URL.createObjectURL(blob);
+
+      if (openInTab) {
+        window.open(downloadUrl, '_blank');
+      } else {
+        const link = document.createElement('a');
+        link.href = downloadUrl;
+        link.setAttribute('download', `${(leaderboard?.competitionTitle || 'competition').replace(/[^a-z0-9]/gi, '_').toLowerCase()}_merit_certificate.pdf`);
+        document.body.appendChild(link);
+        link.click();
+        link.remove();
+      }
+
+      setTimeout(() => window.URL.revokeObjectURL(downloadUrl), 60000);
+    } catch (err) {
+      console.error('Error downloading certificate:', err);
+      alert('Failed to generate competition certificate. Please ensure your assessment has been submitted.');
+    } finally {
+      setDownloadingCert(false);
     }
   };
 
@@ -160,6 +196,33 @@ const Leaderboard = () => {
               <p className="text-xl font-bold text-cyan-400 mt-0.5 font-mono">
                 {Math.floor(myResult.timeTakenSeconds / 60)}m {myResult.timeTakenSeconds % 60}s
               </p>
+            </div>
+          </div>
+
+          {/* Certificate Download & Preview Bar */}
+          <div className="pt-3 mt-3 border-t border-violet-800/40 flex flex-wrap items-center justify-between gap-3">
+            <div className="flex items-center gap-2 text-xs text-amber-300 font-medium">
+              <AcademicCapIcon className="h-4 w-4 text-amber-400 shrink-0" />
+              <span>Official Merit Certificate Ready • Score: {myResult.score}/{myResult.totalPossibleScore} ({myResult.percentage}%)</span>
+            </div>
+            <div className="flex items-center gap-2">
+              <button
+                onClick={() => handleDownloadCertificate(true)}
+                disabled={downloadingCert}
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold text-gray-200 bg-gray-900 hover:bg-gray-800 border border-violet-700/50 transition-colors disabled:opacity-50"
+                title="Preview certificate in a new tab"
+              >
+                <EyeIcon className="h-3.5 w-3.5 text-gray-400" />
+                <span>Preview</span>
+              </button>
+              <button
+                onClick={() => handleDownloadCertificate(false)}
+                disabled={downloadingCert}
+                className="inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl text-xs font-semibold text-white bg-gradient-to-r from-amber-600 to-amber-700 hover:from-amber-500 hover:to-amber-600 shadow-md shadow-amber-600/20 transition-all disabled:opacity-50"
+              >
+                <ArrowDownTrayIcon className="h-3.5 w-3.5" />
+                <span>{downloadingCert ? 'Generating...' : 'Download Certificate (PDF)'}</span>
+              </button>
             </div>
           </div>
         </div>
