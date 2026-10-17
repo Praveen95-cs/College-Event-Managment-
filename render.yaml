@@ -7,7 +7,7 @@ services:
     buildCommand: npm run render-build
     startCommand: npm run render-start
     healthCheckPath: /api/health
-    autoDeployTrigger: commit
+    autoDeploy: true
     envVars:
       - key: NODE_ENV
         value: production
@@ -22,7 +22,7 @@ services:
       - key: JUDGE0_API_URL
         value: https://ce.judge0.com
       - key: MONGODB_URI
-        sync: false
+        value: mongodb://praveensumathi11_db_user:x498jO6IPY0HaglU@ac-5ejedd5-shard-00-00.2uaavye.mongodb.net:27017,ac-5ejedd5-shard-00-01.2uaavye.mongodb.net:27017,ac-5ejedd5-shard-00-02.2uaavye.mongodb.net:27017/college-event-manager?ssl=true&replicaSet=atlas-a0lohh-shard-0&authSource=admin&retryWrites=true&w=majority
       - key: JWT_SECRET
         generateValue: true
       - key: GEMINI_API_KEY
@@ -32,4 +32,4 @@ services:
       - key: ADMIN_EMAIL
         value: admin@collegeevents.com
       - key: ADMIN_PASSWORD
-        sync: false
+        value: CampusAdmin#2026

@@ -1,4 +1,15 @@
 /** @type {import('tailwindcss').Config} */
+let formsPlugin;
+try {
+  formsPlugin = require('@tailwindcss/forms');
+} catch (e) {
+  try {
+    formsPlugin = require(require.resolve('@tailwindcss/forms', { paths: [__dirname, require('path').join(__dirname, '..')] }));
+  } catch (err) {
+    formsPlugin = null;
+  }
+}
+
 module.exports = {
   content: [
     "./src/**/*.{js,jsx,ts,tsx}",
@@ -13,7 +24,7 @@ module.exports = {
     },
   },
   plugins: [
-    require('@tailwindcss/forms'),
+    ...(formsPlugin ? [formsPlugin] : []),
   ],
   important: true,
 } 

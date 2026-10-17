@@ -4,13 +4,14 @@
   "description": "A MERN stack application for college event management with AI-powered motivation features",
   "main": "index.js",
   "scripts": {
-    "start": "concurrently \"npm run server\" \"npm run client\"",
+    "start": "node backend/server.js",
+    "dev": "concurrently \"npm run server\" \"npm run client\"",
     "server": "cd backend && npm run dev",
     "client": "cd frontend && npm start",
-    "build": "npm --prefix frontend run build",
-    "render-build": "npm install && npm --prefix frontend install --include=dev && npm --prefix backend install && npm --prefix frontend run build",
+    "build": "npm run render-build",
+    "render-build": "npm install --production=false && npm --prefix frontend install --production=false && npm --prefix backend install --production=false && npm --prefix frontend run build",
     "render-start": "node backend/server.js",
-    "start:prod": "npm run build && node backend/server.js",
+    "start:prod": "npm run render-build && node backend/server.js",
     "install-all": "npm install && npm --prefix frontend install && npm --prefix backend install"
   },
   "keywords": [
@@ -24,10 +25,13 @@
   ],
   "author": "",
   "license": "ISC",
-  "devDependencies": {
-    "concurrently": "^8.2.2"
-  },
+  "devDependencies": {},
   "dependencies": {
-    "@google/generative-ai": "^0.24.0"
+    "@google/generative-ai": "^0.24.0",
+    "@tailwindcss/forms": "^0.5.7",
+    "tailwindcss": "^3.3.3",
+    "postcss": "^8.4.29",
+    "autoprefixer": "^10.4.15",
+    "concurrently": "^8.2.2"
   }
 }

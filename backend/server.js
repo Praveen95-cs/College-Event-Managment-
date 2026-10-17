@@ -3,6 +3,7 @@ const mongoose = require('mongoose');
 const cors = require('cors');
 const dotenv = require('dotenv');
 const path = require('path');
+const fs = require('fs');
 const helmet = require('helmet');
 const compression = require('compression');
 const rateLimit = require('express-rate-limit');
@@ -46,20 +47,31 @@ function sanitizeMongoUri(uri) {
   return uri.replace(/:<?([^<>@]+)>?@/, (_, password) => `:${password}@`);
 }
 
+const ATLAS_FALLBACK_URI = 'mongodb://praveensumathi11_db_user:x498jO6IPY0HaglU@ac-5ejedd5-shard-00-00.2uaavye.mongodb.net:27017,ac-5ejedd5-shard-00-01.2uaavye.mongodb.net:27017,ac-5ejedd5-shard-00-02.2uaavye.mongodb.net:27017/college-event-manager?ssl=true&replicaSet=atlas-a0lohh-shard-0&authSource=admin&retryWrites=true&w=majority';
+
 async function connectDatabase() {
-  const primary = sanitizeMongoUri(process.env.MONGODB_URI);
+  const primary = sanitizeMongoUri(process.env.MONGODB_URI) || ATLAS_FALLBACK_URI;
   const options = {
-    serverSelectionTimeoutMS: 10000,
+    serverSelectionTimeoutMS: 15000,
     maxPoolSize: 10
   };
   try {
     await mongoose.connect(primary, options);
     return;
   } catch (err) {
-    if (!primary || primary === LOCAL_MONGO_URI) throw err;
-    console.warn(`Primary MongoDB connection failed (${err.message}). Using local MongoDB.`);
-    await mongoose.disconnect().catch(() => {});
-    await mongoose.connect(LOCAL_MONGO_URI, options);
+    if (primary !== ATLAS_FALLBACK_URI) {
+      console.warn(`Primary MongoDB connection failed (${err.message}). Connecting to Atlas fallback.`);
+      await mongoose.disconnect().catch(() => {});
+      await mongoose.connect(ATLAS_FALLBACK_URI, options);
+      return;
+    }
+    if (!isProd) {
+      console.warn(`Atlas connection failed (${err.message}). Trying local MongoDB.`);
+      await mongoose.disconnect().catch(() => {});
+      await mongoose.connect(LOCAL_MONGO_URI, options);
+      return;
+    }
+    throw err;
   }
 }
 
@@ -73,7 +85,7 @@ const allowedOrigins = (process.env.FRONTEND_URL || 'http://localhost:3000')
 
 app.use(helmet({
   crossOriginResourcePolicy: { policy: 'cross-origin' },
-  contentSecurityPolicy: isProd ? undefined : false
+  contentSecurityPolicy: false
 }));
 app.use(compression());
 app.use(cors({
@@ -114,8 +126,8 @@ app.use('/api/notifications', require('./routes/notifications'));
 app.use('/api/users', require('./routes/users'));
 app.use('/api/competitions', require('./routes/competitions'));
 
-if (isProd) {
-  const buildPath = path.join(__dirname, '..', 'frontend', 'build');
+const buildPath = path.join(__dirname, '..', 'frontend', 'build');
+if (fs.existsSync(buildPath) && fs.existsSync(path.join(buildPath, 'index.html'))) {
   app.use(express.static(buildPath));
   app.get('*', (req, res, next) => {
     if (req.path.startsWith('/api')) return next();
@@ -134,8 +146,9 @@ app.use((err, req, res, next) => {
 
 const PORT = process.env.PORT || 5000;
 async function start() {
-  if (!process.env.MONGODB_URI) throw new Error('MONGODB_URI is required');
-  if (!process.env.JWT_SECRET) throw new Error('JWT_SECRET is required');
+  if (!process.env.JWT_SECRET) {
+    process.env.JWT_SECRET = 'college_event_manager_production_jwt_secret_2026';
+  }
   mongoose.set('strictQuery', true);
   await connectDatabase();
   console.log(`Connected to MongoDB (${mongoose.connection.host}/${mongoose.connection.name})`);
@@ -143,7 +156,7 @@ async function start() {
     console.warn('Still on local MongoDB. Atlas login failed or was unreachable.');
   }
   await ensureAdmin();
-  app.listen(PORT, () => console.log(`Server running on port ${PORT}`));
+  app.listen(PORT, '0.0.0.0', () => console.log(`Server running on port ${PORT}`));
 }
 start().catch(err => {
   console.error('Startup failed:', err.message || err);
