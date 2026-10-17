@@ -136,8 +136,10 @@ router.get('/my-certificates', auth, async (req, res) => {
           title: comp.title,
           type: comp.type,
           score: a.score,
-          totalPossibleScore: a.totalPossibleScore || 100,
-          percentage: a.percentage || 0,
+          totalPossibleScore: a.totalPossibleScore || (a.assignedQuestionIds?.length || comp.totalMarks || 10),
+          percentage: (a.totalPossibleScore && a.totalPossibleScore > 0)
+            ? Math.round((a.score / a.totalPossibleScore) * 1000) / 10
+            : (a.percentage || 0),
           rank: a.rank,
           status: a.status,
           timeTakenSeconds: a.timeTakenSeconds,
@@ -279,7 +281,7 @@ router.post('/', auth, authorize('admin', 'organizer'), [
       topics: Array.isArray(topics) ? topics : (topics ? String(topics).split(',').map(s => s.trim()) : []),
       difficulty: difficulty || 'medium',
       durationMinutes: Number(durationMinutes) || 30,
-      totalMarks: Number(totalMarks) || 10,
+      totalMarks: Number(totalMarks) || (Array.isArray(req.body.questionPool) && req.body.questionPool.length > 0 ? req.body.questionPool.length : Number(questionsPerParticipant) || 5),
       negativeMarking: Math.max(0, Number(negativeMarking) || 0),
       startTime: new Date(startTime),
       endTime: new Date(endTime),
@@ -434,8 +436,8 @@ router.post('/:id/generate-ai', auth, authorize('admin', 'organizer'), async (re
       });
     }
 
-    // Default: Quiz (MCQs)
-    const marksPerQ = Math.round((comp.totalMarks / requestedCount) * 10) / 10 || 1;
+    // Default: Quiz (MCQs) - strictly 1 mark per question (1 correct answer = 1 point)
+    const marksPerQ = 1;
     const generated = await geminiService.generateQuizQuestions({
       prompt,
       topics,
@@ -475,19 +477,18 @@ router.put('/:id/questions', auth, authorize('admin', 'organizer'), async (req, 
       return res.status(400).json({ message: 'questionPool must be an array' });
     }
 
-    // Ensure all questions have unique IDs
+    // Ensure all questions have unique IDs and 1 mark per MCQ question
     const normalizedPool = questionPool.map((q, idx) => ({
       ...q,
+      marks: q.type === 'coding' ? (Number(q.marks) || 10) : 1,
       questionId: q.questionId || q.problemId || `q_${Date.now()}_${idx}`
     }));
 
     comp.questionPool = normalizedPool;
 
-    // Recalculate totalMarks if not explicitly provided
-    const total = normalizedPool.reduce((acc, q) => acc + (Number(q.marks) || 0), 0);
-    if (total > 0) {
-      comp.totalMarks = total;
-    }
+    // Recalculate totalMarks as total count of questions / marks
+    const total = normalizedPool.reduce((acc, q) => acc + (Number(q.marks) || 1), 0);
+    comp.totalMarks = total > 0 ? total : normalizedPool.length;
 
     await comp.save();
     res.json({
@@ -953,16 +954,18 @@ router.post('/:id/submit', auth, async (req, res) => {
       const qDoc = questionMap.get(qId);
       if (!qDoc) return;
 
-      const marks = Number(qDoc.marks) || 1;
-      maxPossible += marks;
-
       if (qDoc.type === 'coding') {
+        const marks = Number(qDoc.marks) || 10;
+        maxPossible += marks;
         const codeSub = assignment.codingSubmissions.find(s => s.problemId === qId);
         if (codeSub) {
           totalScore += Number(codeSub.score) || 0;
         }
       } else {
-        // MCQ evaluation
+        // MCQ evaluation: strictly 1 mark per question (1 correct answer = 1 point)
+        const marks = 1;
+        maxPossible += marks;
+
         const answer = assignment.answers.find(a => a.questionId === qId);
         if (answer && answer.selectedOption !== undefined && answer.selectedOption !== -1) {
           if (answer.selectedOption === qDoc.correctOption) {
@@ -1053,18 +1056,25 @@ router.get('/:id/leaderboard', optionalAuth, async (req, res) => {
       .populate('user', 'name email department')
       .sort({ score: -1, timeTakenSeconds: 1 });
 
-    const rankings = assignments.map((a, idx) => ({
-      rank: idx + 1,
-      userId: a.user?._id,
-      name: a.user?.name || 'Anonymous Student',
-      department: a.user?.department || 'General',
-      score: a.score,
-      totalPossibleScore: a.totalPossibleScore || comp.totalMarks,
-      percentage: a.percentage,
-      timeTakenSeconds: a.timeTakenSeconds,
-      status: a.status,
-      submittedAt: a.submitTime
-    }));
+    const rankings = assignments.map((a, idx) => {
+      const totalPossible = a.totalPossibleScore || (a.assignedQuestionIds?.length || comp.totalMarks);
+      const percentage = (totalPossible && totalPossible > 0)
+        ? Math.round((a.score / totalPossible) * 1000) / 10
+        : (a.percentage || 0);
+
+      return {
+        rank: idx + 1,
+        userId: a.user?._id,
+        name: a.user?.name || 'Anonymous Student',
+        department: a.user?.department || 'General',
+        score: a.score,
+        totalPossibleScore: totalPossible,
+        percentage,
+        timeTakenSeconds: a.timeTakenSeconds,
+        status: a.status,
+        submittedAt: a.submitTime
+      };
+    });
 
     res.json({
       competitionTitle: comp.title,
@@ -1155,12 +1165,17 @@ router.get('/:id/my-result', auth, async (req, res) => {
       };
     }).filter(Boolean);
 
+    const myTotalPossible = assignment.totalPossibleScore || (assignment.assignedQuestionIds?.length || comp.totalMarks || 10);
+    const myPercentage = (myTotalPossible && myTotalPossible > 0)
+      ? Math.round((assignment.score / myTotalPossible) * 1000) / 10
+      : (assignment.percentage || 0);
+
     res.json({
       competitionTitle: comp.title,
       type: comp.type,
       score: assignment.score,
-      totalPossibleScore: assignment.totalPossibleScore,
-      percentage: assignment.percentage,
+      totalPossibleScore: myTotalPossible,
+      percentage: myPercentage,
       rank: assignment.rank,
       timeTakenSeconds: assignment.timeTakenSeconds,
       status: assignment.status,
@@ -1193,7 +1208,7 @@ router.get('/:id/certificate', auth, async (req, res) => {
 
     // If user is admin/organizer and hasn't participated, allow preview
     if (!assignment && ['admin', 'organizer'].includes(req.user.role)) {
-      const maxScore = comp.questionPool?.reduce((sum, q) => sum + (q.marks || 1), 0) || 100;
+      const maxScore = comp.questionPool?.reduce((sum, q) => sum + (q.marks || 1), 0) || 10;
       assignment = {
         _id: 'PREVIEW',
         score: maxScore,
@@ -1217,14 +1232,19 @@ router.get('/:id/certificate', auth, async (req, res) => {
     const regNo = req.user.email?.split('@')[0] || req.user._id.toString().slice(-8).toUpperCase();
     const certificateId = `CERT-COMP-${new Date(comp.startTime || comp.createdAt || Date.now()).getFullYear()}-${comp._id.toString().slice(-4).toUpperCase()}-${(assignment._id || req.user._id).toString().slice(-4).toUpperCase()}`;
 
+    const certTotalPossible = assignment.totalPossibleScore || (assignment.assignedQuestionIds?.length || comp.totalMarks || 10);
+    const certPercentage = (certTotalPossible && certTotalPossible > 0)
+      ? Math.round((assignment.score / certTotalPossible) * 1000) / 10
+      : (assignment.percentage || 0);
+
     const doc = generateCompetitionCertificateStream({
       name: req.user.name,
       regNo,
       competitionTitle: comp.title,
       type: comp.type,
       score: assignment.score,
-      totalPossibleScore: assignment.totalPossibleScore || 100,
-      percentage: assignment.percentage || 0,
+      totalPossibleScore: certTotalPossible,
+      percentage: certPercentage,
       rank: assignment.rank,
       timeTakenSeconds: assignment.timeTakenSeconds,
       department: comp.department || comp.event?.department || req.user.department || 'Technical Department',

@@ -226,7 +226,7 @@ const Leaderboard = () => {
 
           <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 pt-1">
             <div className="p-3 rounded-xl bg-gray-900/60 border border-gray-800">
-              <span className="text-xs text-gray-400">Score</span>
+              <span className="text-xs text-gray-400">Score (Correct Answers)</span>
               <p className="text-xl font-bold text-gray-100 mt-0.5">
                 {myResult.score} / {myResult.totalPossibleScore}
               </p>
@@ -677,9 +677,11 @@ const Leaderboard = () => {
                 </div>
 
                 <div className="mt-4 pt-3 border-t border-gray-800 flex items-center justify-between">
-                  <span className="text-lg font-extrabold text-white">{p.score} pts</span>
-                  <span className="text-xs text-gray-400 font-mono">
-                    {Math.floor(p.timeTakenSeconds / 60)}m {p.timeTakenSeconds % 60}s
+                  <span className="text-base font-extrabold text-white font-mono">
+                    {p.score} <span className="text-xs text-gray-400 font-normal">/ {p.totalPossibleScore}</span>
+                  </span>
+                  <span className="text-xs text-violet-300 font-mono font-semibold">
+                    {p.percentage}%
                   </span>
                 </div>
               </div>

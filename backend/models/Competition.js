@@ -66,7 +66,7 @@ const competitionSchema = new mongoose.Schema({
   },
 
   durationMinutes: { type: Number, required: true, min: 1, default: 30 },
-  totalMarks: { type: Number, default: 10 },
+  totalMarks: { type: Number, default: 1 },
   negativeMarking: { type: Number, default: 0, min: 0 }, // Deduction per wrong answer (e.g. 0.25)
 
   startTime: { type: Date, required: true },
