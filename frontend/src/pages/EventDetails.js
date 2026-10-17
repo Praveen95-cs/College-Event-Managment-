@@ -11,7 +11,8 @@ import {
   TrashIcon,
   ArrowLeftIcon,
   TrophyIcon,
-  SparklesIcon
+  SparklesIcon,
+  AcademicCapIcon
 } from '@heroicons/react/24/outline';
 
 import { getBackendUrl } from '../utils/apiConfig';
@@ -330,9 +331,10 @@ const EventDetails = () => {
               {isAttending && (
                 <button
                   onClick={handleDownloadCertificate}
-                  className="inline-flex items-center justify-center px-4 py-2 border border-violet-600 text-sm font-medium rounded-md text-violet-700 bg-violet-50 hover:bg-violet-100"
+                  className="inline-flex items-center justify-center gap-2 px-4 py-2 border border-amber-500/50 text-sm font-semibold rounded-xl text-amber-300 bg-amber-950/40 hover:bg-amber-900/50 shadow-md shadow-amber-950/20 transition-all"
                 >
-                  Download Certificate
+                  <AcademicCapIcon className="h-4 w-4 text-amber-400" />
+                  <span>Download Certificate</span>
                 </button>
               )}
               {isAttending ? (
