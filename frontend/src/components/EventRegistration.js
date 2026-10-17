@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { useAuth } from '../contexts/AuthContext';
 import axios from 'axios';
 import UPIPayment from './UPIPayment';
+import { getBackendUrl } from '../utils/apiConfig';
 
 const EventRegistration = ({ event, onClose }) => {
   const [step, setStep] = useState(1);
@@ -12,7 +13,7 @@ const EventRegistration = ({ event, onClose }) => {
   });
   const [error, setError] = useState('');
   const { user } = useAuth();
-  const backendUrl = process.env.REACT_APP_BACKEND_URL || 'http://localhost:5000';
+  const backendUrl = getBackendUrl();
 
   const handleSubmit = async (e) => {
     e.preventDefault();

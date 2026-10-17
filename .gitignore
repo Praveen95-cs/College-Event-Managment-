@@ -51,3 +51,5 @@ backend/.git-backup/
 node_modules/
 backend/node_modules/
 backend/server.js.backup
+frontend/build/
+frontend/node_modules/

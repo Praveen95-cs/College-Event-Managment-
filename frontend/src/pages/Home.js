@@ -1,5 +1,8 @@
 import React, { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
+import axios from 'axios';
+import { format } from 'date-fns';
+import { useAuth } from '../contexts/AuthContext';
 import { 
   CalendarIcon, 
   UserGroupIcon, 
@@ -11,31 +14,31 @@ import {
 import { motion } from 'framer-motion';
 
 const Home = () => {
+  const { user } = useAuth();
   const [upcomingEvents, setUpcomingEvents] = useState([]);
-  const [announcements, setAnnouncements] = useState([]);
 
   useEffect(() => {
-    // Fetch upcoming events and announcements
-    setUpcomingEvents([
-      { id: 1, title: 'Tech Workshop', date: '2024-03-15', time: '10:00 AM' },
-      { id: 2, title: 'Coding Competition', date: '2024-03-20', time: '2:00 PM' }
-    ]);
-    setAnnouncements([
-      { id: 1, title: 'New Department Website', content: 'Check out our new department website!' },
-      { id: 2, title: 'Scholarship Opportunities', content: 'Apply for scholarships now!' }
-    ]);
+    const loadEvents = async () => {
+      try {
+        const response = await axios.get('/api/events/public');
+        setUpcomingEvents(Array.isArray(response.data) ? response.data.slice(0, 6) : []);
+      } catch {
+        setUpcomingEvents([]);
+      }
+    };
+    loadEvents();
   }, []);
 
   const departments = [
     {
       name: 'Computer Technology',
       icon: CpuChipIcon,
-      description: 'Explore the world of computer technology and software development',
-      stats: {
-        students: '500+',
-        events: '50+',
-        projects: '100+'
-      }
+      description: 'Explore the world of computer technology and software development'
+    },
+    {
+      name: 'Information Technology',
+      icon: CpuChipIcon,
+      description: 'Discover networking, systems, and information services events'
     }
   ];
 
@@ -86,37 +89,46 @@ const Home = () => {
             animate={{ opacity: 1, y: 0 }}
             transition={{ duration: 0.8 }}
           >
-            <h1 className="text-4xl font-extrabold tracking-tight text-white sm:text-5xl lg:text-6xl">
-              Welcome to College Event Manager
+            <p className="text-sm font-semibold uppercase tracking-widest text-violet-300">Campus events, in one place</p>
+            <h1 className="mt-3 text-4xl font-extrabold tracking-tight text-white sm:text-5xl lg:text-6xl">
+              {user ? `Welcome back, ${user.name.split(' ')[0]}` : 'College Event Manager'}
             </h1>
             <p className="mt-6 text-xl text-purple-100 max-w-3xl">
-              Your one-stop solution for managing and discovering college events. Connect with your department, stay updated, and make the most of your college experience.
+              Discover workshops, book seats, and stay in sync with your department.
             </p>
             <div className="mt-10 flex flex-col sm:flex-row space-y-4 sm:space-y-0 sm:space-x-4">
-              <motion.div
-                whileHover={{ scale: 1.05 }}
-                whileTap={{ scale: 0.95 }}
+              <Link
+                to="/events"
+                className="inline-flex items-center justify-center px-6 py-3 rounded-lg text-base font-medium text-gray-900 bg-white hover:bg-violet-50 transition-colors"
               >
-                <Link
-                  to="/events"
-                  className="inline-flex items-center px-6 py-3 border border-transparent text-base font-medium rounded-md text-gray-900 bg-white hover:bg-purple-50 transition-colors duration-200"
-                >
-                  <CalendarIcon className="h-5 w-5 mr-2" />
-                  Browse Events
-                </Link>
-              </motion.div>
-              <motion.div
-                whileHover={{ scale: 1.05 }}
-                whileTap={{ scale: 0.95 }}
-              >
+                <CalendarIcon className="h-5 w-5 mr-2" />
+                Browse Events
+              </Link>
+              {!user && (
                 <Link
                   to="/register"
-                  className="inline-flex items-center px-6 py-3 border border-transparent text-base font-medium rounded-md text-white bg-purple-600 hover:bg-purple-700 transition-colors duration-200"
+                  className="inline-flex items-center justify-center px-6 py-3 rounded-lg text-base font-medium text-white bg-violet-600 hover:bg-violet-700 transition-colors"
                 >
                   Get Started
                   <ArrowRightIcon className="h-5 w-5 ml-2" />
                 </Link>
-              </motion.div>
+              )}
+              {user?.role === 'student' && (
+                <Link
+                  to="/community"
+                  className="inline-flex items-center justify-center px-6 py-3 rounded-lg text-base font-medium text-white bg-white/10 hover:bg-white/20 transition-colors"
+                >
+                  Open community
+                </Link>
+              )}
+              {(user?.role === 'admin' || user?.role === 'organizer') && (
+                <Link
+                  to={user.role === 'admin' ? '/admin' : '/create-event'}
+                  className="inline-flex items-center justify-center px-6 py-3 rounded-lg text-base font-medium text-white bg-violet-600 hover:bg-violet-700 transition-colors"
+                >
+                  {user.role === 'admin' ? 'Open dashboard' : 'Create an event'}
+                </Link>
+              )}
             </div>
           </motion.div>
         </div>
@@ -161,9 +173,14 @@ const Home = () => {
           </div>
 
           <div className="mt-12 grid gap-8 sm:grid-cols-2">
+            {upcomingEvents.length === 0 && (
+              <p className="sm:col-span-2 text-center text-gray-400">
+                No upcoming events yet. Check back after organizers publish events.
+              </p>
+            )}
             {upcomingEvents.map((event) => (
               <motion.div
-                key={event.id}
+                key={event._id}
                 whileHover={{ scale: 1.02 }}
                 className="bg-gray-900 rounded-lg shadow-md overflow-hidden border border-gray-700"
               >
@@ -171,11 +188,11 @@ const Home = () => {
                   <h3 className="text-lg font-medium text-white">{event.title}</h3>
                   <div className="mt-2 flex items-center text-sm text-gray-300">
                     <CalendarIcon className="h-5 w-5 mr-2" />
-                    {event.date} at {event.time}
+                    {event.date ? format(new Date(event.date), 'MMM d, yyyy') : ''} {event.time ? `at ${event.time}` : ''}
                   </div>
                   <div className="mt-4">
                     <Link
-                      to={`/events/${event.id}`}
+                      to={`/events/${event._id}`}
                       className="inline-flex items-center text-sm font-medium text-purple-400 hover:text-purple-300"
                     >
                       Learn more
@@ -218,20 +235,13 @@ const Home = () => {
                     </div>
                   </div>
                   <p className="mt-4 text-base text-gray-300">{department.description}</p>
-                  <div className="mt-6 grid grid-cols-3 gap-4">
-                    <div className="text-center">
-                      <p className="text-2xl font-bold text-purple-400">{department.stats.students}</p>
-                      <p className="text-sm text-gray-400">Students</p>
-                    </div>
-                    <div className="text-center">
-                      <p className="text-2xl font-bold text-purple-400">{department.stats.events}</p>
-                      <p className="text-sm text-gray-400">Events</p>
-                    </div>
-                    <div className="text-center">
-                      <p className="text-2xl font-bold text-purple-400">{department.stats.projects}</p>
-                      <p className="text-sm text-gray-400">Projects</p>
-                    </div>
-                  </div>
+                  <Link
+                    to="/events"
+                    className="mt-6 inline-flex items-center text-sm font-medium text-purple-400 hover:text-purple-300"
+                  >
+                    View department events
+                    <ArrowRightIcon className="h-4 w-4 ml-1" />
+                  </Link>
                 </div>
               </motion.div>
             ))}
@@ -239,68 +249,30 @@ const Home = () => {
         </div>
       </div>
 
-      {/* Announcements Section */}
-      <div className="py-16 bg-gray-800">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-          <div className="text-center">
-            <h2 className="text-base text-purple-400 font-semibold tracking-wide uppercase">Announcements</h2>
-            <p className="mt-2 text-3xl leading-8 font-extrabold tracking-tight text-white sm:text-4xl">
-              Stay Updated
-            </p>
-          </div>
-
-          <div className="mt-12 grid gap-8 sm:grid-cols-2">
-            {announcements.map((announcement) => (
-              <motion.div
-                key={announcement.id}
-                whileHover={{ scale: 1.02 }}
-                className="bg-gray-900 rounded-lg shadow-md overflow-hidden border border-gray-700"
-              >
-                <div className="p-6">
-                  <h3 className="text-lg font-medium text-white">{announcement.title}</h3>
-                  <p className="mt-2 text-base text-gray-300">{announcement.content}</p>
-                </div>
-              </motion.div>
-            ))}
-          </div>
-        </div>
-      </div>
-
-      {/* CTA Section */}
-      <div className="bg-gradient-to-r from-purple-900 to-gray-900">
-        <div className="max-w-7xl mx-auto py-12 px-4 sm:px-6 lg:py-16 lg:px-8 lg:flex lg:items-center lg:justify-between">
-          <h2 className="text-3xl font-extrabold tracking-tight text-white sm:text-4xl">
-            <span className="block">Ready to get started?</span>
-            <span className="block text-purple-200">Join our community today.</span>
-          </h2>
-          <div className="mt-8 flex lg:mt-0 lg:flex-shrink-0">
-            <motion.div
-              whileHover={{ scale: 1.05 }}
-              whileTap={{ scale: 0.95 }}
-              className="inline-flex rounded-md shadow"
-            >
+      {!user && (
+        <div className="bg-gradient-to-r from-violet-900 to-gray-900">
+          <div className="max-w-7xl mx-auto py-12 px-4 sm:px-6 lg:py-16 lg:px-8 lg:flex lg:items-center lg:justify-between">
+            <h2 className="text-3xl font-extrabold tracking-tight text-white sm:text-4xl">
+              <span className="block">New here?</span>
+              <span className="block text-violet-200">Create a student account to book events.</span>
+            </h2>
+            <div className="mt-8 flex gap-3 lg:mt-0">
               <Link
                 to="/register"
-                className="inline-flex items-center justify-center px-5 py-3 border border-transparent text-base font-medium rounded-md text-gray-900 bg-white hover:bg-purple-50"
+                className="inline-flex items-center justify-center px-5 py-3 rounded-lg text-base font-medium text-gray-900 bg-white hover:bg-violet-50"
               >
-                Get started
+                Create account
               </Link>
-            </motion.div>
-            <motion.div
-              whileHover={{ scale: 1.05 }}
-              whileTap={{ scale: 0.95 }}
-              className="ml-3 inline-flex rounded-md shadow"
-            >
               <Link
                 to="/events"
-                className="inline-flex items-center justify-center px-5 py-3 border border-transparent text-base font-medium rounded-md text-white bg-purple-600 hover:bg-purple-700"
+                className="inline-flex items-center justify-center px-5 py-3 rounded-lg text-base font-medium text-white bg-violet-600 hover:bg-violet-700"
               >
-                Learn more
+                Browse events
               </Link>
-            </motion.div>
+            </div>
           </div>
         </div>
-      </div>
+      )}
     </div>
   );
 };

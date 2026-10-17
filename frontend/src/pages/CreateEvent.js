@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import axios from 'axios';
 import { useAuth } from '../contexts/AuthContext';
+import { getBackendUrl } from '../utils/apiConfig';
 
 const CreateEvent = () => {
   const [formData, setFormData] = useState({
@@ -23,7 +24,7 @@ const CreateEvent = () => {
   const [loading, setLoading] = useState(false);
   const { user } = useAuth();
   const navigate = useNavigate();
-  const backendUrl = process.env.REACT_APP_BACKEND_URL || 'http://localhost:5000';
+  const backendUrl = getBackendUrl();
 
   const handleChange = (e) => {
     const { name, value } = e.target;
@@ -86,6 +87,20 @@ const CreateEvent = () => {
       <div className="max-w-2xl mx-auto px-4 sm:px-6 lg:px-8">
         <div className="bg-gray-800 rounded-lg shadow-lg p-6">
           <h1 className="text-2xl font-bold text-gray-100 mb-6">Create New Event</h1>
+
+          <div className="flex items-center justify-between p-4 mb-6 rounded-xl bg-violet-950/40 border border-violet-800/40">
+            <div>
+              <h3 className="text-sm font-bold text-violet-300">Host an AI Quiz or Coding Contest?</h3>
+              <p className="text-xs text-gray-400 mt-0.5">Generate personalized MCQs or coding challenges with Google Gemini.</p>
+            </div>
+            <button
+              type="button"
+              onClick={() => navigate('/competitions/create')}
+              className="px-3.5 py-1.5 rounded-lg text-xs font-semibold text-white bg-violet-600 hover:bg-violet-500 transition-colors shadow"
+            >
+              Launch Studio
+            </button>
+          </div>
 
           {error && (
             <div className="mb-4 bg-red-900/50 border border-red-700 text-red-200 px-4 py-3 rounded-lg">

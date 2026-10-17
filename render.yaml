@@ -1,0 +1,29 @@
+services:
+  - type: web
+    name: college-event-manager
+    env: node
+    plan: free
+    region: oregon
+    buildCommand: npm run render-build
+    startCommand: npm run render-start
+    healthCheckPath: /api/health
+    autoDeploy: true
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: GEMINI_MODEL
+        value: gemini-3.8-flash
+      - key: JUDGE0_API_URL
+        value: https://ce.judge0.com
+      - key: MONGODB_URI
+        sync: false
+      - key: JWT_SECRET
+        generateValue: true
+      - key: GEMINI_API_KEY
+        sync: false
+      - key: ADMIN_NAME
+        value: Administrator
+      - key: ADMIN_EMAIL
+        value: admin@collegeevents.com
+      - key: ADMIN_PASSWORD
+        sync: false

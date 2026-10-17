@@ -2,8 +2,11 @@ import React, { createContext, useContext, useState, useEffect } from 'react';
 import axios from 'axios';
 
 // Set the base URL for all axios requests
-const API_URL = process.env.REACT_APP_API_URL || 'http://localhost:5000';
+const API_URL = process.env.REACT_APP_API_URL !== undefined
+  ? process.env.REACT_APP_API_URL
+  : (process.env.NODE_ENV === 'production' ? '' : 'http://localhost:5000');
 axios.defaults.baseURL = API_URL;
+axios.defaults.withCredentials = true;
 
 const AuthContext = createContext(null);
 
@@ -58,7 +61,13 @@ export const AuthProvider = ({ children }) => {
 
   const register = async (userData) => {
     try {
-      const response = await axios.post('/api/auth/register', userData);
+      const studentData = {
+        name: userData.name,
+        email: userData.email,
+        password: userData.password,
+        department: userData.department
+      };
+      const response = await axios.post('/api/auth/register', studentData);
       const { token, user } = response.data;
       
       // Save token to localStorage

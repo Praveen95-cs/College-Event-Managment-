@@ -52,7 +52,7 @@ const Notifications = () => {
   const unreadCount = notifications.filter(n => !n.read).length;
 
   return (
-    <div className="fixed top-4 right-4 z-50">
+    <div className="relative">
       <Menu as="div" className="relative">
         <Menu.Button className="relative p-2 rounded-full bg-gray-800 text-gray-100 hover:text-white hover:bg-gray-700 focus:outline-none focus:ring-2 focus:ring-violet-500 focus:ring-offset-2 focus:ring-offset-gray-900">
           <BellIcon className="h-6 w-6" />

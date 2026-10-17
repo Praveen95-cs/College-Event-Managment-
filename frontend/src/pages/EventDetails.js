@@ -10,8 +10,11 @@ import {
   PencilIcon,
   TrashIcon,
   ArrowLeftIcon,
-  ClockIcon
+  TrophyIcon,
+  SparklesIcon
 } from '@heroicons/react/24/outline';
+
+import { getBackendUrl } from '../utils/apiConfig';
 
 const EventDetails = () => {
   const { id } = useParams();
@@ -20,14 +23,22 @@ const EventDetails = () => {
   const [event, setEvent] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
-  const [showMotivationForm, setShowMotivationForm] = useState(false);
-  const [newQuote, setNewQuote] = useState({ text: '', author: '' });
-  const [newTip, setNewTip] = useState('');
-  const backendUrl = process.env.REACT_APP_BACKEND_URL || 'http://localhost:5000';
+  const [eventCompetitions, setEventCompetitions] = useState([]);
+  const backendUrl = getBackendUrl();
 
   useEffect(() => {
     fetchEventDetails();
+    fetchEventCompetitions();
   }, [id]);
+
+  const fetchEventCompetitions = async () => {
+    try {
+      const res = await axios.get(`${backendUrl}/api/competitions?eventId=${id}`);
+      setEventCompetitions(res.data);
+    } catch (err) {
+      // Non-critical
+    }
+  };
 
   const fetchEventDetails = async () => {
     try {
@@ -68,15 +79,6 @@ const EventDetails = () => {
       } catch (error) {
         console.error('Error deleting event:', error);
       }
-    }
-  };
-
-  const handleGenerateMotivation = async () => {
-    try {
-      await axios.post(`/api/motivation/generate/${id}`);
-      fetchEventDetails();
-    } catch (error) {
-      console.error('Error generating motivation content:', error);
     }
   };
 
@@ -123,34 +125,6 @@ const EventDetails = () => {
       window.URL.revokeObjectURL(downloadUrl);
     } catch (error) {
       console.error('Error downloading certificate:', error);
-    }
-  };
-
-  const handleAddQuote = async (e) => {
-    e.preventDefault();
-    try {
-      await axios.put(`/api/motivation/${id}`, {
-        quotes: [...event.motivationContent.quotes, newQuote]
-      });
-      setNewQuote({ text: '', author: '' });
-      setShowMotivationForm(false);
-      fetchEventDetails();
-    } catch (error) {
-      console.error('Error adding quote:', error);
-    }
-  };
-
-  const handleAddTip = async (e) => {
-    e.preventDefault();
-    try {
-      await axios.put(`/api/motivation/${id}`, {
-        tips: [...event.motivationContent.tips, { text: newTip }]
-      });
-      setNewTip('');
-      setShowMotivationForm(false);
-      fetchEventDetails();
-    } catch (error) {
-      console.error('Error adding tip:', error);
     }
   };
 
@@ -294,123 +268,64 @@ const EventDetails = () => {
           </div>
         </div>
 
-        {/* Motivation Section */}
+        {/* AI Competition Arena Integration Card */}
         <div className="border-t border-gray-200 px-4 py-5 sm:px-6">
-          <div className="flex justify-between items-center mb-4">
-            <h4 className="text-lg font-medium text-gray-900">Motivation Content</h4>
+          <div className="flex items-center justify-between mb-4">
+            <div className="flex items-center gap-2">
+              <TrophyIcon className="h-6 w-6 text-amber-500" />
+              <h4 className="text-lg font-bold text-gray-900">Event Competitions & AI Arenas</h4>
+            </div>
             {(isOrganizer || isAdmin) && (
-              <div className="flex space-x-4">
-                <button
-                  onClick={handleGenerateMotivation}
-                  className="inline-flex items-center px-3 py-2 border border-transparent text-sm leading-4 font-medium rounded-md text-white bg-indigo-600 hover:bg-indigo-700"
-                >
-                  Generate Content
-                </button>
-                <button
-                  onClick={() => setShowMotivationForm(!showMotivationForm)}
-                  className="inline-flex items-center px-3 py-2 border border-gray-300 shadow-sm text-sm leading-4 font-medium rounded-md text-gray-700 bg-white hover:bg-gray-50"
-                >
-                  Add Manually
-                </button>
-              </div>
+              <button
+                onClick={() => navigate('/competitions/create')}
+                className="inline-flex items-center px-3 py-1.5 rounded-lg text-xs font-semibold text-white bg-violet-600 hover:bg-violet-700 transition-colors shadow"
+              >
+                <SparklesIcon className="h-4 w-4 mr-1.5" />
+                Add AI Competition
+              </button>
             )}
           </div>
 
-          {showMotivationForm && (isOrganizer || isAdmin) && (
-            <div className="mb-6 p-4 bg-gray-50 rounded-lg">
-              <div className="grid grid-cols-1 gap-6 sm:grid-cols-2">
-                <div>
-                  <h5 className="text-sm font-medium text-gray-900 mb-3">Add Quote</h5>
-                  <form onSubmit={handleAddQuote} className="space-y-4">
-                    <div>
-                      <label htmlFor="quoteText" className="block text-sm font-medium text-gray-700">
-                        Quote
-                      </label>
-                      <input
-                        type="text"
-                        id="quoteText"
-                        value={newQuote.text}
-                        onChange={(e) => setNewQuote({ ...newQuote, text: e.target.value })}
-                        className="mt-1 block w-full border border-gray-300 rounded-md shadow-sm py-2 px-3 focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm"
-                        required
-                      />
+          {eventCompetitions.length > 0 ? (
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              {eventCompetitions.map(comp => (
+                <div key={comp._id} className="p-4 rounded-xl bg-violet-50/50 border border-violet-200 flex flex-col justify-between">
+                  <div>
+                    <div className="flex items-center justify-between">
+                      <span className="px-2 py-0.5 rounded text-[11px] font-bold uppercase tracking-wider bg-violet-200 text-violet-800">
+                        {comp.type} ARENA
+                      </span>
+                      <span className="text-xs text-gray-500">{comp.durationMinutes} mins • {comp.totalMarks} marks</span>
                     </div>
-                    <div>
-                      <label htmlFor="quoteAuthor" className="block text-sm font-medium text-gray-700">
-                        Author
-                      </label>
-                      <input
-                        type="text"
-                        id="quoteAuthor"
-                        value={newQuote.author}
-                        onChange={(e) => setNewQuote({ ...newQuote, author: e.target.value })}
-                        className="mt-1 block w-full border border-gray-300 rounded-md shadow-sm py-2 px-3 focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm"
-                        required
-                      />
-                    </div>
+                    <h5 className="font-bold text-gray-900 mt-2">{comp.title}</h5>
+                    <p className="text-xs text-gray-600 line-clamp-2 mt-1">{comp.description}</p>
+                  </div>
+                  <div className="mt-4 pt-3 border-t border-violet-200/60 flex items-center justify-between">
                     <button
-                      type="submit"
-                      className="inline-flex items-center px-3 py-2 border border-transparent text-sm leading-4 font-medium rounded-md text-white bg-indigo-600 hover:bg-indigo-700"
+                      onClick={() => navigate(`/competitions/${comp._id}/leaderboard`)}
+                      className="text-xs font-medium text-violet-700 hover:text-violet-900"
                     >
-                      Add Quote
+                      Leaderboard
                     </button>
-                  </form>
-                </div>
-                <div>
-                  <h5 className="text-sm font-medium text-gray-900 mb-3">Add Tip</h5>
-                  <form onSubmit={handleAddTip} className="space-y-4">
-                    <div>
-                      <label htmlFor="tipText" className="block text-sm font-medium text-gray-700">
-                        Tip
-                      </label>
-                      <input
-                        type="text"
-                        id="tipText"
-                        value={newTip}
-                        onChange={(e) => setNewTip(e.target.value)}
-                        className="mt-1 block w-full border border-gray-300 rounded-md shadow-sm py-2 px-3 focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm"
-                        required
-                      />
-                    </div>
                     <button
-                      type="submit"
-                      className="inline-flex items-center px-3 py-2 border border-transparent text-sm leading-4 font-medium rounded-md text-white bg-indigo-600 hover:bg-indigo-700"
+                      onClick={() => navigate(comp.type === 'coding' ? `/competitions/${comp._id}/code` : `/competitions/${comp._id}/quiz`)}
+                      className="px-3 py-1.5 rounded-lg text-xs font-semibold text-white bg-violet-600 hover:bg-violet-700 shadow-sm"
                     >
-                      Add Tip
+                      Enter Arena
                     </button>
-                  </form>
+                  </div>
                 </div>
-              </div>
+              ))}
+            </div>
+          ) : (
+            <div className="p-4 rounded-xl bg-gray-50 border border-gray-200 text-center text-sm text-gray-500">
+              No online competitions currently attached to this event.
             </div>
           )}
-
-          <div className="grid grid-cols-1 gap-6 sm:grid-cols-2">
-            <div>
-              <h5 className="text-sm font-medium text-gray-900 mb-3">Motivational Quotes</h5>
-              <div className="space-y-4">
-                {event.motivationContent?.quotes.map((quote, index) => (
-                  <div key={index} className="bg-gray-50 p-4 rounded-lg">
-                    <p className="text-gray-900 italic">"{quote.text}"</p>
-                    <p className="text-gray-500 text-sm mt-2">- {quote.author}</p>
-                  </div>
-                ))}
-              </div>
-            </div>
-            <div>
-              <h5 className="text-sm font-medium text-gray-900 mb-3">Success Tips</h5>
-              <div className="space-y-4">
-                {event.motivationContent?.tips.map((tip, index) => (
-                  <div key={index} className="bg-gray-50 p-4 rounded-lg">
-                    <p className="text-gray-900">{tip.text}</p>
-                  </div>
-                ))}
-              </div>
-            </div>
-          </div>
         </div>
 
         <div className="border-t border-gray-200 px-4 py-5 sm:px-6">
-          {isAuthenticated && !isOrganizer && (
+          {isAuthenticated && user?.role === 'student' && (
             <div className="flex flex-col gap-3 sm:flex-row sm:justify-end">
               {isAttending && (
                 <button
