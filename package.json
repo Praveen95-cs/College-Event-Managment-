@@ -1,7 +1,7 @@
 {
-  "name": "college-event-manager",
+  "name": "avenor-event-platform",
   "version": "1.0.0",
-  "description": "A MERN stack application for college event management with AI-powered motivation features",
+  "description": "Avenor — Elevate Every Event. Modern MERN stack platform for college event management, live coding competitions, and quota-resilient AI assessments.",
   "main": "index.js",
   "scripts": {
     "start": "node backend/server.js",
