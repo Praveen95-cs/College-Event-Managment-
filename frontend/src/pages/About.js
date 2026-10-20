@@ -5,15 +5,15 @@ const About = () => {
     <div className="min-h-screen bg-gray-900 py-12">
       <div className="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8">
         <div className="bg-gray-800 rounded-lg shadow-lg p-8">
-          <h1 className="text-3xl font-bold text-gray-100 mb-6">About College Event Manager</h1>
+          <h1 className="text-3xl font-bold text-gray-100 mb-6">About Avenor</h1>
           
           <div className="space-y-6 text-gray-300">
             <section>
-              <h2 className="text-xl font-semibold text-violet-400 mb-3">Our Mission</h2>
+              <h2 className="text-xl font-semibold text-violet-400 mb-3">Our Mission: Elevate Every Event</h2>
               <p>
-                College Event Manager is designed to streamline and enhance the event management process
+                Avenor is designed to streamline and elevate the campus event and competition experience
                 for educational institutions. Our platform connects students, organizers, and administrators
-                in a seamless ecosystem for creating, managing, and participating in college events.
+                in a seamless ecosystem for creating, managing, and competing in modern collegiate events.
               </p>
             </section>
 

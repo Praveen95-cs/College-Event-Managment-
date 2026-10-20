@@ -89,12 +89,22 @@ const Home = () => {
             animate={{ opacity: 1, y: 0 }}
             transition={{ duration: 0.8 }}
           >
-            <p className="text-sm font-semibold uppercase tracking-widest text-violet-300">Campus events, in one place</p>
-            <h1 className="mt-3 text-4xl font-extrabold tracking-tight text-white sm:text-5xl lg:text-6xl">
-              {user ? `Welcome back, ${user.name.split(' ')[0]}` : 'College Event Manager'}
+            <div className="inline-flex items-center gap-2 px-3.5 py-1.5 rounded-full text-xs font-semibold uppercase tracking-wider bg-violet-500/20 text-violet-300 border border-violet-500/30 mb-4 backdrop-blur-sm">
+              <span className="w-2 h-2 rounded-full bg-violet-400 animate-pulse"></span>
+              Avenor • Elevate Every Event
+            </div>
+            <h1 className="mt-2 text-4xl font-extrabold tracking-tight text-white sm:text-5xl lg:text-6xl">
+              {user ? `Welcome back, ${user.name.split(' ')[0]}` : (
+                <>
+                  Ave<span className="text-transparent bg-clip-text bg-gradient-to-r from-violet-400 via-indigo-300 to-fuchsia-400">nor</span>
+                </>
+              )}
             </h1>
-            <p className="mt-6 text-xl text-purple-100 max-w-3xl">
-              Discover workshops, book seats, and stay in sync with your department.
+            <p className="mt-3 text-xl sm:text-2xl font-semibold text-violet-200">
+              Elevate Every Event.
+            </p>
+            <p className="mt-3 text-base sm:text-lg text-purple-100 max-w-3xl">
+              The premier campus platform for workshops, competitive algorithmic arenas, real-time leaderboards, and automated credentialing.
             </p>
             <div className="mt-10 flex flex-col sm:flex-row space-y-4 sm:space-y-0 sm:space-x-4">
               <Link

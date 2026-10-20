@@ -11,7 +11,7 @@ const PrivacyPolicy = () => {
             <section>
               <h2 className="text-xl font-semibold text-violet-400 mb-3">Introduction</h2>
               <p>
-                At College Event Manager, we take your privacy seriously. This Privacy Policy explains
+                At Avenor, we take your privacy seriously. This Privacy Policy explains
                 how we collect, use, disclose, and safeguard your information when you use our platform.
                 Please read this privacy policy carefully. If you do not agree with the terms of this
                 privacy policy, please do not access the platform.

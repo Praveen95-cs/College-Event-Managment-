@@ -12,22 +12,19 @@ const codeExecutionService = require('../services/codeExecutionService');
 const { generateCompetitionCertificateStream } = require('../services/certificateService');
 
 /**
- * Health and status check for Gemini integration
+/**
+ * Health and status check for AI provider integration
  */
-router.get('/gemini-status', auth, async (req, res) => {
+const getAiStatusHandler = async (req, res) => {
   try {
-    const verifiedModel = await geminiService.getVerifiedModel();
-    res.json({
-      ok: true,
-      provider: 'Google Gemini API',
-      tier: 'Free Tier',
-      verifiedModel,
-      isConfigured: !!process.env.GEMINI_API_KEY
-    });
+    const status = await geminiService.getStatus();
+    res.json(status);
   } catch (err) {
     res.status(500).json({ ok: false, message: err.message });
   }
-});
+};
+router.get('/gemini-status', auth, getAiStatusHandler);
+router.get('/ai-status', auth, getAiStatusHandler);
 
 /**
  * List published/upcoming competitions
@@ -353,19 +350,27 @@ router.delete('/:id', auth, authorize('admin', 'organizer'), async (req, res) =>
     }
 
     if (req.user.role !== 'admin' && comp.organizer.toString() !== req.user._id.toString()) {
-      return res.status(403).json({ message: 'Not authorized' });
+      return res.status(403).json({ message: 'Not authorized to delete this competition' });
     }
 
-    await AssessmentAssignment.deleteMany({ competition: comp._id });
+    // Delete all participant assignments, submissions, and code evaluation records
+    const deletedAssignments = await AssessmentAssignment.deleteMany({ competition: comp._id });
+    // Delete competition document permanently from MongoDB to free storage
     await comp.deleteOne();
-    res.json({ message: 'Competition deleted successfully' });
+
+    res.json({
+      message: 'Competition and all participant assessments deleted successfully to clean up space',
+      deletedAssessmentsCount: deletedAssignments.deletedCount || 0
+    });
   } catch (err) {
-    res.status(500).json({ message: 'Error deleting competition' });
+    console.error('Error deleting competition:', err);
+    res.status(500).json({ message: 'Error deleting competition from database' });
   }
 });
 
 /**
- * Organizer / Admin: Trigger Gemini AI to generate questions / coding problems
+ * Organizer / Admin: Trigger AI to generate questions / coding problems
+ * Enhanced with MongoDB problem caching, quota 429 delay parsing, and deduplication
  */
 router.post('/:id/generate-ai', auth, authorize('admin', 'organizer'), async (req, res) => {
   try {
@@ -383,7 +388,8 @@ router.post('/:id/generate-ai', auth, authorize('admin', 'organizer'), async (re
       topics = comp.topics,
       difficulty = comp.difficulty,
       count = 5,
-      type = comp.type
+      type = comp.type,
+      forceFresh = false
     } = req.body;
 
     const requestedCount = Math.min(Math.max(1, Number(count) || 5), 20);
@@ -395,13 +401,16 @@ router.post('/:id/generate-ai', auth, authorize('admin', 'organizer'), async (re
         difficulty,
         count: Math.min(requestedCount, 5),
         permittedLanguages: comp.permittedLanguages,
-        marksPerProblem: Math.round(comp.totalMarks / Math.min(requestedCount, 5)) || 20
+        marksPerProblem: Math.round(comp.totalMarks / Math.min(requestedCount, 5)) || 20,
+        forceFresh,
+        competitionId: comp._id.toString()
       });
 
       return res.json({
         success: true,
         type: 'coding',
         modelUsed: generated.modelUsed,
+        fromCache: !!generated.fromCache,
         problems: generated.problems
       });
     }
@@ -410,28 +419,33 @@ router.post('/:id/generate-ai', auth, authorize('admin', 'organizer'), async (re
       const mcqCount = Math.max(1, Math.floor(requestedCount * 0.7));
       const codingCount = Math.max(1, requestedCount - mcqCount);
 
-      const [quizGen, codingGen] = await Promise.all([
-        geminiService.generateQuizQuestions({
-          prompt,
-          topics,
-          difficulty,
-          count: mcqCount,
-          marksPerQuestion: 2
-        }),
-        geminiService.generateCodingProblems({
-          prompt,
-          topics,
-          difficulty,
-          count: codingCount,
-          permittedLanguages: comp.permittedLanguages,
-          marksPerProblem: 10
-        })
-      ]);
+      // Execute sequentially to prevent quota bursts on free tier
+      const quizGen = await geminiService.generateQuizQuestions({
+        prompt,
+        topics,
+        difficulty,
+        count: mcqCount,
+        marksPerQuestion: 2,
+        forceFresh,
+        competitionId: comp._id.toString()
+      });
+
+      const codingGen = await geminiService.generateCodingProblems({
+        prompt,
+        topics,
+        difficulty,
+        count: codingCount,
+        permittedLanguages: comp.permittedLanguages,
+        marksPerProblem: 10,
+        forceFresh,
+        competitionId: comp._id.toString()
+      });
 
       return res.json({
         success: true,
         type: 'hybrid',
         modelUsed: quizGen.modelUsed,
+        fromCache: !!(quizGen.fromCache || codingGen.fromCache),
         questions: [...quizGen.questions, ...codingGen.problems]
       });
     }
@@ -443,18 +457,32 @@ router.post('/:id/generate-ai', auth, authorize('admin', 'organizer'), async (re
       topics,
       difficulty,
       count: requestedCount,
-      marksPerQuestion: marksPerQ
+      marksPerQuestion: marksPerQ,
+      forceFresh,
+      competitionId: comp._id.toString()
     });
 
     res.json({
       success: true,
       type: 'quiz',
       modelUsed: generated.modelUsed,
+      fromCache: !!generated.fromCache,
       questions: generated.questions
     });
   } catch (err) {
     console.error('AI generation error:', err);
-    res.status(500).json({ message: err.message || 'AI generation failed' });
+    const is429 = err.status === 429 || err.code === 'RESOURCE_EXHAUSTED' || String(err.message).includes('429');
+    if (is429) {
+      return res.status(429).json({
+        error: 'RESOURCE_EXHAUSTED',
+        retryAfterSeconds: err.retryAfterSeconds || 60,
+        message: err.message || 'Free-tier request quota limit reached. Please wait before retrying, or create questions manually.'
+      });
+    }
+
+    res.status(500).json({
+      message: err.message || 'AI generation failed. Please try again or create questions manually.'
+    });
   }
 });
 
@@ -477,32 +505,52 @@ router.put('/:id/questions', auth, authorize('admin', 'organizer'), async (req, 
       return res.status(400).json({ message: 'questionPool must be an array' });
     }
 
-    // Ensure all questions have unique IDs and 1 mark per MCQ question
-    const normalizedPool = questionPool.map((q, idx) => ({
-      ...q,
-      marks: q.type === 'coding' ? (Number(q.marks) || 10) : 1,
-      questionId: q.questionId || q.problemId || `q_${Date.now()}_${idx}`
-    }));
+    // Validate and normalize all questions
+    const normalizedPool = questionPool.map((q, idx) => {
+      const isCoding = q.type === 'coding';
+      if (isCoding) {
+        if (!q.title || !q.description) {
+          throw new Error(`Coding problem #${idx + 1} must have a valid title and problem description`);
+        }
+      } else {
+        if (!q.question || !Array.isArray(q.options) || q.options.length !== 4) {
+          throw new Error(`MCQ #${idx + 1} must have a question statement and exactly 4 options`);
+        }
+      }
+
+      return {
+        ...q,
+        type: isCoding ? 'coding' : 'mcq',
+        marks: isCoding ? (Number(q.marks) || 10) : 1,
+        questionId: q.questionId || q.problemId || `q_${Date.now()}_${idx}_${Math.random().toString(36).substring(2, 6)}`,
+        problemId: isCoding ? (q.problemId || q.questionId || `p_${Date.now()}_${idx}`) : undefined
+      };
+    });
 
     comp.questionPool = normalizedPool;
 
-    // Recalculate totalMarks as total count of questions / marks
+    // Recalculate totalMarks as total sum of question marks
     const total = normalizedPool.reduce((acc, q) => acc + (Number(q.marks) || 1), 0);
     comp.totalMarks = total > 0 ? total : normalizedPool.length;
 
     await comp.save();
+
+    // Cache valid questions into MongoDB for reuse in future competitions
+    geminiService.aiService.indexQuestionsIntoCache(normalizedPool).catch(() => {});
+
     res.json({
-      message: 'Question pool saved successfully',
+      message: 'Question pool saved and cached successfully',
       questionCount: comp.questionPool.length,
       totalMarks: comp.totalMarks
     });
   } catch (err) {
-    res.status(500).json({ message: err.message || 'Error saving question pool' });
+    res.status(400).json({ message: err.message || 'Error saving question pool' });
   }
 });
 
 /**
  * Organizer / Admin: Publish competition
+ * Validates that competition has valid, verified questions before opening
  */
 router.post('/:id/publish', auth, authorize('admin', 'organizer'), async (req, res) => {
   try {
@@ -516,12 +564,37 @@ router.post('/:id/publish', auth, authorize('admin', 'organizer'), async (req, r
     }
 
     if (!comp.questionPool || comp.questionPool.length === 0) {
-      return res.status(400).json({ message: 'Cannot publish competition with an empty question pool. Generate or add questions first.' });
+      return res.status(400).json({
+        message: 'Cannot publish competition with an empty question pool. Generate or add questions first.'
+      });
+    }
+
+    // Strict validation: Never silently publish invalid questions
+    for (let i = 0; i < comp.questionPool.length; i++) {
+      const q = comp.questionPool[i];
+      if (q.type === 'coding') {
+        if (!q.title || !q.description) {
+          return res.status(400).json({
+            message: `Cannot publish: Coding problem #${i + 1} (${q.title || 'Untitled'}) is missing title or description.`
+          });
+        }
+        if (!Array.isArray(q.sampleTestCases) || q.sampleTestCases.length === 0) {
+          return res.status(400).json({
+            message: `Cannot publish: Coding problem "${q.title}" must have at least 1 sample test case.`
+          });
+        }
+      } else {
+        if (!q.question || !Array.isArray(q.options) || q.options.length !== 4) {
+          return res.status(400).json({
+            message: `Cannot publish: MCQ #${i + 1} does not have a complete question and 4 choices.`
+          });
+        }
+      }
     }
 
     comp.status = 'published';
     await comp.save();
-    res.json({ message: 'Competition published successfully', status: comp.status });
+    res.json({ message: 'Competition validated and published successfully', status: comp.status });
   } catch (err) {
     res.status(500).json({ message: err.message || 'Failed to publish competition' });
   }

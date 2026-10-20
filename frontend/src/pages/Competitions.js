@@ -11,7 +11,8 @@ import {
   PlusIcon,
   CalendarDaysIcon,
   CheckCircleIcon,
-  ArrowRightIcon
+  ArrowRightIcon,
+  TrashIcon
 } from '@heroicons/react/24/outline';
 
 import { getBackendUrl } from '../utils/apiConfig';
@@ -57,7 +58,24 @@ const Competitions = () => {
         setGeminiStatus(res.data);
       }
     } catch (err) {
-      // Non-critical status
+      console.warn('Could not fetch Gemini status:', err);
+    }
+  };
+
+  const handleDeleteCompetition = async (compId, compTitle) => {
+    if (!window.confirm(`Are you sure you want to permanently delete "${compTitle}"?\n\nThis will remove all questions, participant submissions, and scores from the database to clean up space.`)) {
+      return;
+    }
+
+    try {
+      const token = localStorage.getItem('token');
+      await axios.delete(`${backendUrl}/api/competitions/${compId}`, {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      setCompetitions(prev => prev.filter(c => c._id !== compId));
+    } catch (err) {
+      console.error('Error deleting competition:', err);
+      alert(err.response?.data?.message || 'Failed to delete competition');
     }
   };
 
@@ -281,6 +299,17 @@ const Competitions = () => {
                       >
                         Manage
                       </Link>
+                    )}
+
+                    {user && (user.role === 'admin' || comp.organizer?._id === user._id || comp.organizer === user._id) && (
+                      <button
+                        type="button"
+                        onClick={() => handleDeleteCompetition(comp._id, comp.title)}
+                        className="p-1.5 text-xs font-medium rounded-lg text-rose-400 bg-rose-950/40 border border-rose-900/50 hover:bg-rose-900/60 hover:text-rose-200 transition-colors"
+                        title="Delete competition & clean up space"
+                      >
+                        <TrashIcon className="h-4 w-4" />
+                      </button>
                     )}
 
                     {hasSubmitted ? (

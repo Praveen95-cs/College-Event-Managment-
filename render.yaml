@@ -18,7 +18,11 @@ services:
       - key: GENERATE_SOURCEMAP
         value: "false"
       - key: GEMINI_MODEL
-        value: gemini-3.8-flash
+        value: gemini-3.5-flash
+      - key: AI_PROVIDER
+        value: gemini
+      - key: GROQ_API_KEY
+        sync: false
       - key: JUDGE0_API_URL
         value: https://ce.judge0.com
       - key: MONGODB_URI

@@ -73,12 +73,16 @@ const EventDetails = () => {
   };
 
   const handleDeleteEvent = async () => {
-    if (window.confirm('Are you sure you want to delete this event?')) {
+    if (window.confirm('Are you sure you want to permanently delete this event? This will remove all bookings, linked competitions, and photos to clean up database space.')) {
       try {
-        await axios.delete(`/api/events/${id}`);
+        const token = localStorage.getItem('token');
+        await axios.delete(`${backendUrl}/api/events/${id}`, {
+          headers: token ? { Authorization: `Bearer ${token}` } : {}
+        });
         navigate('/events');
       } catch (error) {
         console.error('Error deleting event:', error);
+        alert(error.response?.data?.message || 'Failed to delete event');
       }
     }
   };

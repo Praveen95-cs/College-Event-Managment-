@@ -1,15 +1,19 @@
 import React, { useState, useEffect } from 'react';
+import { Link } from 'react-router-dom';
 import axios from 'axios';
 import { useAuth } from '../contexts/AuthContext';
+import { getBackendUrl } from '../utils/apiConfig';
 
 const AdminDashboard = () => {
   const { user } = useAuth();
+  const backendUrl = getBackendUrl();
   const [events, setEvents] = useState([]);
   const [users, setUsers] = useState([]);
+  const [competitions, setCompetitions] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
-  const [activeTab, setActiveTab] = useState('events');
+  const [activeTab, setActiveTab] = useState('events'); // 'events', 'competitions', 'users'
   const [organizerForm, setOrganizerForm] = useState({
     name: '',
     email: '',
@@ -20,12 +24,16 @@ const AdminDashboard = () => {
 
   const fetchData = async () => {
     try {
-      const [eventsRes, usersRes] = await Promise.all([
-        axios.get('/api/events'),
-        axios.get('/api/users')
+      const token = localStorage.getItem('token');
+      const headers = token ? { Authorization: `Bearer ${token}` } : {};
+      const [eventsRes, usersRes, compsRes] = await Promise.all([
+        axios.get(`${backendUrl}/api/events`, { headers }),
+        axios.get(`${backendUrl}/api/users`, { headers }),
+        axios.get(`${backendUrl}/api/competitions`, { headers }).catch(() => ({ data: [] }))
       ]);
-      setEvents(eventsRes.data);
-      setUsers(usersRes.data);
+      setEvents(eventsRes.data || []);
+      setUsers(usersRes.data || []);
+      setCompetitions(compsRes.data || []);
     } catch (err) {
       setError(err.response?.data?.message || 'Failed to fetch data');
     } finally {
@@ -36,6 +44,38 @@ const AdminDashboard = () => {
   useEffect(() => {
     fetchData();
   }, []);
+
+  const handleDeleteEvent = async (eventId, eventTitle) => {
+    if (!window.confirm(`Are you sure you want to permanently delete event "${eventTitle}"?\n\nThis will remove all associated registrations, linked competitions, and files to clean up database space.`)) {
+      return;
+    }
+    try {
+      const token = localStorage.getItem('token');
+      await axios.delete(`${backendUrl}/api/events/${eventId}`, {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      setEvents(prev => prev.filter(e => e._id !== eventId));
+      setSuccess('Event and associated records deleted successfully to clean up space.');
+    } catch (err) {
+      setError(err.response?.data?.message || 'Failed to delete event');
+    }
+  };
+
+  const handleDeleteCompetition = async (compId, compTitle) => {
+    if (!window.confirm(`Are you sure you want to permanently delete competition "${compTitle}"?\n\nThis will remove all participant assessments, submissions, and scores from the database to clean up space.`)) {
+      return;
+    }
+    try {
+      const token = localStorage.getItem('token');
+      await axios.delete(`${backendUrl}/api/competitions/${compId}`, {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      setCompetitions(prev => prev.filter(c => c._id !== compId));
+      setSuccess('Competition and all participant assessments deleted successfully to clean up space.');
+    } catch (err) {
+      setError(err.response?.data?.message || 'Failed to delete competition');
+    }
+  };
 
   const handleEventStatusChange = async (eventId, newStatus) => {
     try {
@@ -112,7 +152,17 @@ const AdminDashboard = () => {
                       : 'border-transparent text-gray-400 hover:text-gray-200 hover:border-gray-500'
                   } whitespace-nowrap py-4 px-6 border-b-2 font-medium text-sm`}
                 >
-                  Events
+                  Events ({events.length})
+                </button>
+                <button
+                  onClick={() => setActiveTab('competitions')}
+                  className={`${
+                    activeTab === 'competitions'
+                      ? 'border-violet-500 text-violet-300'
+                      : 'border-transparent text-gray-400 hover:text-gray-200 hover:border-gray-500'
+                  } whitespace-nowrap py-4 px-6 border-b-2 font-medium text-sm`}
+                >
+                  Competitions ({competitions.length})
                 </button>
                 <button
                   onClick={() => setActiveTab('users')}
@@ -122,7 +172,7 @@ const AdminDashboard = () => {
                       : 'border-transparent text-gray-400 hover:text-gray-200 hover:border-gray-500'
                   } whitespace-nowrap py-4 px-6 border-b-2 font-medium text-sm`}
                 >
-                  Users
+                  Users ({users.length})
                 </button>
               </nav>
             </div>
@@ -170,22 +220,96 @@ const AdminDashboard = () => {
                           </span>
                         </td>
                         <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-300">
-                          <select
-                            value={event.status}
-                            onChange={(e) => handleEventStatusChange(event._id, e.target.value)}
-                            className="mt-1 block w-full pl-3 pr-10 py-2 text-base border-gray-600 bg-gray-900 text-gray-100 focus:outline-none focus:ring-violet-500 focus:border-violet-500 sm:text-sm rounded-md"
-                          >
-                            <option value="pending">Pending</option>
-                            <option value="approved">Approved</option>
-                            <option value="rejected">Rejected</option>
-                            <option value="upcoming">Upcoming</option>
-                            <option value="ongoing">Ongoing</option>
-                            <option value="completed">Completed</option>
-                            <option value="cancelled">Cancelled</option>
-                          </select>
+                          <div className="flex items-center gap-2">
+                            <select
+                              value={event.status}
+                              onChange={(e) => handleEventStatusChange(event._id, e.target.value)}
+                              className="block w-full pl-3 pr-8 py-1.5 text-xs border-gray-600 bg-gray-900 text-gray-100 focus:outline-none focus:ring-violet-500 focus:border-violet-500 rounded-md"
+                            >
+                              <option value="pending">Pending</option>
+                              <option value="approved">Approved</option>
+                              <option value="rejected">Rejected</option>
+                              <option value="upcoming">Upcoming</option>
+                              <option value="ongoing">Ongoing</option>
+                              <option value="completed">Completed</option>
+                              <option value="cancelled">Cancelled</option>
+                            </select>
+                            <button
+                              type="button"
+                              onClick={() => handleDeleteEvent(event._id, event.title)}
+                              className="px-2.5 py-1.5 text-xs font-semibold rounded text-rose-300 bg-rose-950/60 border border-rose-800 hover:bg-rose-900 transition-colors"
+                              title="Delete event and free space"
+                            >
+                              Delete
+                            </button>
+                          </div>
                         </td>
                       </tr>
                     ))}
+                  </tbody>
+                </table>
+              </div>
+            ) : activeTab === 'competitions' ? (
+              <div className="overflow-x-auto">
+                <table className="min-w-full divide-y divide-gray-700">
+                  <thead className="bg-gray-900">
+                    <tr>
+                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-400 uppercase tracking-wider">Title</th>
+                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-400 uppercase tracking-wider">Type</th>
+                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-400 uppercase tracking-wider">Organizer</th>
+                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-400 uppercase tracking-wider">Status</th>
+                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-400 uppercase tracking-wider">Actions</th>
+                    </tr>
+                  </thead>
+                  <tbody className="bg-gray-800 divide-y divide-gray-700">
+                    {competitions.length === 0 ? (
+                      <tr>
+                        <td colSpan="5" className="px-6 py-8 text-center text-sm text-gray-400">
+                          No competitions found.
+                        </td>
+                      </tr>
+                    ) : (
+                      competitions.map((comp) => (
+                        <tr key={comp._id}>
+                          <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-100">
+                            {comp.title}
+                          </td>
+                          <td className="px-6 py-4 whitespace-nowrap text-xs text-gray-300 uppercase">
+                            <span className="px-2 py-0.5 rounded bg-violet-900/60 text-violet-300 border border-violet-700/60">
+                              {comp.type}
+                            </span>
+                          </td>
+                          <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-300">
+                            {comp.organizer?.name || '—'}
+                          </td>
+                          <td className="px-6 py-4 whitespace-nowrap text-xs">
+                            <span className={`px-2 py-0.5 rounded-full font-medium ${
+                              comp.status === 'published' ? 'bg-emerald-950 text-emerald-300 border border-emerald-800' : 'bg-gray-700 text-gray-300'
+                            }`}>
+                              {comp.status}
+                            </span>
+                          </td>
+                          <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-300">
+                            <div className="flex items-center gap-2">
+                              <Link
+                                to={`/competitions/${comp._id}/manage`}
+                                className="px-3 py-1 text-xs font-medium rounded text-gray-200 bg-gray-700 hover:bg-gray-600 transition-colors"
+                              >
+                                Manage
+                              </Link>
+                              <button
+                                type="button"
+                                onClick={() => handleDeleteCompetition(comp._id, comp.title)}
+                                className="px-2.5 py-1 text-xs font-semibold rounded text-rose-300 bg-rose-950/60 border border-rose-800 hover:bg-rose-900 transition-colors"
+                                title="Delete competition and clean up DB space"
+                              >
+                                Delete
+                              </button>
+                            </div>
+                          </td>
+                        </tr>
+                      ))
+                    )}
                   </tbody>
                 </table>
               </div>

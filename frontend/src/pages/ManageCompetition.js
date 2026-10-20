@@ -7,7 +7,8 @@ import {
   ArrowDownTrayIcon,
   CheckCircleIcon,
   ExclamationCircleIcon,
-  AcademicCapIcon
+  AcademicCapIcon,
+  ClockIcon
 } from '@heroicons/react/24/outline';
 import { getBackendUrl } from '../utils/apiConfig';
 
@@ -18,6 +19,7 @@ const ManageCompetition = () => {
 
   const [activeTab, setActiveTab] = useState(id ? 'questions' : 'setup'); // 'setup', 'generator', 'questions', 'analytics'
   const [loading, setLoading] = useState(false);
+  const [deleting, setDeleting] = useState(false);
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
   const [events, setEvents] = useState([]);
@@ -50,9 +52,26 @@ const ManageCompetition = () => {
   // AI Generator state
   const [aiCount, setAiCount] = useState(5);
   const [aiGenerating, setAiGenerating] = useState(false);
+  const [useCache, setUseCache] = useState(true);
+  const [quotaCooldown, setQuotaCooldown] = useState(0);
 
   // Analytics State
   const [analytics, setAnalytics] = useState(null);
+
+  // Cooldown countdown timer
+  useEffect(() => {
+    if (quotaCooldown <= 0) return;
+    const interval = setInterval(() => {
+      setQuotaCooldown(prev => {
+        if (prev <= 1) {
+          clearInterval(interval);
+          return 0;
+        }
+        return prev - 1;
+      });
+    }, 1000);
+    return () => clearInterval(interval);
+  }, [quotaCooldown]);
 
   useEffect(() => {
     fetchEvents();
@@ -184,9 +203,44 @@ const ManageCompetition = () => {
     }
   };
 
-  const handleGenerateAI = async () => {
+  const handleDeleteCompetition = async () => {
+    if (!competitionId) return;
+    const confirmed = window.confirm(
+      'Are you sure you want to permanently delete this competition? All participant submissions, results, and assessment records will be completely removed from the database to clean up space.'
+    );
+    if (!confirmed) return;
+
+    setError('');
+    setSuccess('');
+    setDeleting(true);
+
+    try {
+      const token = localStorage.getItem('token');
+      await axios.delete(`${backendUrl}/api/competitions/${competitionId}`, {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      alert('Competition and participant records deleted successfully.');
+      navigate('/competitions');
+    } catch (err) {
+      console.error('Error deleting competition:', err);
+      setError(err.response?.data?.message || 'Failed to delete competition');
+    } finally {
+      setDeleting(false);
+    }
+  };
+
+  const handleGenerateAI = async (forceFresh = false) => {
     if (!competitionId) {
       setError('Please save the competition setup first before generating questions.');
+      return;
+    }
+
+    // Prevent duplicate concurrent requests
+    if (aiGenerating) return;
+
+    // Check if provider is currently in active quota cooldown
+    if (quotaCooldown > 0 && forceFresh) {
+      setError(`Free-tier AI request quota limit active. Please wait ${quotaCooldown}s, reuse the saved problem bank, or add questions manually.`);
       return;
     }
 
@@ -203,22 +257,32 @@ const ManageCompetition = () => {
           topics: formData.topics.split(',').map(s => s.trim()).filter(Boolean),
           difficulty: formData.difficulty,
           count: aiCount,
-          type: formData.type
+          type: formData.type,
+          forceFresh: !useCache || forceFresh
         },
         { headers: { Authorization: `Bearer ${token}` } }
       );
 
       const generated = res.data.questions || res.data.problems || [];
       if (generated.length === 0) {
-        throw new Error('AI did not return any questions. Try adjusting your prompt.');
+        throw new Error('No questions returned. Try adjusting your prompt.');
       }
 
       setQuestionPool(prev => [...prev, ...generated]);
-      setSuccess(`Successfully generated ${generated.length} questions using ${res.data.modelUsed}! Review and edit them below.`);
+      const sourceNote = res.data.fromCache ? 'Loaded from MongoDB Problem Bank (0 API Quota Consumed)' : `Generated with ${res.data.modelUsed}`;
+      setSuccess(`Successfully added ${generated.length} questions (${sourceNote})! Review and edit them below.`);
       setActiveTab('questions');
     } catch (err) {
       console.error('AI generation error:', err);
-      setError(err.response?.data?.message || 'Failed to generate questions. Verify GEMINI_API_KEY.');
+      if (err.response?.status === 429) {
+        const delay = Number(err.response?.data?.retryAfterSeconds) || 60;
+        setQuotaCooldown(delay);
+        setError(
+          `Free-tier request quota limit reached. Cooldown active for ${delay}s. You can wait for reset, load cached questions from the MongoDB problem bank, or create questions manually below.`
+        );
+      } else {
+        setError(err.response?.data?.message || 'Failed to generate questions. Verify GEMINI_API_KEY or create questions manually.');
+      }
     } finally {
       setAiGenerating(false);
     }
@@ -392,15 +456,29 @@ const ManageCompetition = () => {
 
         <div className="flex flex-wrap items-center gap-3">
           {competitionId && (
-            <button
-              onClick={handlePublish}
-              disabled={loading || questionPool.length === 0}
-              className="px-4 py-2 rounded-xl text-sm font-semibold text-white bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 transition-colors shadow-lg shadow-emerald-600/20"
-            >
-              {competitionStatus === 'published' ? 'Republish / Update' : 'Publish Competition'}
-            </button>
+            <>
+              <button
+                type="button"
+                onClick={handleDeleteCompetition}
+                disabled={loading || deleting}
+                className="px-3.5 py-2 rounded-xl text-sm font-semibold text-rose-300 bg-rose-950/60 border border-rose-800/80 hover:bg-rose-900/60 transition-colors flex items-center gap-1.5 disabled:opacity-50"
+                title="Delete competition and remove from DB to clean up space"
+              >
+                <TrashIcon className="h-4 w-4" />
+                {deleting ? 'Deleting...' : 'Delete Competition'}
+              </button>
+              <button
+                type="button"
+                onClick={handlePublish}
+                disabled={loading || questionPool.length === 0}
+                className="px-4 py-2 rounded-xl text-sm font-semibold text-white bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 transition-colors shadow-lg shadow-emerald-600/20"
+              >
+                {competitionStatus === 'published' ? 'Republish / Update' : 'Publish Competition'}
+              </button>
+            </>
           )}
           <button
+            type="button"
             onClick={() => navigate('/competitions')}
             className="px-4 py-2 rounded-xl text-sm font-medium text-gray-300 bg-gray-800 hover:bg-gray-700 transition-colors"
           >
@@ -694,29 +772,92 @@ const ManageCompetition = () => {
               </div>
             </div>
 
+            {/* Problem Bank Caching & Quota Protection Toggle */}
+            <div className="p-4 rounded-xl bg-violet-950/30 border border-violet-800/40 space-y-2">
+              <label className="inline-flex items-center gap-2 cursor-pointer text-sm font-medium text-violet-200">
+                <input
+                  type="checkbox"
+                  checked={useCache}
+                  onChange={(e) => setUseCache(e.target.checked)}
+                  className="rounded bg-gray-800 border-gray-700 text-violet-600 focus:ring-violet-500"
+                />
+                <span>Reuse pre-generated questions from MongoDB Problem Bank (0 API Quota Consumed)</span>
+              </label>
+              <p className="text-xs text-gray-400 pl-6">
+                When enabled, pulls verified coding problems and MCQs already cached in your database before consuming external AI free-tier quota limits.
+              </p>
+            </div>
+
+            {/* Quota Cooldown Alert if active */}
+            {quotaCooldown > 0 && (
+              <div className="p-4 rounded-xl bg-amber-950/50 border border-amber-800/80 text-amber-200 text-sm space-y-2">
+                <div className="flex items-center gap-2 font-semibold">
+                  <ClockIcon className="h-5 w-5 text-amber-400 shrink-0 animate-pulse" />
+                  <span>Free-Tier Rate Limit Reached — Cooldown Active ({quotaCooldown}s remaining)</span>
+                </div>
+                <p className="text-xs text-amber-300/80">
+                  Google Gemini or the AI provider requires a cooldown period before accepting fresh synthesis requests. Please do not retry repeatedly during this reset period.
+                </p>
+                <div className="flex flex-wrap gap-2 pt-1">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setUseCache(true);
+                      handleGenerateAI(false);
+                    }}
+                    className="px-3 py-1.5 rounded-lg text-xs font-semibold text-white bg-amber-700 hover:bg-amber-600 transition-colors"
+                  >
+                    Load Cached Problems from DB (Instant)
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setActiveTab('questions')}
+                    className="px-3 py-1.5 rounded-lg text-xs font-semibold text-amber-200 bg-amber-900/60 border border-amber-700 hover:bg-amber-800/60 transition-colors"
+                  >
+                    Create Questions Manually
+                  </button>
+                </div>
+              </div>
+            )}
+
             <div className="pt-4 flex flex-wrap items-center justify-between gap-4">
-              <span className="text-xs text-gray-400">
-                You can generate multiple batches. All generated questions append to the question pool for your review and editing.
+              <span className="text-xs text-gray-400 max-w-md">
+                Generated questions are validated and append to your question pool below for editing and fine-tuning before publishing.
               </span>
 
-              <button
-                type="button"
-                onClick={handleGenerateAI}
-                disabled={aiGenerating}
-                className="inline-flex items-center px-6 py-3 rounded-xl font-semibold text-sm text-white bg-gradient-to-r from-violet-600 to-indigo-600 hover:from-violet-500 hover:to-indigo-500 transition-all shadow-lg shadow-violet-600/30 disabled:opacity-50"
-              >
-                {aiGenerating ? (
-                  <>
-                    <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin mr-2"></div>
-                    Gemini Synthesizing Questions...
-                  </>
-                ) : (
-                  <>
-                    <SparklesIcon className="h-5 w-5 mr-2" />
-                    Generate with Gemini Free Tier
-                  </>
-                )}
-              </button>
+              <div className="flex flex-wrap items-center gap-3">
+                <button
+                  type="button"
+                  onClick={() => setActiveTab('questions')}
+                  className="px-4 py-2.5 rounded-xl font-medium text-xs text-gray-300 bg-gray-800 hover:bg-gray-700 transition-colors"
+                >
+                  Skip to Manual Entry
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => handleGenerateAI(false)}
+                  disabled={aiGenerating || (quotaCooldown > 0 && !useCache)}
+                  className="inline-flex items-center px-6 py-3 rounded-xl font-semibold text-sm text-white bg-gradient-to-r from-violet-600 to-indigo-600 hover:from-violet-500 hover:to-indigo-500 transition-all shadow-lg shadow-violet-600/30 disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  {aiGenerating ? (
+                    <>
+                      <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin mr-2"></div>
+                      Synthesizing Questions with AI...
+                    </>
+                  ) : quotaCooldown > 0 && !useCache ? (
+                    <>
+                      <ClockIcon className="h-4 w-4 mr-2" />
+                      Cooldown Active ({quotaCooldown}s)
+                    </>
+                  ) : (
+                    <>
+                      <SparklesIcon className="h-5 w-5 mr-2" />
+                      Generate with AI Free Tier
+                    </>
+                  )}
+                </button>
+              </div>
             </div>
           </div>
         </div>

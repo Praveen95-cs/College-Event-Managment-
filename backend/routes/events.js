@@ -1,6 +1,7 @@
 const express=require('express'); const router=express.Router();
 const {body,validationResult}=require('express-validator'); const {auth,optionalAuth,authorize}=require('../middleware/auth');
 const Event=require('../models/Event'); const Notification=require('../models/Notification'); const Registration=require('../models/Registration');
+const Competition=require('../models/Competition'); const AssessmentAssignment=require('../models/AssessmentAssignment');
 const multer=require('multer'); const path=require('path'); const fs=require('fs');
 const uploads=path.join(__dirname,'..','uploads'); fs.mkdirSync(uploads,{recursive:true});
 const upload=multer({storage:multer.diskStorage({destination:(_,f,cb)=>cb(null,uploads),filename:(_,f,cb)=>cb(null,Date.now()+'-'+Math.round(Math.random()*1e9)+path.extname(f.originalname))}),limits:{fileSize:5*1024*1024},fileFilter:(_,f,cb)=>['image/jpeg','image/png','image/gif'].includes(f.mimetype)?cb(null,true):cb(new Error('Only JPEG, PNG and GIF are allowed'))});
@@ -14,7 +15,49 @@ router.post('/',auth,authorize('admin','organizer'),upload.single('photo'),[
 ],async(req,res)=>{const er=validationResult(req);if(!er.isEmpty())return res.status(400).json({errors:er.array()});try{const e=await Event.create({...req.body,status:req.body.status||'approved',capacity:Number(req.body.capacity),organizer:req.user._id,photo:req.file?`/uploads/${req.file.filename}`:'',noveltyFeatures:novelty(req.body)});res.status(201).json(e);}catch(e){res.status(500).json({message:e.message});}});
 async function update(req,res){const e=await Event.findById(req.params.id);if(!e)return res.status(404).json({message:'Event not found'});if(req.user.role!=='admin'&&e.organizer.toString()!==req.user._id.toString())return res.status(403).json({message:'Not authorized'});Object.assign(e,req.body);if(['highlights','perks','agenda','certificateEnabled'].some(k=>req.body[k]!==undefined))e.noveltyFeatures={...e.noveltyFeatures.toObject(),...novelty(req.body)};await e.save();res.json(e);}
 router.put('/:id',auth,authorize('admin','organizer'),update); router.patch('/:id',auth,authorize('admin','organizer'),update);
-router.delete('/:id',auth,authorize('admin','organizer'),async(req,res)=>{const e=await Event.findById(req.params.id);if(!e)return res.status(404).json({message:'Event not found'});if(req.user.role!=='admin'&&e.organizer.toString()!==req.user._id.toString())return res.status(403).json({message:'Not authorized'});await Registration.deleteMany({event:e._id});await e.deleteOne();res.json({message:'Event deleted'});});
+router.delete('/:id', auth, authorize('admin', 'organizer'), async (req, res) => {
+  try {
+    const e = await Event.findById(req.params.id);
+    if (!e) return res.status(404).json({ message: 'Event not found' });
+    if (req.user.role !== 'admin' && e.organizer.toString() !== req.user._id.toString()) {
+      return res.status(403).json({ message: 'Not authorized to delete this event' });
+    }
+
+    // 1. Find and delete all competitions associated with this event
+    const linkedComps = await Competition.find({ event: e._id });
+    if (linkedComps.length > 0) {
+      const compIds = linkedComps.map(c => c._id);
+      // Delete all assignments for these competitions
+      await AssessmentAssignment.deleteMany({ competition: { $in: compIds } });
+      // Delete the competitions
+      await Competition.deleteMany({ _id: { $in: compIds } });
+    }
+
+    // 2. Delete all registrations for this event
+    await Registration.deleteMany({ event: e._id });
+
+    // 3. Delete all notifications referencing this event
+    await Notification.deleteMany({ relatedEvent: e._id });
+
+    // 4. Clean up photo from disk if present to free storage space
+    if (e.photo && e.photo.startsWith('/uploads/')) {
+      const photoPath = path.join(__dirname, '..', e.photo);
+      if (fs.existsSync(photoPath)) {
+        try { fs.unlinkSync(photoPath); } catch (err) { console.warn('Could not remove event photo:', err.message); }
+      }
+    }
+
+    // 5. Delete the event document
+    await e.deleteOne();
+    res.json({
+      message: 'Event and all associated competitions, bookings, and files deleted successfully to clean up space',
+      deletedCompetitionsCount: linkedComps.length
+    });
+  } catch (err) {
+    console.error('Error deleting event:', err);
+    res.status(500).json({ message: err.message || 'Error deleting event' });
+  }
+});
 router.post('/register',auth,async(req,res)=>{try{const eventId=req.body.eventId||req.body.id;if(!eventId)return res.status(400).json({message:'eventId is required'});const e=await Event.findById(eventId);if(!e)return res.status(404).json({message:'Event not found'});if(e.attendees.length>=e.capacity)return res.status(400).json({message:'Event is full'});await e.addAttendee(req.user._id);const r=await Registration.findOneAndUpdate({event:e._id,user:req.user._id},{event:e._id,user:req.user._id,name:req.body.name||req.user.name,regNo:req.body.regNo||req.user._id.toString().slice(-8),needsAccommodation:!!req.body.needsAccommodation,status:'approved'},{upsert:true,new:true,setDefaultsOnInsert:true});await Notification.create({user:req.user._id,title:'Event Booking Confirmation',message:`You have successfully booked for ${e.title}`,type:'event_booking',relatedEvent:e._id});res.status(201).json({message:'Event booked successfully',registrationId:r._id,registration:r});}catch(e){res.status(400).json({message:e.message});}});
 router.post('/:id/book',auth,async(req,res)=>{try{const e=await Event.findById(req.params.id);if(!e)return res.status(404).json({message:'Event not found'});if(e.attendees.length>=e.capacity)return res.status(400).json({message:'Event is full'});await e.addAttendee(req.user._id);const r=await Registration.findOneAndUpdate({event:e._id,user:req.user._id},{event:e._id,user:req.user._id,name:req.body.name||req.user.name,regNo:req.body.regNo||req.user._id.toString().slice(-8),needsAccommodation:!!req.body.needsAccommodation,status:'approved'},{upsert:true,new:true,setDefaultsOnInsert:true});await Notification.create({user:req.user._id,title:'Event Booking Confirmation',message:`You have successfully booked for ${e.title}`,type:'event_booking',relatedEvent:e._id});res.json({message:'Event booked successfully',registrationId:r._id,registration:r});}catch(e){res.status(400).json({message:e.message});}});
 router.post('/:id/cancel',auth,async(req,res)=>{const e=await Event.findById(req.params.id);if(!e)return res.status(404).json({message:'Event not found'});await e.removeAttendee(req.user._id);await Registration.findOneAndUpdate({event:e._id,user:req.user._id},{status:'cancelled'});await Notification.create({user:req.user._id,title:'Booking Cancelled',message:`Your booking for ${e.title} has been cancelled`,type:'event_cancellation',relatedEvent:e._id});res.json({message:'Booking cancelled successfully'});});
