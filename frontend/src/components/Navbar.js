@@ -11,6 +11,8 @@ import {
 } from '@heroicons/react/24/outline';
 import Notifications from './Notifications';
 
+import AvenorLogo from './AvenorLogo';
+
 const linkClass = ({ isActive }) =>
   `${isActive ? 'text-white border-violet-400' : 'text-gray-300 border-transparent hover:text-white hover:border-violet-400'} inline-flex items-center px-1 pt-1 border-b-2 text-sm font-medium transition-colors`;
 
@@ -30,21 +32,8 @@ const Navbar = () => {
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
         <div className="flex justify-between h-16">
           <div className="flex items-center min-w-0">
-            <Link to="/" className="flex items-center gap-2.5 shrink-0 group">
-              <div className="w-9 h-9 rounded-xl bg-gradient-to-tr from-violet-600 via-indigo-600 to-fuchsia-500 flex items-center justify-center shadow-lg shadow-violet-600/30 group-hover:shadow-violet-600/50 transition-all group-hover:scale-105">
-                <svg className="w-5 h-5 text-white" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-                  <path d="M12 2L3 21h4.5l2-4.5h5l2 4.5H21L12 2z" />
-                  <path d="M10.5 13.5h3" />
-                </svg>
-              </div>
-              <div className="flex flex-col">
-                <span className="text-xl sm:text-2xl font-black tracking-tight text-white flex items-center">
-                  Ave<span className="text-transparent bg-clip-text bg-gradient-to-r from-violet-400 to-indigo-400">nor</span>
-                </span>
-                <span className="text-[10px] font-medium tracking-widest text-violet-400/80 uppercase -mt-1 hidden sm:block">
-                  Elevate Every Event
-                </span>
-              </div>
+            <Link to="/" className="shrink-0 hover:opacity-95 transition-opacity">
+              <AvenorLogo size="md" subtitle="Campus Events & Life" />
             </Link>
             <div className="hidden sm:ml-8 sm:flex sm:space-x-6">
               <NavLink to="/" end className={linkClass}>Home</NavLink>

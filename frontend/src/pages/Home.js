@@ -11,9 +11,9 @@ import {
   AcademicCapIcon,
   ClockIcon,
   MapPinIcon,
-  ChatBubbleLeftRightIcon,
-  CheckCircleIcon
+  ChatBubbleLeftRightIcon
 } from '@heroicons/react/24/outline';
+import { AvenorMark } from '../components/AvenorLogo';
 
 const Home = () => {
   const { user } = useAuth();
@@ -62,12 +62,34 @@ const Home = () => {
 
   return (
     <div className="min-h-screen bg-gray-950 text-gray-100 selection:bg-violet-600 selection:text-white">
-      {/* Hero Welcome Section */}
-      <section className="relative border-b border-gray-800 bg-gradient-to-b from-gray-900 via-gray-950 to-gray-950 pt-16 pb-20 px-4 sm:px-6 lg:px-8">
-        <div className="max-w-5xl mx-auto text-center">
-          <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full text-xs font-medium bg-violet-500/10 text-violet-300 border border-violet-500/20 mb-6">
-            <AcademicCapIcon className="h-4 w-4 text-violet-400" />
-            <span>Campus Event & Student Activity Portal</span>
+      {/* Hero Welcome Section with Campus Background Image */}
+      <section className="relative overflow-hidden border-b border-gray-800/80 bg-gray-950 pt-16 pb-24 px-4 sm:px-6 lg:px-8">
+        {/* Campus Background Image & Overlays */}
+        <div className="absolute inset-0 pointer-events-none select-none z-0">
+          <img
+            src="/images/college.png"
+            alt="College Campus"
+            className="w-full h-full object-cover object-center opacity-30 filter brightness-90 contrast-110"
+            onError={(e) => {
+              e.target.style.display = 'none';
+            }}
+          />
+          <div className="absolute inset-0 bg-gradient-to-t from-gray-950 via-gray-950/85 to-gray-950/60" />
+          <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_top,_var(--tw-gradient-stops))] from-violet-950/40 via-transparent to-transparent" />
+        </div>
+
+        <div className="relative z-10 max-w-5xl mx-auto text-center">
+          {/* Prominent Logo Section */}
+          <div className="inline-flex items-center gap-3 p-2 pr-4 rounded-2xl bg-gray-900/80 border border-violet-500/30 shadow-xl backdrop-blur-md mb-6 hover:border-violet-500/50 transition">
+            <AvenorMark size="md" />
+            <div className="text-left">
+              <span className="text-xs font-black tracking-wider text-white uppercase block leading-none">
+                AVENOR
+              </span>
+              <span className="text-[10px] font-medium text-violet-300 block mt-0.5 leading-none">
+                Elevate Every Event
+              </span>
+            </div>
           </div>
 
           <h1 className="text-3xl sm:text-5xl font-bold tracking-tight text-white max-w-3xl mx-auto leading-tight">
