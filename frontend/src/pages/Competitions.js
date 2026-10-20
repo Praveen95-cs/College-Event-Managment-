@@ -119,20 +119,20 @@ const Competitions = () => {
         <div className="absolute top-0 right-0 -mt-12 -mr-12 w-96 h-96 bg-violet-600/10 rounded-full blur-3xl pointer-events-none"></div>
         <div className="relative z-10 flex flex-col md:flex-row md:items-center md:justify-between gap-6">
           <div className="max-w-2xl space-y-3">
-            <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full text-xs font-medium bg-violet-500/10 text-violet-300 border border-violet-500/20">
-              <SparklesIcon className="h-4 w-4 text-violet-400" />
-              Powered by Google Gemini Free Tier
+            <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full text-xs font-semibold bg-violet-500/10 text-violet-300 border border-violet-500/20">
+              <TrophyIcon className="h-4 w-4 text-violet-400" />
+              Campus Coding Arena & Technical Quizzes
             </div>
             <h1 className="text-3xl sm:text-4xl font-extrabold tracking-tight text-white">
-              AI Quiz & Coding Competitions
+              Student Competitions & Coding Battles
             </h1>
             <p className="text-gray-300 text-sm sm:text-base">
-              Test your engineering skills in personalized AI-generated quizzes and isolated algorithmic coding arenas. Compete live on the real-time leaderboard.
+              Sharpen your engineering skills in timed challenges, live quizzes, and department coding arenas. Compete live with classmates and climb the campus leaderboard.
             </p>
             {geminiStatus?.verifiedModel && (
               <p className="text-xs text-gray-400 flex items-center gap-1.5">
                 <CheckCircleIcon className="h-4 w-4 text-emerald-400 inline" />
-                Verified Model: <span className="text-emerald-300 font-mono font-medium">{geminiStatus.verifiedModel}</span> (Free Tier)
+                Problem Assistant Engine: <span className="text-emerald-300 font-mono font-medium">{geminiStatus.verifiedModel}</span>
               </p>
             )}
           </div>
