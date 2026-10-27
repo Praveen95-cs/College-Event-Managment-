@@ -12,6 +12,7 @@
 An enterprise-grade, modern MERN stack web platform for college event management, live coding arenas, and quota-resilient AI-driven online assessments.
 
 ---
+Live Demo - https://college-event-manager-cxf4.onrender.com/
 
 ## 🌟 What is Avenor?
 
