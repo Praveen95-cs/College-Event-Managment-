@@ -59,8 +59,14 @@ services:
         generateValue: true
       - key: YOUPI_AUTO_VERIFY_ENABLED
         value: "true"
-      - key: YOUPI_AUTO_RECONCILE_OBSERVED
-        value: "true"
+      - key: PAYMENT_ACTIVE_WINDOW_MS
+        value: "300000"
+      - key: PAYMENT_PROCESSING_WINDOW_MS
+        value: "30000"
+      - key: PAYMENT_GRACE_PERIOD_MS
+        value: "5000"
+      - key: ANDROID_ENROLLMENT_SECRET
+        generateValue: true
       - key: YOUPI_IMAP_HOST
         value: imap.gmail.com
       - key: YOUPI_IMAP_PORT

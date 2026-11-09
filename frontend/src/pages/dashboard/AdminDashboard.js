@@ -13,11 +13,32 @@ const AdminDashboard = () => {
   const [departments, setDepartments] = useState([]);
   const [competitions, setCompetitions] = useState([]);
   const [youpiSessions, setYoupiSessions] = useState([]);
+  const [youpiQueue, setYoupiQueue] = useState({
+    receivingAccountId: '',
+    currentSlot: null,
+    queue: []
+  });
+  const [youpiDevices, setYoupiDevices] = useState([]);
+  const [pairQrData, setPairQrData] = useState(null);
+  const [selectedDeviceVpa, setSelectedDeviceVpa] = useState('');
+  const [generatingPairQr, setGeneratingPairQr] = useState(false);
+  const [suspendedUsers, setSuspendedUsers] = useState([]);
+  const [recentFraudObs, setRecentFraudObs] = useState([]);
+  const [unbanningUserId, setUnbanningUserId] = useState('');
+  const [statementVpa, setStatementVpa] = useState('');
+  const [standQrForm, setStandQrForm] = useState({
+    preferredVpa: '',
+    amount: '',
+    mode: '02',
+    tn: ''
+  });
+  const [standQrResult, setStandQrResult] = useState(null);
+  const [generatingStandQr, setGeneratingStandQr] = useState(false);
   const [youpiAutomation, setYoupiAutomation] = useState({
     primaryVpa: '',
     backupVpas: [],
     autoVerifyEnabled: true,
-    autoReconcileObserved: true,
+    fulfillOnObserved: false,
     imapHost: 'imap.gmail.com',
     imapPort: 993,
     imapUser: '',
@@ -27,6 +48,7 @@ const AdminDashboard = () => {
     observerConfigured: false,
     hasObserverSecret: false,
     observerSecretHint: '',
+    hasAndroidEnrollmentSecret: false,
     lastPollAt: null,
     lastPollResult: null
   });
@@ -34,7 +56,6 @@ const AdminDashboard = () => {
   const [youpiAutoForm, setYoupiAutoForm] = useState({
     backupVpas: '',
     autoVerifyEnabled: true,
-    autoReconcileObserved: true,
     imapHost: 'imap.gmail.com',
     imapPort: '993',
     imapUser: '',
@@ -122,7 +143,9 @@ const AdminDashboard = () => {
         cleanupRes,
         deptsList,
         statusRes,
-        autoRes
+        autoRes,
+        queueRes,
+        securityRes
       ] = await Promise.all([
         axios.get(`${backendUrl}/api/events`, { headers }),
         axios.get(`${backendUrl}/api/users`, { headers }),
@@ -139,6 +162,12 @@ const AdminDashboard = () => {
           .catch(() => ({ data: null })),
         axios
           .get(`${backendUrl}/api/payments/youpi/admin/automation`, { headers })
+          .catch(() => ({ data: null })),
+        axios
+          .get(`${backendUrl}/api/payments/youpi/admin/queue`, { headers })
+          .catch(() => ({ data: null })),
+        axios
+          .get(`${backendUrl}/api/payments/youpi/admin/security/suspended`, { headers })
           .catch(() => ({ data: null }))
       ]);
 
@@ -181,13 +210,28 @@ const AdminDashboard = () => {
         setYoupiAutoForm({
           backupVpas: Array.isArray(ac.backupVpas) ? ac.backupVpas.join(', ') : '',
           autoVerifyEnabled: ac.autoVerifyEnabled !== false,
-          autoReconcileObserved: ac.autoReconcileObserved !== false,
           imapHost: ac.imapHost || 'imap.gmail.com',
           imapPort: String(ac.imapPort || 993),
           imapUser: ac.imapUser || '',
           imapPass: ''
         });
         setYoupiObservations(autoRes.data.observations || []);
+        setYoupiDevices(autoRes.data.devices || []);
+        if (ac.primaryVpa) {
+          setStatementVpa((prev) => prev || ac.primaryVpa);
+          setStandQrForm((prev) => (prev.preferredVpa ? prev : { ...prev, preferredVpa: ac.primaryVpa }));
+        }
+      }
+      if (queueRes.data) {
+        setYoupiQueue({
+          receivingAccountId: queueRes.data.receivingAccountId || '',
+          currentSlot: queueRes.data.currentSlot || null,
+          queue: queueRes.data.queue || []
+        });
+      }
+      if (securityRes.data) {
+        setSuspendedUsers(securityRes.data.suspendedUsers || []);
+        setRecentFraudObs(securityRes.data.recentFraudObservations || []);
       }
     } catch (err) {
       setError(err.response?.data?.message || 'Failed to fetch data');
@@ -433,9 +477,12 @@ const AdminDashboard = () => {
       }
       setSuccess(
         action === 'approve'
-          ? 'YouPI payment reconciled — event pass & competitions unlocked.'
-          : 'YouPI payment marked as failed.'
+          ? `YouPI payment settled (${updated?.status || 'RECONCILED'}) — event pass & competitions unlocked.`
+          : updated?.status === 'MANUAL_REVIEW'
+            ? 'YouPI observation flagged for manual bank verification review.'
+            : 'YouPI payment marked as failed.'
       );
+      await fetchData();
     } catch (err) {
       setError(err.response?.data?.message || 'Failed to reconcile YouPI payment');
     } finally {
@@ -656,21 +703,143 @@ const AdminDashboard = () => {
       setReconcilingCsv(true);
       const csvText = await file.text();
       const token = localStorage.getItem('token');
+      const targetRecAcc = (statementVpa || youpiAutomation.primaryVpa || '').trim();
       const res = await axios.post(
-        `${backendUrl}/api/payments/youpi/admin/reconcile-csv`,
-        { csvText },
+        `${backendUrl}/api/payments/youpi/admin/statements/import`,
+        { receivingAccountId: targetRecAcc, csv: csvText },
         { headers: { Authorization: `Bearer ${token}` } }
       );
       if (res.data?.summary) setCsvSummary(res.data.summary);
       if (res.data?.observations) setYoupiObservations(res.data.observations);
+      const sum = res.data?.summary || {};
+      const settledCnt = sum.reconciled ?? sum.matchedCount ?? 0;
+      const conflictCnt = sum.conflicts ?? sum.ambiguousCount ?? 0;
       setSuccess(
-        `Processed ${res.data?.summary?.creditRows || 0} bank credit row(s) — ${res.data?.summary?.matchedCount || 0} session(s) settled.`
+        `Scanned ${sum.creditRows || 0} bank credit row(s) (${targetRecAcc || 'primary VPA'}) — ${settledCnt} settled, ${conflictCnt} conflict(s).`
       );
       await fetchData();
     } catch (err) {
       setError(err.response?.data?.message || 'Failed to process bank CSV statement.');
     } finally {
       setReconcilingCsv(false);
+    }
+  };
+
+  const handleRefreshQueue = async (overrideVpa = '') => {
+    try {
+      setError('');
+      const token = localStorage.getItem('token');
+      const vpa = (overrideVpa || youpiQueue.receivingAccountId || youpiAutomation.primaryVpa || '').trim();
+      const res = await axios.get(`${backendUrl}/api/payments/youpi/admin/queue`, {
+        params: vpa ? { receivingAccountId: vpa } : {},
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      if (res.data) {
+        setYoupiQueue({
+          receivingAccountId: res.data.receivingAccountId || vpa,
+          currentSlot: res.data.currentSlot || null,
+          queue: res.data.queue || []
+        });
+      }
+    } catch (err) {
+      setError(err.response?.data?.message || 'Failed to refresh payment queue.');
+    }
+  };
+
+  const handleGeneratePairQr = async (overrideVpa = '') => {
+    try {
+      setError('');
+      setSuccess('');
+      setGeneratingPairQr(true);
+      const token = localStorage.getItem('token');
+      const vpa = (overrideVpa || selectedDeviceVpa || youpiAutomation.primaryVpa || '').trim();
+      const res = await axios.get(`${backendUrl}/api/payments/youpi/admin/sms-gateway/pair-qr`, {
+        params: vpa ? { receivingAccountId: vpa } : {},
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      setPairQrData(res.data || null);
+      if (Array.isArray(res.data?.devices)) {
+        setYoupiDevices(res.data.devices);
+      }
+      setSuccess(`Generated Android SMS Gateway pairing QR for ${res.data?.receivingAccountId || vpa || 'primary VPA'}.`);
+    } catch (err) {
+      setError(err.response?.data?.message || 'Failed to generate Android pairing QR.');
+    } finally {
+      setGeneratingPairQr(false);
+    }
+  };
+
+  const handleRevokeAndroidDevice = async (deviceId) => {
+    try {
+      setError('');
+      setSuccess('');
+      const token = localStorage.getItem('token');
+      const res = await axios.post(
+        `${backendUrl}/api/payments/youpi/admin/sms-gateway/devices/${deviceId}/revoke`,
+        {},
+        { headers: { Authorization: `Bearer ${token}` } }
+      );
+      setSuccess(res.data?.message || 'Android SMS observer device revoked.');
+      await fetchData();
+    } catch (err) {
+      setError(err.response?.data?.message || 'Failed to revoke Android device.');
+    }
+  };
+
+  const handleDeleteAndroidDevice = async (deviceId) => {
+    if (!window.confirm('Permanently remove this Android SMS observer device?')) return;
+    try {
+      setError('');
+      setSuccess('');
+      const token = localStorage.getItem('token');
+      const res = await axios.delete(
+        `${backendUrl}/api/payments/youpi/admin/sms-gateway/devices/${deviceId}`,
+        { headers: { Authorization: `Bearer ${token}` } }
+      );
+      setSuccess(res.data?.message || 'Android SMS observer device removed.');
+      await fetchData();
+    } catch (err) {
+      setError(err.response?.data?.message || 'Failed to delete Android device.');
+    }
+  };
+
+  const handleUnbanUser = async (targetUser) => {
+    try {
+      setError('');
+      setSuccess('');
+      setUnbanningUserId(targetUser._id);
+      const token = localStorage.getItem('token');
+      const res = await axios.post(
+        `${backendUrl}/api/payments/youpi/admin/security/unban`,
+        { userId: targetUser._id },
+        { headers: { Authorization: `Bearer ${token}` } }
+      );
+      setSuccess(res.data?.message || `Security suspension cleared for ${targetUser.email}.`);
+      await fetchData();
+    } catch (err) {
+      setError(err.response?.data?.message || 'Failed to clear user suspension.');
+    } finally {
+      setUnbanningUserId('');
+    }
+  };
+
+  const handleGenerateStandQr = async (e) => {
+    if (e) e.preventDefault();
+    try {
+      setError('');
+      setGeneratingStandQr(true);
+      const params = {
+        mode: standQrForm.mode || '02'
+      };
+      if (standQrForm.preferredVpa) params.preferredVpa = standQrForm.preferredVpa;
+      if (standQrForm.tn?.trim()) params.tn = standQrForm.tn.trim();
+      if (standQrForm.mode === '04' && standQrForm.amount) params.amount = standQrForm.amount;
+      const res = await axios.get(`${backendUrl}/api/payments/youpi/stand-qr`, { params });
+      setStandQrResult(res.data || null);
+    } catch (err) {
+      setError(err.response?.data?.message || 'Failed to generate NPCI Stand QR.');
+    } finally {
+      setGeneratingStandQr(false);
     }
   };
 
@@ -686,16 +855,19 @@ const AdminDashboard = () => {
   const publishedCompsCount = competitions.filter((c) => c.status === 'published' || c.status === 'active').length;
   const organizerCount = users.filter((u) => u.role === 'organizer').length;
   const activeDepartments = departments.filter((d) => d.isActive !== false);
+  const authorizedVpas = Array.from(
+    new Set([youpiAutomation.primaryVpa, ...(youpiAutomation.backupVpas || [])].filter(Boolean))
+  );
 
   const statusBadgeClass = (status) => {
     const s = String(status || '').toLowerCase();
-    if (['approved', 'published', 'active', 'reconciled', 'success', 'observed_success'].includes(s)) {
+    if (['approved', 'published', 'active', 'reconciled', 'success', 'connected', 'clear'].includes(s)) {
       return 'bg-[#4cc38a]/10 text-[#4cc38a] border border-[#4cc38a]/25';
     }
-    if (['pending', 'upcoming', 'manual_review', 'queued', 'initiated'].includes(s)) {
+    if (['pending', 'upcoming', 'observed_success', 'manual_review', 'queued', 'processing', 'initiated', 'idle', 'standby', 'flagged'].includes(s)) {
       return 'bg-[#e09132]/10 text-[#ebb05d] border border-[#e09132]/25';
     }
-    if (['rejected', 'cancelled', 'failed', 'expired'].includes(s)) {
+    if (['rejected', 'cancelled', 'failed', 'expired', 'blocked', 'suspended', 'revoked', 'offline'].includes(s)) {
       return 'bg-[#e5484d]/10 text-[#e5484d] border border-[#e5484d]/25';
     }
     return 'bg-[#262421] text-[#aaa398] border border-[#efe9de]/[0.08]';
@@ -1726,15 +1898,15 @@ const AdminDashboard = () => {
           </div>
         ) : (
           <div className="divide-y divide-[#efe9de]/[0.08]">
-            {/* YouPI Automated Bank Verification, Multi-VPA Rotation & CSV Reconciliation */}
+            {/* YouPI-PG Zero-Trust Engine Configuration, Statement CSV & Bank Polling */}
             <div className="p-5 bg-[#161513]/70 space-y-5">
               <div className="flex flex-wrap items-start justify-between gap-3">
                 <div>
                   <h3 className="text-[15px] font-medium text-[#efe9de]">
-                    YouPI Automated Payment Verification &amp; Backup UPI Pool
+                    YouPI-PG Zero-Trust Automation, Backup VPA Pool &amp; CSV Settlement
                   </h3>
                   <p className="text-[12px] text-[#8a847a] mt-0.5">
-                    Configure backup receiver UPI IDs (for GPay day-limit bypass), enable real-time bank Gmail IMAP / SMS observer auto-reconciliation, or bulk-match bank CSV statements.
+                    Configure backup receiver UPI IDs, Gmail IMAP bank polling, or reconcile bank CSV statements across authorized receiving accounts.
                   </p>
                 </div>
                 <div className="flex flex-wrap items-center gap-2">
@@ -1756,7 +1928,18 @@ const AdminDashboard = () => {
                   >
                     {youpiAutomation.observerConfigured ? 'SMS/Webhook Bridge Armed' : 'Webhook Secret Unset'}
                   </span>
+                  <span className="px-2.5 py-1 rounded-[6px] text-[11px] font-mono border bg-[#e09132]/10 text-[#ebb05d] border-[#e09132]/25">
+                    Zero-Trust Mode
+                  </span>
                 </div>
+              </div>
+
+              <div className="rounded-[10px] bg-[#e09132]/10 border border-[#e09132]/30 px-4 py-3 text-[12px] text-[#d9ceb8] leading-relaxed">
+                <strong className="text-[#ebb05d]">Zero-Trust Settlement Invariant:</strong>{' '}
+                Live Gmail IMAP &amp; Android SMS observations move matching sessions to{' '}
+                <code className="font-mono text-[#ebb05d]">OBSERVED_SUCCESS (NOT_RECONCILED)</code> only.
+                Student event passes, certificates &amp; WhatsApp group links unlock <strong>exclusively</strong>{' '}
+                after 2-day IST CSV Bank Statement Reconciliation or manual Admin Approve below.
               </div>
 
               <div className="grid grid-cols-1 lg:grid-cols-12 gap-4">
@@ -1852,21 +2035,7 @@ const AdminDashboard = () => {
                         }
                         className="h-4 w-4 rounded-[4px] border-[#efe9de]/20 bg-[#262421] text-[#e09132]"
                       />
-                      <span>Enable automated bank polling while sessions are active</span>
-                    </label>
-                    <label className="inline-flex items-center gap-2 cursor-pointer">
-                      <input
-                        type="checkbox"
-                        checked={youpiAutoForm.autoReconcileObserved}
-                        onChange={(e) =>
-                          setYoupiAutoForm((p) => ({
-                            ...p,
-                            autoReconcileObserved: e.target.checked
-                          }))
-                        }
-                        className="h-4 w-4 rounded-[4px] border-[#efe9de]/20 bg-[#262421] text-[#e09132]"
-                      />
-                      <span>Auto-settle &amp; unlock passes on verified bank match</span>
+                      <span>Enable automated IMAP polling during active 300s/30s checkout windows</span>
                     </label>
                   </div>
 
@@ -1910,7 +2079,7 @@ const AdminDashboard = () => {
                     <p className="text-[11px] font-mono text-[#8a847a]">
                       Last IMAP sweep: {new Date(youpiAutomation.lastPollAt).toLocaleString()} ·{' '}
                       {youpiAutomation.lastPollResult?.ok
-                        ? `Scanned ${youpiAutomation.lastPollResult.scanned || 0}, Matched ${youpiAutomation.lastPollResult.matched || 0}`
+                        ? `Scanned ${youpiAutomation.lastPollResult.scanned || 0}, Observed ${youpiAutomation.lastPollResult.matched || 0}`
                         : youpiAutomation.lastPollResult?.error || 'Idle'}
                     </p>
                   )}
@@ -1918,29 +2087,55 @@ const AdminDashboard = () => {
 
                 {/* Bank CSV Bulk Reconciliation */}
                 <div className="lg:col-span-4 rounded-[12px] bg-[#12110f] border border-[#efe9de]/[0.08] p-4 flex flex-col justify-between space-y-3">
-                  <div className="space-y-1.5">
+                  <div className="space-y-2">
                     <span className="text-[13px] font-medium text-[#efe9de]">
-                      Bank CSV Statement Auto-Match
+                      Bank CSV Statement Reconciliation
                     </span>
                     <p className="text-[11.5px] text-[#8a847a] leading-relaxed">
-                      Upload your HDFC / SBI / ICICI / Axis CSV statement to match and reconcile pending YouPI sessions by UTR &amp; exact paise amount.
+                      Import your HDFC / SBI / ICICI / Axis CSV statement to settle{' '}
+                      <code className="font-mono text-[#ebb05d]">OBSERVED_SUCCESS</code> &amp;{' '}
+                      <code className="font-mono text-[#ebb05d]">MANUAL_REVIEW</code> sessions within the 2-day IST posting window.
                     </p>
-                    <p className="text-[10.5px] font-mono text-[#aaa398] break-all pt-1">
-                      SMS Webhook: {window.location.origin}/api/payments/youpi/observer/sms
-                    </p>
+
+                    {authorizedVpas.length > 0 && (
+                      <div>
+                        <label className="block text-[11px] text-[#aaa398] mb-1">
+                          Statement Receiving Account (VPA)
+                        </label>
+                        <select
+                          aria-label="Statement Receiving VPA"
+                          value={statementVpa || authorizedVpas[0]}
+                          onChange={(e) => setStatementVpa(e.target.value)}
+                          className="input-field h-8 text-[11.5px] font-mono py-0"
+                        >
+                          {authorizedVpas.map((vpa) => (
+                            <option key={vpa} value={vpa}>
+                              {vpa}
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+                    )}
+
+                    <div className="text-[10px] font-mono text-[#8a847a] space-y-0.5 break-all pt-1">
+                      <div>Android App Endpoint: {(backendUrl || window.location.origin)}/api/payments/youpi/pollers/android/events</div>
+                      <div>Secret SMS Bridge: {(backendUrl || window.location.origin)}/api/payments/youpi/observer/sms</div>
+                    </div>
                   </div>
 
                   {csvSummary && (
                     <div className="p-2.5 rounded-[8px] bg-[#1c1a18] border border-[#efe9de]/[0.08] text-[11px] font-mono space-y-0.5 text-[#d9ceb8]">
-                      <div>Credit rows: {csvSummary.creditRows}</div>
-                      <div className="text-[#4cc38a]">Settled: {csvSummary.matchedCount}</div>
-                      <div className="text-[#ebb05d]">Ambiguous held: {csvSummary.ambiguousCount}</div>
-                      <div className="text-[#8a847a]">Unmatched/Dup: {csvSummary.unattributedCount + csvSummary.duplicateCount}</div>
+                      <div>Credit rows parsed: {csvSummary.creditRows || 0}</div>
+                      <div className="text-[#4cc38a]">Reconciled (RECONCILED): {csvSummary.reconciled ?? csvSummary.matchedCount ?? 0}</div>
+                      <div className="text-[#ebb05d]">Conflicts / Held: {csvSummary.conflicts ?? csvSummary.ambiguousCount ?? 0}</div>
+                      <div className="text-[#8a847a]">
+                        Unmatched / Dup: {(csvSummary.unmatched ?? csvSummary.unattributedCount ?? 0) + (csvSummary.duplicateCount || 0)}
+                      </div>
                     </div>
                   )}
 
                   <label className="btn-primary h-9 px-3 text-[12px] cursor-pointer text-center">
-                    <span>{reconcilingCsv ? 'Reconciling CSV...' : 'Upload Bank Statement (.csv)'}</span>
+                    <span>{reconcilingCsv ? 'Reconciling CSV...' : 'Import Bank Statement (.csv)'}</span>
                     <input
                       type="file"
                       accept=".csv,text/csv"
@@ -1951,17 +2146,304 @@ const AdminDashboard = () => {
                   </label>
                 </div>
               </div>
+
+              {/* Android SMS Gateway Pairing, Live FIFO Queue Monitor & NPCI Stand QR */}
+              <div className="grid grid-cols-1 lg:grid-cols-12 gap-4">
+                {/* Android SMS Gateway Pairing & Paired Devices */}
+                <div className="lg:col-span-5 rounded-[12px] bg-[#12110f] border border-[#efe9de]/[0.08] p-4 space-y-3">
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <div>
+                      <h4 className="text-[13px] font-medium text-[#efe9de]">
+                        Android SMS Gateway Pairing (HMAC)
+                      </h4>
+                      <p className="text-[11px] text-[#8a847a]">
+                        Pair an Android companion phone via QR to forward bank SMS &amp; GPay/PhonePe/Paytm alerts securely.
+                      </p>
+                    </div>
+                    <span className="px-2 py-0.5 rounded-[5px] text-[10.5px] font-mono bg-[#262421] text-[#ebb05d] border border-[#efe9de]/[0.08]">
+                      {youpiDevices.filter((d) => d.isActive).length} active device(s)
+                    </span>
+                  </div>
+
+                  <div className="flex flex-wrap items-center gap-2">
+                    {authorizedVpas.length > 0 && (
+                      <select
+                        aria-label="Receiving VPA for Android SMS Gateway"
+                        value={selectedDeviceVpa || authorizedVpas[0]}
+                        onChange={(e) => setSelectedDeviceVpa(e.target.value)}
+                        className="input-field h-8 text-[11.5px] font-mono py-0 flex-1 min-w-[160px]"
+                      >
+                        {authorizedVpas.map((vpa) => (
+                          <option key={vpa} value={vpa}>
+                            {vpa}
+                          </option>
+                        ))}
+                      </select>
+                    )}
+                    <button
+                      type="button"
+                      disabled={generatingPairQr}
+                      onClick={() => handleGeneratePairQr()}
+                      className="btn-secondary h-8 px-3 text-[11.5px] shrink-0"
+                    >
+                      {generatingPairQr ? 'Generating...' : 'Generate Pairing QR'}
+                    </button>
+                  </div>
+
+                  {pairQrData?.qrSvg && (
+                    <div className="rounded-[10px] bg-[#161513] border border-[#efe9de]/[0.08] p-3 flex flex-col sm:flex-row items-center gap-3">
+                      <div className="bg-white p-2 rounded-[8px] shrink-0">
+                        <img
+                          src={`data:image/svg+xml;charset=utf-8,${encodeURIComponent(pairQrData.qrSvg)}`}
+                          alt="Android SMS Gateway Pairing QR"
+                          className="w-28 h-28 block"
+                        />
+                      </div>
+                      <div className="min-w-0 space-y-1 text-[11px]">
+                        <div className="font-medium text-[#efe9de]">Scan inside YouPI Android Companion</div>
+                        <div className="font-mono text-[#ebb05d] break-all">
+                          VPA: {pairQrData.receivingAccountId}
+                        </div>
+                        <div className="text-[#8a847a]">
+                          Signed with SHA-256 HMAC per device · 60s replay guard
+                        </div>
+                      </div>
+                    </div>
+                  )}
+
+                  {youpiDevices.length > 0 ? (
+                    <div className="space-y-2 max-h-48 overflow-y-auto pr-1">
+                      {youpiDevices.map((dev) => (
+                        <div
+                          key={dev.deviceId}
+                          className="rounded-[8px] bg-[#161513] border border-[#efe9de]/[0.06] px-3 py-2 flex items-center justify-between gap-2 text-[11px]"
+                        >
+                          <div className="min-w-0">
+                            <div className="flex items-center gap-2">
+                              <span className="font-medium text-[#efe9de] truncate">
+                                {dev.deviceName || dev.deviceModel || 'Android Observer'}
+                              </span>
+                              <span
+                                className={`px-1.5 py-0.5 rounded-[4px] font-mono text-[10px] ${statusBadgeClass(
+                                  dev.connectionStatus || (dev.isActive ? 'standby' : 'revoked')
+                                )}`}
+                              >
+                                {dev.connectionStatus || (dev.isActive ? 'STANDBY' : 'REVOKED')}
+                              </span>
+                            </div>
+                            <div className="font-mono text-[10px] text-[#8a847a] truncate mt-0.5">
+                              {dev.receivingAccountId || 'All VPAs'} · ID: {String(dev.deviceId).slice(0, 8)}…
+                            </div>
+                          </div>
+                          <div className="flex items-center gap-1.5 shrink-0">
+                            {dev.isActive && (
+                              <button
+                                type="button"
+                                onClick={() => handleRevokeAndroidDevice(dev.deviceId)}
+                                className="px-2 py-1 rounded-[5px] text-[10.5px] font-medium text-[#ebb05d] bg-[#e09132]/10 border border-[#e09132]/25 hover:bg-[#e09132]/20"
+                              >
+                                Revoke
+                              </button>
+                            )}
+                            <button
+                              type="button"
+                              onClick={() => handleDeleteAndroidDevice(dev.deviceId)}
+                              className="px-2 py-1 rounded-[5px] text-[10.5px] font-medium text-[#e5484d] bg-[#e5484d]/10 border border-[#e5484d]/25 hover:bg-[#e5484d]/20"
+                            >
+                              Remove
+                            </button>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  ) : (
+                    <p className="text-[11px] text-[#8a847a]">
+                      No Android SMS Gateway devices paired yet. Generate a QR above to link a phone.
+                    </p>
+                  )}
+                </div>
+
+                {/* Live FIFO Single-Slot Queue Monitor */}
+                <div className="lg:col-span-4 rounded-[12px] bg-[#12110f] border border-[#efe9de]/[0.08] p-4 space-y-3">
+                  <div className="flex items-center justify-between gap-2">
+                    <div>
+                      <h4 className="text-[13px] font-medium text-[#efe9de]">
+                        Live FIFO Payment Slot Monitor
+                      </h4>
+                      <p className="text-[11px] text-[#8a847a]">
+                        1 active checkout per receiving VPA at any time; others queue in strict FIFO order.
+                      </p>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => handleRefreshQueue()}
+                      className="btn-secondary h-7 px-2.5 text-[11px] shrink-0"
+                    >
+                      Refresh
+                    </button>
+                  </div>
+
+                  {authorizedVpas.length > 0 && (
+                    <select
+                      aria-label="Inspect Queue for VPA"
+                      value={youpiQueue.receivingAccountId || authorizedVpas[0]}
+                      onChange={(e) => handleRefreshQueue(e.target.value)}
+                      className="input-field h-8 text-[11.5px] font-mono py-0"
+                    >
+                      {authorizedVpas.map((vpa) => (
+                        <option key={vpa} value={vpa}>
+                          Slot Pool: {vpa}
+                        </option>
+                      ))}
+                    </select>
+                  )}
+
+                  {youpiQueue.currentSlot ? (
+                    <div className="rounded-[9px] bg-[#161513] border border-[#4cc38a]/25 p-3 space-y-1 text-[11.5px]">
+                      <div className="flex items-center justify-between gap-2">
+                        <span className="font-mono text-[#4cc38a] font-semibold">
+                          ACTIVE SLOT HOLDER
+                        </span>
+                        <span className={`px-1.5 py-0.5 rounded-[4px] font-mono text-[10px] ${statusBadgeClass(youpiQueue.currentSlot.status)}`}>
+                          {youpiQueue.currentSlot.status}
+                        </span>
+                      </div>
+                      <div className="font-mono text-[#efe9de]">
+                        {youpiQueue.currentSlot.orderId} · ₹{((Number(youpiQueue.currentSlot.amountPaise) || 0) / 100).toFixed(2)}
+                      </div>
+                      <div className="text-[#8a847a] truncate">
+                        {youpiQueue.currentSlot.event?.title || 'Event checkout'} · Method: {youpiQueue.currentSlot.method || 'UPI'}
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="rounded-[9px] bg-[#161513] border border-[#efe9de]/[0.06] p-3 text-[11.5px] text-[#8a847a]">
+                      Slot idle — next checkout acquires immediately without queuing.
+                    </div>
+                  )}
+
+                  <div className="space-y-1.5">
+                    <div className="text-[11px] font-mono text-[#aaa398]">
+                      Waiting Queue ({youpiQueue.queue?.length || 0})
+                    </div>
+                    {(youpiQueue.queue || []).length === 0 ? (
+                      <p className="text-[11px] text-[#8a847a]">No sessions waiting in queue.</p>
+                    ) : (
+                      <div className="space-y-1.5 max-h-32 overflow-y-auto pr-1">
+                        {youpiQueue.queue.map((q) => (
+                          <div
+                            key={q.paymentId}
+                            className="rounded-[7px] bg-[#161513] border border-[#efe9de]/[0.06] px-2.5 py-1.5 flex items-center justify-between text-[11px] font-mono"
+                          >
+                            <span className="text-[#ebb05d]">#{q.queuePosition}</span>
+                            <span className="text-[#efe9de] truncate mx-2">{q.orderId}</span>
+                            <span className="text-[#aaa398]">₹{((Number(q.amountPaise) || 0) / 100).toFixed(2)}</span>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                </div>
+
+                {/* NPCI Stand QR Generator (mode=02 Static / mode=04 Fixed Amount) */}
+                <form
+                  onSubmit={handleGenerateStandQr}
+                  className="lg:col-span-3 rounded-[12px] bg-[#12110f] border border-[#efe9de]/[0.08] p-4 space-y-2.5"
+                >
+                  <div>
+                    <h4 className="text-[13px] font-medium text-[#efe9de]">
+                      NPCI Desk Stand QR
+                    </h4>
+                    <p className="text-[11px] text-[#8a847a]">
+                      Printable booth QR (`mode=02` open or `mode=04` fixed INR).
+                    </p>
+                  </div>
+
+                  {authorizedVpas.length > 0 && (
+                    <select
+                      aria-label="Stand QR Payee VPA"
+                      value={standQrForm.preferredVpa || authorizedVpas[0]}
+                      onChange={(e) =>
+                        setStandQrForm((p) => ({ ...p, preferredVpa: e.target.value }))
+                      }
+                      className="input-field h-8 text-[11.5px] font-mono py-0"
+                    >
+                      {authorizedVpas.map((vpa) => (
+                        <option key={vpa} value={vpa}>
+                          {vpa}
+                        </option>
+                      ))}
+                    </select>
+                  )}
+
+                  <div className="grid grid-cols-2 gap-2">
+                    <select
+                      aria-label="NPCI Stand QR Mode"
+                      value={standQrForm.mode}
+                      onChange={(e) =>
+                        setStandQrForm((p) => ({ ...p, mode: e.target.value }))
+                      }
+                      className="input-field h-8 text-[11.5px] font-mono py-0"
+                    >
+                      <option value="02">Static (02)</option>
+                      <option value="04">Fixed Amt (04)</option>
+                    </select>
+                    <input
+                      type="number"
+                      min="1"
+                      step="1"
+                      disabled={standQrForm.mode !== '04'}
+                      placeholder={standQrForm.mode === '04' ? 'INR Amount' : 'Open amount'}
+                      value={standQrForm.amount}
+                      onChange={(e) =>
+                        setStandQrForm((p) => ({ ...p, amount: e.target.value }))
+                      }
+                      className="input-field h-8 text-[11.5px] font-mono disabled:opacity-45"
+                    />
+                  </div>
+
+                  <input
+                    type="text"
+                    placeholder="Desk note (e.g. Avenor Desk)"
+                    value={standQrForm.tn}
+                    onChange={(e) => setStandQrForm((p) => ({ ...p, tn: e.target.value }))}
+                    className="input-field h-8 text-[11.5px]"
+                  />
+
+                  <button
+                    type="submit"
+                    disabled={generatingStandQr}
+                    className="btn-secondary h-8 w-full text-[11.5px]"
+                  >
+                    {generatingStandQr ? 'Generating QR...' : 'Generate NPCI Stand QR'}
+                  </button>
+
+                  {standQrResult?.qrSvg && (
+                    <div className="pt-1 flex flex-col items-center gap-1.5">
+                      <div className="bg-white p-2 rounded-[8px]">
+                        <img
+                          src={`data:image/svg+xml;charset=utf-8,${encodeURIComponent(standQrResult.qrSvg)}`}
+                          alt="NPCI Stand QR"
+                          className="w-28 h-28 block"
+                        />
+                      </div>
+                      <span className="text-[10px] font-mono text-[#8a847a] text-center break-all line-clamp-2">
+                        {standQrResult.upiUri}
+                      </span>
+                    </div>
+                  )}
+                </form>
+              </div>
             </div>
 
             <div className="overflow-x-auto">
               <table className="min-w-full divide-y divide-[#efe9de]/[0.06]">
                 <thead className="bg-[#12110f]/50">
                   <tr>
-                    <th className="px-5 py-3 text-left text-[12px] font-medium text-[#8a847a]">Order &amp; UTR</th>
+                    <th className="px-5 py-3 text-left text-[12px] font-medium text-[#8a847a]">Order, Method &amp; UTR</th>
                     <th className="px-5 py-3 text-left text-[12px] font-medium text-[#8a847a]">Event</th>
                     <th className="px-5 py-3 text-left text-[12px] font-medium text-[#8a847a]">Student</th>
                     <th className="px-5 py-3 text-left text-[12px] font-medium text-[#8a847a]">Amount</th>
-                    <th className="px-5 py-3 text-left text-[12px] font-medium text-[#8a847a]">Status</th>
+                    <th className="px-5 py-3 text-left text-[12px] font-medium text-[#8a847a]">Status &amp; Settlement</th>
                     <th className="px-5 py-3 text-left text-[12px] font-medium text-[#8a847a]">Actions</th>
                   </tr>
                 </thead>
@@ -1978,16 +2460,23 @@ const AdminDashboard = () => {
                         'MANUAL_REVIEW',
                         'ACTIVE',
                         'PROCESSING',
+                        'QUEUED',
                         'OBSERVED_SUCCESS'
                       ].includes(ps.status);
                       const busy = reconcilingId === ps.paymentId;
                       return (
                         <tr key={ps.paymentId} className="hover:bg-[#262421]/40 transition-colors duration-150">
                           <td className="px-5 py-3.5 whitespace-nowrap text-[12px] font-mono">
-                            <div className="text-[#efe9de]">{ps.orderId}</div>
+                            <div className="text-[#efe9de] flex items-center gap-1.5">
+                              <span>{ps.orderId}</span>
+                              <span className="px-1.5 py-0.5 rounded-[4px] bg-[#262421] text-[10px] text-[#aaa398]">
+                                {ps.method || 'UPI'}
+                              </span>
+                            </div>
                             <div className="text-[#8a847a] mt-0.5">
-                              {ps.utr ? `UTR: ${ps.utr}` : ps.gatewayMode.toUpperCase()}
+                              {ps.utr ? `UTR: ${ps.utr}` : 'Awaiting UTR'}
                               {ps.payeeVpa ? ` · ${ps.payeeVpa}` : ''}
+                              {ps.queuePosition > 0 ? ` · Q#${ps.queuePosition}` : ''}
                             </div>
                           </td>
                           <td className="px-5 py-3.5 whitespace-nowrap text-[13px] text-[#efe9de]">
@@ -2003,13 +2492,19 @@ const AdminDashboard = () => {
                             {ps.currency} {ps.amountDisplay}
                           </td>
                           <td className="px-5 py-3.5 whitespace-nowrap">
-                            <span
-                              className={`inline-flex px-2 py-0.5 rounded-[6px] text-[11px] font-mono ${statusBadgeClass(
-                                ps.status
-                              )}`}
-                            >
-                              {ps.status}
-                            </span>
+                            <div className="flex flex-col items-start gap-1">
+                              <span
+                                className={`inline-flex px-2 py-0.5 rounded-[6px] text-[11px] font-mono ${statusBadgeClass(
+                                  ps.status
+                                )}`}
+                              >
+                                {ps.status}
+                              </span>
+                              <span className="text-[10.5px] font-mono text-[#8a847a]">
+                                {ps.settlementState || 'PENDING'}
+                                {ps.verificationTag ? ` · ${ps.verificationTag}` : ''}
+                              </span>
+                            </div>
                           </td>
                           <td className="px-5 py-3.5 whitespace-nowrap text-[12px]">
                             {canReconcile ? (
@@ -2043,6 +2538,80 @@ const AdminDashboard = () => {
                   )}
                 </tbody>
               </table>
+            </div>
+
+            {/* Fraud Security & Suspended Identities Panel */}
+            <div className="p-5 bg-[#161513]/50 space-y-3">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <div>
+                  <h4 className="text-[13.5px] font-medium text-[#efe9de]">
+                    Fraud Security &amp; Auto-Suspended Identities ({suspendedUsers.length})
+                  </h4>
+                  <p className="text-[11.5px] text-[#8a847a]">
+                    Stage 5 spoofing defense automatically suspends accounts linked to spoofed bank SMS/email sender injections.
+                  </p>
+                </div>
+                <span
+                  className={`px-2.5 py-0.5 rounded-[5px] text-[11px] font-mono border ${
+                    suspendedUsers.length > 0
+                      ? 'bg-[#e5484d]/10 text-[#e5484d] border-[#e5484d]/30'
+                      : 'bg-[#4cc38a]/10 text-[#4cc38a] border-[#4cc38a]/25'
+                  }`}
+                >
+                  {suspendedUsers.length > 0 ? `${suspendedUsers.length} Suspended` : 'All Clear'}
+                </span>
+              </div>
+
+              {suspendedUsers.length > 0 && (
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-2.5">
+                  {suspendedUsers.map((su) => (
+                    <div
+                      key={su._id}
+                      className="rounded-[10px] bg-[#12110f] border border-[#e5484d]/30 p-3 flex items-center justify-between gap-3"
+                    >
+                      <div className="min-w-0">
+                        <div className="flex items-center gap-2">
+                          <span className="text-[13px] font-medium text-[#efe9de] truncate">
+                            {su.name}
+                          </span>
+                          <span className={`px-1.5 py-0.5 rounded-[4px] font-mono text-[10px] ${statusBadgeClass(su.paymentSecurityStatus)}`}>
+                            {su.paymentSecurityStatus}
+                          </span>
+                        </div>
+                        <div className="text-[11px] font-mono text-[#8a847a] truncate">
+                          {su.email}
+                        </div>
+                        {su.paymentSecurityReason && (
+                          <div className="text-[11px] text-[#e5484d] truncate mt-0.5">
+                            {su.paymentSecurityReason}
+                          </div>
+                        )}
+                      </div>
+                      <button
+                        type="button"
+                        disabled={unbanningUserId === su._id}
+                        onClick={() => handleUnbanUser(su)}
+                        className="h-8 px-3 rounded-[6px] text-[11.5px] font-medium text-[#4cc38a] bg-[#4cc38a]/10 border border-[#4cc38a]/25 hover:bg-[#4cc38a]/20 shrink-0"
+                      >
+                        {unbanningUserId === su._id ? 'Unbanning...' : 'Unban / Clear Flag'}
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              {recentFraudObs.length > 0 && (
+                <div className="rounded-[9px] bg-[#12110f] border border-[#e5484d]/20 p-3 space-y-1.5">
+                  <div className="text-[11px] font-mono text-[#e5484d] uppercase">
+                    Recent Spoof / Fraud Rejection Audit ({recentFraudObs.length})
+                  </div>
+                  {recentFraudObs.slice(0, 5).map((fo) => (
+                    <div key={fo._id} className="text-[11px] font-mono text-[#aaa398] truncate">
+                      [{new Date(fo.createdAt).toLocaleString()}] {fo.source} · Sender: {fo.sender || 'unknown'} · {fo.reason || fo.rawSnippet}
+                    </div>
+                  ))}
+                </div>
+              )}
             </div>
 
             {youpiObservations.length > 0 && (

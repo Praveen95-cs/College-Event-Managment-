@@ -5,14 +5,25 @@ import { QrCodeIcon, ArrowRightIcon, ShieldCheckIcon } from '@heroicons/react/24
 const UPIPayment = ({
   eventId = '',
   paymentId = '',
+  orderId = '',
   amount = 99,
   upiId = '',
-  businessName = 'Praveen S'
+  businessName = 'Avenor Campus Events'
 }) => {
   const safeVpa = String(upiId || '').trim();
-  const safeName = encodeURIComponent(String(businessName || 'Avenor Campus Events').trim());
   const safeAmt = Number(amount || 0).toFixed(2);
-  const upiLink = safeVpa ? `upi://pay?pa=${safeVpa}&pn=${safeName}&am=${safeAmt}&cu=INR` : '';
+  let upiLink = '';
+  if (safeVpa) {
+    const params = new URLSearchParams();
+    params.set('pa', safeVpa);
+    params.set('pn', String(businessName || 'Avenor Campus Events').trim());
+    params.set('am', safeAmt);
+    if (orderId) {
+      params.set('tn', String(orderId).trim());
+    }
+    upiLink = `upi://pay?${params.toString()}`;
+  }
+
   const targetRoute = paymentId
     ? `/payment/${paymentId}`
     : eventId
@@ -31,7 +42,7 @@ const UPIPayment = ({
           </div>
           <span className="inline-flex items-center gap-1 text-[11px] font-mono text-[#4cc38a]">
             <ShieldCheckIcon className="h-3.5 w-3.5" />
-            <span>0% Fee</span>
+            <span>Zero-Trust · 0% Fee</span>
           </span>
         </div>
 

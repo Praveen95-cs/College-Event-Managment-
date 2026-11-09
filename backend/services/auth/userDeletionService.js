@@ -6,7 +6,9 @@ const Registration = require('../../models/events/Registration');
 const Competition = require('../../models/competitions/Competition');
 const AssessmentAssignment = require('../../models/competitions/AssessmentAssignment');
 const YoupiPaymentSession = require('../../models/payments/YoupiPaymentSession');
+const YoupiStatementLine = require('../../models/payments/YoupiStatementLine');
 const Notification = require('../../models/community/Notification');
+const { promoteNext, reindexQueue, normalizeReceivingAccountId } = require('../payments/youpiGatewayService');
 const Message = require('../../models/community/Message');
 const Club = require('../../models/feed/Club');
 const ClubFollow = require('../../models/feed/ClubFollow');
@@ -58,6 +60,25 @@ async function cascadeDeleteUser(targetUserId, actingAdminId) {
   // Clear dangling attendanceMarkedBy references if organizer is deleted
   await Registration.updateMany({ attendanceMarkedBy: uid }, { $set: { attendanceMarkedBy: null } });
 
+  // Capture any held FIFO slots/queued sessions owned by the deleted user so deleting never wedges the queue
+  const userYoupiSessions = await YoupiPaymentSession.find({ user: uid })
+    .select('_id receivingAccountId payeeVpa slotLockActive status')
+    .lean();
+  const affectedRecAccounts = Array.from(
+    new Set(
+      userYoupiSessions
+        .filter(s => s.slotLockActive || s.status === 'QUEUED')
+        .map(s => s.receivingAccountId || normalizeReceivingAccountId(s.payeeVpa))
+        .filter(Boolean)
+    )
+  );
+  if (userYoupiSessions.length > 0) {
+    await YoupiStatementLine.updateMany(
+      { paymentSessionId: { $in: userYoupiSessions.map(s => s._id) } },
+      { $set: { paymentSessionId: null } }
+    ).catch(() => {});
+  }
+
   // 2. Clean up exam assignments, YouPI sessions, notifications, messages, OTPs
   const [assignDelRes, youpiDelRes] = await Promise.all([
     AssessmentAssignment.deleteMany({ user: uid }),
@@ -66,6 +87,11 @@ async function cascadeDeleteUser(targetUserId, actingAdminId) {
     Message.deleteMany({ user: uid }),
     EmailOtp.deleteMany({ email: target.email })
   ]);
+
+  for (const recAcc of affectedRecAccounts) {
+    await promoteNext(recAcc).catch(() => {});
+    await reindexQueue(recAcc).catch(() => {});
+  }
 
   // 3. Social follow / like / save / comment count reconciliation
   const [userFollows, userLikes, userSaves, commentCountsByPost] = await Promise.all([

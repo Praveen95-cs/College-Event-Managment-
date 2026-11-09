@@ -116,7 +116,12 @@ app.post(
   express.raw({ type: 'application/json', limit: '1mb' }),
   youpiRouter.handleYoupiWebhook
 );
-app.use(express.json({ limit: '4mb' }));
+app.use(express.json({
+  limit: '4mb',
+  verify: (req, _res, buf) => {
+    req.rawBody = buf.toString('utf8');
+  }
+}));
 app.use(express.urlencoded({ extended: true, limit: '4mb' }));
 app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
 app.use('/uploads', (req, res) => res.status(404).json({ message: 'Media asset not found' }));
@@ -251,6 +256,13 @@ async function start() {
   await ensureAllPublishedEventsSynced(true).catch(err => console.warn('Initial feed sync note:', err.message));
   const { startExpiredEventScheduler } = require('./services/events/eventCleanupService');
   startExpiredEventScheduler();
+  const YoupiPaymentSession = require('./models/payments/YoupiPaymentSession');
+  const YoupiBankObservation = require('./models/payments/YoupiBankObservation');
+  const { sanitizeLegacySlotLocks, startYoupiReaperDaemon } = require('./services/payments/youpiGatewayService');
+  await sanitizeLegacySlotLocks().catch(err => console.warn('YouPI slot sanitization note:', err.message));
+  await YoupiPaymentSession.syncIndexes().catch(err => console.warn('YouPI session index sync note:', err.message));
+  await YoupiBankObservation.syncIndexes().catch(err => console.warn('YouPI observation index sync note:', err.message));
+  startYoupiReaperDaemon();
   const { startPaymentAutomationScheduler } = require('./services/payments/paymentAutomationService');
   startPaymentAutomationScheduler();
   app.listen(PORT, '0.0.0.0', () => console.log(`Server running on port ${PORT}`));

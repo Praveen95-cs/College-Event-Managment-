@@ -9,6 +9,7 @@ process.env.RESEND_API_KEY = '';
 process.env.EMAIL_WEBHOOK_URL = '';
 process.env.EMAIL_WEBHOOK_SECRET = '';
 process.env.DISABLE_DB_EMAIL_SETTINGS = 'true';
+process.env.PAYMENT_GRACE_PERIOD_MS = '0';
 const mongoose = require('mongoose');
 const assert = require('assert');
 
@@ -49,6 +50,8 @@ const {
   toPaise,
   toRupeesString,
   buildUpiUri,
+  buildStandUpiUri,
+  buildStandQrData,
   getYoupiConfig,
   signWebhookPayload,
   verifyYoupiWebhook,
@@ -56,22 +59,37 @@ const {
   submitUtrAndProcessSession,
   switchSessionVpa,
   markSessionProcessing,
+  cancelYoupiSession,
   reconcileSessionByAdmin,
-  processIncomingWebhook
+  processIncomingWebhook,
+  runReaperTick,
+  sanitizeLegacySlotLocks,
+  stopYoupiReaperDaemon
 } = require('../services/payments/youpiGatewayService');
 const YoupiPaymentSession = require('../models/payments/YoupiPaymentSession');
 const YoupiWebhookReceipt = require('../models/payments/YoupiWebhookReceipt');
 const YoupiBankObservation = require('../models/payments/YoupiBankObservation');
+const YoupiStatementLine = require('../models/payments/YoupiStatementLine');
+const YoupiAndroidDevice = require('../models/payments/YoupiAndroidDevice');
 const {
   isAuthorizedBankEmailSender,
+  isPureNumericSender,
   isLikelyBankSmsSender,
   BankEmailParser,
   BankSmsParser,
-  parseStatementCsv
+  parseStatementCsv,
+  calendarDateInIndia,
+  addCalendarDays
 } = require('../services/payments/bankAlertParserService');
 const {
   ingestBankObservation,
-  reconcileStatementCsv
+  reconcileStatementCsv,
+  pairAndroidDevice,
+  verifyAndroidDeviceHmac,
+  revokeAndroidDevice,
+  deleteAndroidDevice,
+  stopPaymentAutomationScheduler,
+  destroyAttributionTimers
 } = require('../services/payments/paymentAutomationService');
 const emailService = require('../services/email/emailService');
 const competitionsRouter = require('../routes/competitions/competitions');
@@ -107,6 +125,7 @@ async function runTestSuite() {
       await mongoose.connect(process.env.MONGODB_URI, { serverSelectionTimeoutMS: 5000 });
     }
   }
+  await sanitizeLegacySlotLocks();
 
   // TEST 1: Gemini Model Verification & Free-Tier Check
   await test('Gemini Service - Model verification on account free tier', async () => {
@@ -812,7 +831,7 @@ if input_data:
       isPaid: true,
       registrationFee: 249,
       currency: 'INR',
-      paymentUpiId: 'clubtreasury@okhdfcbank',
+      paymentUpiId: `clubtreasury.${Date.now()}@okhdfcbank`,
       organizer: orgId
     });
 
@@ -853,19 +872,49 @@ if input_data:
       const blocked = await competitionsRouter.evaluateCompetitionAccess(comp, studentA);
       assert.strictEqual(blocked.allowed, false, 'Student A must be blocked before paying');
 
-      // 2. Create session with real club VPA
+      // 2. Verify standard UPI session rejects manual UTR submission (409 AUTOMATIC_UPI_ONLY)
+      const upiAutoSess = await createYoupiPaymentSession({
+        eventId: paidEvent._id.toString(),
+        user: studentA,
+        body: { name: studentA.name, regNo: '26CS101', method: 'UPI' }
+      });
+      assert.strictEqual(upiAutoSess.session.method, 'UPI');
+      let autoOnlyRejected = false;
+      try {
+        await submitUtrAndProcessSession({
+          paymentId: upiAutoSess.session.paymentId,
+          user: studentA,
+          body: { utr: '412899887766' }
+        });
+      } catch (err) {
+        autoOnlyRejected = err.status === 409 && err.code === 'AUTOMATIC_UPI_ONLY';
+      }
+      assert.strictEqual(autoOnlyRejected, true, 'Standard UPI session must reject manual UTR with 409 AUTOMATIC_UPI_ONLY');
+      await cancelYoupiSession({ paymentId: upiAutoSess.session.paymentId, user: studentA });
+
+      // 3. Create MANUAL_UPI session with real club VPA -> submit UTR -> MANUAL_REVIEW -> Admin Reconcile -> Unlock
       const created = await createYoupiPaymentSession({
         eventId: paidEvent._id.toString(),
         user: studentA,
-        body: { name: studentA.name, regNo: '26CS101' }
+        body: { name: studentA.name, regNo: '26CS101', method: 'MANUAL_UPI', forceNew: true }
       });
       createdOrderIdA = created.session.orderId;
       assert.strictEqual(created.isPaidEvent, true);
+      assert.strictEqual(created.session.method, 'MANUAL_UPI');
       assert.strictEqual(created.session.amountPaise, '24900');
       assert.strictEqual(created.session.allowDemoUtr, false);
       assert(created.session.qrSvg.includes('<svg'), 'Session must return QR SVG');
 
-      // 3. Submit UTR -> strictly enters MANUAL_REVIEW and does NOT unlock competition yet
+      // Verify MANUAL_UPI rejects markSessionProcessing with 409 MANUAL_UPI_ONLY
+      let manualOnlyRejected = false;
+      try {
+        await markSessionProcessing({ paymentId: created.session.paymentId, user: studentA });
+      } catch (err) {
+        manualOnlyRejected = err.status === 409 && err.code === 'MANUAL_UPI_ONLY';
+      }
+      assert.strictEqual(manualOnlyRejected, true, 'MANUAL_UPI session must reject /payment-done with 409 MANUAL_UPI_ONLY');
+
+      // Submit UTR -> strictly enters MANUAL_REVIEW and does NOT unlock competition yet
       const uniqueUtr = `4128${Date.now().toString().slice(-8)}`;
       const submitted = await submitUtrAndProcessSession({
         paymentId: created.session.paymentId,
@@ -874,6 +923,7 @@ if input_data:
       });
       assert.strictEqual(submitted.session.status, 'MANUAL_REVIEW');
       assert.strictEqual(submitted.session.settled, false);
+      assert.strictEqual(submitted.session.slotLockActive, false, 'Submitting MANUAL_UPI UTR must release active slot lock');
       assert.strictEqual(submitted.registration.paymentStatus, 'pending');
 
       const stillLocked = await competitionsRouter.evaluateCompetitionAccess(comp, studentA);
@@ -898,7 +948,7 @@ if input_data:
       const sessionB = await createYoupiPaymentSession({
         eventId: paidEvent._id.toString(),
         user: studentB,
-        body: { name: studentB.name, regNo: '26CS102' }
+        body: { name: studentB.name, regNo: '26CS102', method: 'MANUAL_UPI' }
       });
       createdOrderIdB = sessionB.session.orderId;
       let dupBlocked = false;
@@ -1014,7 +1064,7 @@ if input_data:
       isPaid: true,
       registrationFee: 199,
       currency: 'INR',
-      paymentUpiId: 'praveensumathi12-1@okaxis',
+      paymentUpiId: `wa.${uniqueSuffix}@okaxis`,
       whatsappGroupLink: 'https://chat.whatsapp.com/AvenorTestGroupLink99',
       autoDeleteWhenExpired: 'always'
     });
@@ -1039,7 +1089,7 @@ if input_data:
       const created = await createYoupiPaymentSession({
         eventId: expiredPaidEvent._id.toString(),
         user: student,
-        body: { name: student.name, regNo: '26WA01', email: customEmail }
+        body: { name: student.name, regNo: '26WA01', email: customEmail, method: 'MANUAL_UPI' }
       });
       // Future deadline wasn't tested here because createYoupiPaymentSession blocks EVENT COMPLETED; let's test expired evaluation + cascade below if future -> past
       assert.fail('Should not allow creating session for completed event');
@@ -1056,7 +1106,7 @@ if input_data:
       const created = await createYoupiPaymentSession({
         eventId: expiredPaidEvent._id.toString(),
         user: student,
-        body: { name: student.name, regNo: '26WA01', email: customEmail }
+        body: { name: student.name, regNo: '26WA01', email: customEmail, method: 'MANUAL_UPI' }
       });
       createdOrderId = created.session.orderId;
       assert.strictEqual(created.session.hasWhatsappGroup, true);
@@ -1435,8 +1485,8 @@ if input_data:
     }
   });
 
-  // TEST 27: Strict %20 UPI Encoding & Backup VPA Pool Rotation (GPay Day-Limit Mitigation)
-  await test('27. Strict %20 buildUpiUri encoding & authorized backup VPA pool rotation', async () => {
+  // TEST 27: Canonical YouPI-PG buildUpiUri, NPCI Stand QR & Immutable Receiving Account Snapshot
+  await test('27. Canonical buildUpiUri, Stand QR (02/04) & immutable receivingAccountSnapshot (409 on post-switch)', async () => {
     const suffix = Date.now();
     const rawUri = buildUpiUri({
       payeeVpa: 'praveensumathi12-1@okaxis',
@@ -1445,10 +1495,37 @@ if input_data:
       transactionRef: `ORD_${suffix}`,
       transactionNote: 'Campus Tech Pass'
     });
-    assert(rawUri.startsWith('upi://pay?pa=praveensumathi12-1@okaxis&'), 'Must preserve literal @ in pa=');
-    assert(!rawUri.includes('+'), 'RFC3986 UPI deep-link must use %20 instead of + for spaces');
-    assert(rawUri.includes('pn=Avenor%20Campus%20Events'), 'Payee name must use %20 encoding');
-    assert(rawUri.includes('am=149.00&cu=INR'), 'Amount must format as exact 2 decimals');
+    assert(rawUri.startsWith('upi://pay?'), 'Must start with upi://pay?');
+    const uriParams = new URLSearchParams(rawUri.split('?')[1]);
+    assert.strictEqual(uriParams.get('pa'), 'praveensumathi12-1@okaxis');
+    assert.strictEqual(uriParams.get('pn'), 'Avenor Campus Events');
+    assert.strictEqual(uriParams.get('am'), '149.00');
+    assert.strictEqual(uriParams.get('tn'), `ORD_${suffix}`);
+    assert.strictEqual(uriParams.get('cu'), null, 'Canonical checkout buildUpiUri must not include cu');
+
+    const standStatic = buildStandUpiUri({
+      payeeVpa: 'praveensumathi12-1@okaxis',
+      payeeName: 'Avenor Desk',
+      mode: '02',
+      transactionNote: 'Open Booth',
+      currency: 'INR'
+    });
+    const standStaticParams = new URLSearchParams(standStatic.split('?')[1]);
+    assert.strictEqual(standStaticParams.get('mode'), '02');
+    assert.strictEqual(standStaticParams.get('am'), null);
+    assert.strictEqual(standStaticParams.get('cu'), 'INR');
+
+    const standFixed = buildStandUpiUri({
+      payeeVpa: 'praveensumathi12-1@okaxis',
+      payeeName: 'Avenor Desk',
+      amountPaise: 14900,
+      mode: '04',
+      currency: 'INR'
+    });
+    const standFixedParams = new URLSearchParams(standFixed.split('?')[1]);
+    assert.strictEqual(standFixedParams.get('mode'), '04');
+    assert.strictEqual(standFixedParams.get('am'), '149.00');
+    assert.strictEqual(standFixedParams.get('cu'), 'INR');
 
     let adminActor = await User.findOne({ role: 'admin' });
     let createdAdmin = false;
@@ -1473,8 +1550,8 @@ if input_data:
     });
 
     const paidEvent = await Event.create({
-      title: `VPA Rotation Event ${suffix}`,
-      description: 'Tests backup VPA pool switching',
+      title: `VPA Immutable Event ${suffix}`,
+      description: 'Tests pre-checkout VPA choice & post-creation immutability',
       date: new Date(Date.now() + 4 * 86400000),
       time: '10:00 AM',
       location: 'Main Hall',
@@ -1490,41 +1567,65 @@ if input_data:
       backupPaymentUpiIds: [`backup.${suffix}@oksbi`]
     });
 
-    let createdOrderId = '';
+    const createdOrderIds = [];
     try {
+      // 1. Pre-session selection of unauthorized VPA must fail 403 UNAUTHORIZED_VPA
+      let unauthPreRejected = false;
+      try {
+        await createYoupiPaymentSession({
+          eventId: paidEvent._id.toString(),
+          user: student,
+          body: { name: student.name, regNo: `VPA${suffix}`, preferredVpa: 'attacker@okicici' }
+        });
+      } catch (err) {
+        unauthPreRejected = err.status === 403 && err.code === 'UNAUTHORIZED_VPA';
+      }
+      assert.strictEqual(unauthPreRejected, true, 'Unauthorized pre-checkout VPA must fail with 403 UNAUTHORIZED_VPA');
+
+      // 2. Default session binds primary VPA snapshot
       const created = await createYoupiPaymentSession({
         eventId: paidEvent._id.toString(),
         user: student,
         body: { name: student.name, regNo: `VPA${suffix}` }
       });
-      createdOrderId = created.session.orderId;
+      createdOrderIds.push(created.session.orderId);
       assert.strictEqual(created.session.payeeVpa, `primary.${suffix}@okaxis`);
+      assert.strictEqual(created.session.receivingAccountSnapshot?.upiId, `primary.${suffix}@okaxis`);
       assert(created.session.availableVpas.includes(`backup.${suffix}@oksbi`));
 
-      // Student requesting an unauthorized arbitrary VPA must fail 403
-      let spoofRejected = false;
+      // 3. Post-creation switchSessionVpa ALWAYS rejects with 409 IMMUTABLE_RECEIVING_ACCOUNT
+      let immutableRejected = false;
       try {
         await switchSessionVpa({
           paymentId: created.session.paymentId,
           user: student,
-          targetVpa: 'attacker@okicici'
+          targetVpa: `backup.${suffix}@oksbi`
         });
       } catch (err) {
-        spoofRejected = err.status === 403 && err.code === 'UNAUTHORIZED_VPA';
+        immutableRejected = err.status === 409 && err.code === 'IMMUTABLE_RECEIVING_ACCOUNT';
       }
-      assert.strictEqual(spoofRejected, true, 'Unauthorized VPA injection must fail with 403 UNAUTHORIZED_VPA');
+      assert.strictEqual(immutableRejected, true, 'Post-creation VPA switching must reject with 409 IMMUTABLE_RECEIVING_ACCOUNT');
 
-      // Rotate cleanly to authorized backup VPA
-      const rotated = await switchSessionVpa({
-        paymentId: created.session.paymentId,
+      // 4. Cancel session cleanly, then start new session with authorized backup VPA pre-selected
+      await cancelYoupiSession({ paymentId: created.session.paymentId, user: student });
+      const backupSession = await createYoupiPaymentSession({
+        eventId: paidEvent._id.toString(),
         user: student,
-        targetVpa: `backup.${suffix}@oksbi`
+        body: {
+          name: student.name,
+          regNo: `VPA${suffix}`,
+          preferredVpa: `backup.${suffix}@oksbi`,
+          forceNew: true
+        }
       });
-      assert.strictEqual(rotated.payeeVpa, `backup.${suffix}@oksbi`);
-      assert(rotated.upiUri.includes(`pa=backup.${suffix}@oksbi`));
-      assert(rotated.vpaHistory.includes(`backup.${suffix}@oksbi`));
+      createdOrderIds.push(backupSession.session.orderId);
+      assert.strictEqual(backupSession.session.payeeVpa, `backup.${suffix}@oksbi`);
+      assert.strictEqual(backupSession.session.receivingAccountSnapshot?.upiId, `backup.${suffix}@oksbi`);
+      assert(backupSession.session.upiUri.includes(`pa=backup.${suffix}%40oksbi`));
     } finally {
-      if (createdOrderId) await YoupiWebhookReceipt.deleteMany({ orderId: createdOrderId });
+      if (createdOrderIds.length > 0) {
+        await YoupiWebhookReceipt.deleteMany({ orderId: { $in: createdOrderIds } });
+      }
       await YoupiPaymentSession.deleteMany({ event: paidEvent._id });
       await Registration.deleteMany({ event: paidEvent._id });
       await Event.deleteMany({ _id: paidEvent._id });
@@ -1539,6 +1640,8 @@ if input_data:
     assert.strictEqual(isAuthorizedBankEmailSender('alerts@evil-phish.com'), false);
     assert.strictEqual(isLikelyBankSmsSender('VK-HDFCBK-S'), true);
     assert.strictEqual(isLikelyBankSmsSender('+919876543210'), false);
+    assert.strictEqual(isPureNumericSender('+919876543210'), true);
+    assert.strictEqual(isPureNumericSender('VK-HDFCBK-S'), false);
 
     // Email credit extraction strips Available Balance so Avl Bal Rs 25,000 is never picked up
     const emailParsed = BankEmailParser.parse({
@@ -1585,10 +1688,9 @@ if input_data:
     assert.strictEqual(csvRes.lines[1].direction, 'DEBIT');
   });
 
-  // TEST 29: Automated Bank Observation Ingestion (Auto-Reconcile, Ambiguous Hold, Spoof & Anti-Replay)
-  await test('29. Automated bank ingestion settles unique open session & holds ambiguous/spoofed alerts', async () => {
+  // TEST 29: Zero-Trust 6-Stage Bank Observation Pipeline (OBSERVED_SUCCESS != RECONCILED, Fraud Ban, L1->L2, Dedupe & Ambiguity Hold)
+  await test('29. Zero-Trust 6-stage pipeline: OBSERVED_SUCCESS stays NOT_RECONCILED, Stage 5 fraud ban, L1->L2 & ambiguity hold', async () => {
     const suffix = Date.now();
-    // Use distinctive prime-like rupee fees so unrelated live sessions on Atlas cannot collide on exact paise
     const uniqueFeeRupees = 713 + (suffix % 97);
     const ambiguousFeeRupees = 829 + (suffix % 89);
 
@@ -1626,8 +1728,8 @@ if input_data:
 
     const [uniqueEvent, ambEvent] = await Event.create([
       {
-        title: `Unique Auto Event ${suffix}`,
-        description: 'Automated reconciliation test',
+        title: `ZeroTrust Auto Event ${suffix}`,
+        description: 'Zero-trust bank observation test',
         date: new Date(Date.now() + 5 * 86400000),
         time: '11:00 AM',
         location: 'Lab 1',
@@ -1639,11 +1741,12 @@ if input_data:
         isPaid: true,
         registrationFee: uniqueFeeRupees,
         currency: 'INR',
-        paymentUpiId: `auto.${suffix}@okaxis`
+        paymentUpiId: `auto.${suffix}@okaxis`,
+        whatsappGroupLink: 'https://chat.whatsapp.com/ZeroTrustGateGroup1'
       },
       {
-        title: `Ambiguous Auto Event ${suffix}`,
-        description: 'Ambiguous amount guard test',
+        title: `Ambiguous Hold Event ${suffix}`,
+        description: 'Ambiguity & duplicate UTR guard test',
         date: new Date(Date.now() + 6 * 86400000),
         time: '02:00 PM',
         location: 'Lab 2',
@@ -1655,31 +1758,78 @@ if input_data:
         isPaid: true,
         registrationFee: ambiguousFeeRupees,
         currency: 'INR',
-        paymentUpiId: `auto.${suffix}@okaxis`
+        paymentUpiId: `amb.${suffix}@oksbi`
       }
     ]);
 
     const createdFingerprints = [];
     const createdOrderIds = [];
+    const spoofUtr = `5${String(suffix).slice(-11).padStart(11, '0')}`;
     const uniqueUtr = `9${String(suffix).slice(-11).padStart(11, '0')}`;
+    const vpaAuto = `auto.${suffix}@okaxis`;
+    const vpaAmb = `amb.${suffix}@oksbi`;
 
     try {
-      // 1. Spoofed personal mobile SMS must be rejected immediately
+      // 1a. Unlinked spoofed personal mobile SMS rejects as REJECTED_SPOOF without banning customer
+      const unlinkedSpoof = await ingestBankObservation({
+        source: 'SMS_OBSERVER',
+        sender: '+919876543210',
+        receivingAccountId: vpaAuto,
+        text: `Rs ${uniqueFeeRupees}.00 credited to A/c Ref ${spoofUtr}`,
+        messageKey: `spoof-unlinked-${suffix}`
+      });
+      if (unlinkedSpoof.observation?.fingerprint) createdFingerprints.push(unlinkedSpoof.observation.fingerprint);
+      assert.strictEqual(unlinkedSpoof.accepted, false);
+      assert.strictEqual(unlinkedSpoof.status, 'REJECTED_SPOOF');
+
+      // 1b. Stage 5 Fraud Spoofing Defense: attributable customer spoof targeting an active session MUST auto-suspend customer
+      const spoofTarget = await createYoupiPaymentSession({
+        eventId: uniqueEvent._id.toString(),
+        user: student1,
+        body: { name: student1.name, regNo: `AU0_${suffix}` }
+      });
+      createdOrderIds.push(spoofTarget.session.orderId);
+
       const spoofRes = await ingestBankObservation({
         source: 'SMS_OBSERVER',
-        sender: '9876543210',
-        text: `Rs ${uniqueFeeRupees}.00 credited to A/c Ref ${uniqueUtr}`,
+        sender: '+919876543210',
+        receivingAccountId: vpaAuto,
+        submissionIdentity: { userId: student1._id.toString(), email: student1.email },
+        text: `Rs ${uniqueFeeRupees}.00 credited to A/c Ref ${spoofUtr}`,
         messageKey: `spoof-${suffix}`
       });
-      assert.strictEqual(spoofRes.accepted, false);
-      assert.strictEqual(spoofRes.status, 'REJECTED_SPOOF');
       if (spoofRes.observation?.fingerprint) createdFingerprints.push(spoofRes.observation.fingerprint);
+      assert.strictEqual(spoofRes.accepted, false);
+      assert.strictEqual(spoofRes.status, 'FRAUDULENT_PAYMENT_INJECTION');
+      assert.strictEqual(spoofRes.threatDetected, true);
+      assert.strictEqual(spoofRes.banned, true);
 
-      // 2. Create single open session -> mark PROCESSING -> authentic DLT SMS auto-reconciles & settles
+      const suspendedS1 = await User.findById(student1._id);
+      assert.strictEqual(suspendedS1.paymentSecurityStatus, 'SUSPENDED', 'Stage 5 must auto-suspend customer identity');
+
+      let bannedRejected = false;
+      try {
+        await createYoupiPaymentSession({
+          eventId: uniqueEvent._id.toString(),
+          user: suspendedS1,
+          body: { name: student1.name, regNo: `AU0B_${suffix}` }
+        });
+      } catch (err) {
+        bannedRejected = err.status === 403 && err.code === 'BANNED_IDENTITY';
+      }
+      assert.strictEqual(bannedRejected, true, 'Suspended identity must fail checkout with 403 BANNED_IDENTITY');
+
+      // Clear suspension (admin unban) and continue pipeline tests
+      await User.findByIdAndUpdate(student1._id, {
+        $set: { paymentSecurityStatus: 'CLEAR', paymentSecurityReason: '' }
+      });
+      student1.paymentSecurityStatus = 'CLEAR';
+
+      // 2. Authentic DLT Bank SMS during PROCESSING moves session -> OBSERVED_SUCCESS (NOT_RECONCILED), NEVER RECONCILED!
       const sUnique = await createYoupiPaymentSession({
         eventId: uniqueEvent._id.toString(),
         user: student1,
-        body: { name: student1.name, regNo: `AU1_${suffix}` }
+        body: { name: student1.name, regNo: `AU1_${suffix}`, forceNew: true }
       });
       createdOrderIds.push(sUnique.session.orderId);
 
@@ -1689,49 +1839,89 @@ if input_data:
       });
       assert.strictEqual(procRes.session.status, 'PROCESSING');
 
-      const autoRes = await ingestBankObservation({
+      const obsRes = await ingestBankObservation({
         source: 'SMS_OBSERVER',
         sender: 'VK-HDFCBK',
+        receivingAccountId: vpaAuto,
         text: `Rs ${uniqueFeeRupees}.00 credited to A/c X1234 by UPI Ref ${uniqueUtr}. Avl Bal Rs 9,000.00`,
-        autoReconcileOverride: true,
         messageKey: `sms-${suffix}`
       });
-      if (autoRes.observation?.fingerprint) createdFingerprints.push(autoRes.observation.fingerprint);
-      assert.strictEqual(autoRes.accepted, true, 'Authentic bank SMS matching 1 open session must auto-reconcile');
-      assert.strictEqual(autoRes.status, 'MATCHED_RECONCILED');
-      assert.strictEqual(autoRes.session.status, 'RECONCILED');
-      assert.strictEqual(autoRes.registration.paymentStatus, 'paid');
+      if (obsRes.observation?.fingerprint) createdFingerprints.push(obsRes.observation.fingerprint);
+      assert.strictEqual(obsRes.accepted, true);
+      assert.strictEqual(obsRes.status, 'MATCHED_OBSERVED');
+      assert.strictEqual(obsRes.verificationLevel, 1);
+      assert.strictEqual(obsRes.verificationTag, 'Single Verification (SMS) | OBSERVED_NOT_RECONCILED');
+      assert.strictEqual(obsRes.session.status, 'OBSERVED_SUCCESS', 'Zero-Trust: bank alert must yield OBSERVED_SUCCESS, never RECONCILED');
+      assert.strictEqual(obsRes.session.settlementState, 'NOT_RECONCILED');
+      assert.strictEqual(obsRes.session.settled, false);
+      assert.strictEqual(obsRes.session.slotLockActive, false, 'OBSERVED_SUCCESS must release active FIFO slot lock');
+      assert.strictEqual(obsRes.session.whatsappGroupLink, '', 'WhatsApp link must stay hidden while NOT_RECONCILED');
+      assert.strictEqual(obsRes.registration.paymentStatus, 'pending', 'Registration must stay pending until CSV/admin reconciliation');
 
-      // 3. Replaying same UTR under a different source/messageKey must block as DUPLICATE_UTR
-      const dupRes = await ingestBankObservation({
+      // 3. Same channel-family (SMS_OBSERVER) replay is deduplicated cleanly
+      const sameFamReplay = await ingestBankObservation({
+        source: 'SMS_OBSERVER',
+        sender: 'VK-HDFCBK',
+        receivingAccountId: vpaAuto,
+        text: `Rs ${uniqueFeeRupees}.00 credited to A/c X1234 by UPI Ref ${uniqueUtr}.`,
+        messageKey: `sms-dup-${suffix}`
+      });
+      assert.strictEqual(sameFamReplay.accepted, false);
+      assert.strictEqual(sameFamReplay.duplicate, true);
+
+      // 4. Independent Email channel-family corroboration upgrades L1 -> Dual Verification (still NOT_RECONCILED)
+      const emailUpgradeRes = await ingestBankObservation({
         source: 'IMAP_EMAIL',
         sender: 'alerts@hdfcbank.net',
+        receivingAccountId: vpaAuto,
         subject: 'UPI Credit Alert',
         text: `Rs. ${uniqueFeeRupees}.00 credited to your A/c. UPI Ref No ${uniqueUtr}.`,
-        messageKey: `dup-email-${suffix}`
+        messageKey: `email-l2-${suffix}`
       });
-      if (dupRes.observation?.fingerprint) createdFingerprints.push(dupRes.observation.fingerprint);
-      assert.strictEqual(dupRes.accepted, false);
-      assert.strictEqual(dupRes.status, 'DUPLICATE_UTR');
+      if (emailUpgradeRes.observation?.fingerprint) createdFingerprints.push(emailUpgradeRes.observation.fingerprint);
+      assert.strictEqual(emailUpgradeRes.accepted, true);
+      assert.strictEqual(emailUpgradeRes.verificationLevel, 2);
+      assert.strictEqual(emailUpgradeRes.verificationTag, 'Dual Verification (SMS + Gmail) | OBSERVED_NOT_RECONCILED');
+      assert.strictEqual(emailUpgradeRes.session.status, 'OBSERVED_SUCCESS');
+      assert.strictEqual(emailUpgradeRes.session.settled, false);
 
-      // 4. Two concurrent open sessions with identical amount & no Order ID / matching UTR must hold as AMBIGUOUS
-      const amb1 = await createYoupiPaymentSession({
-        eventId: ambEvent._id.toString(),
-        user: student1,
-        body: { name: student1.name, regNo: `AMB1_${suffix}` }
-      });
-      const amb2 = await createYoupiPaymentSession({
+      // 5. Consumed UTR targeting ANOTHER session must reject with DUPLICATE_UTR
+      const otherSess = await createYoupiPaymentSession({
         eventId: ambEvent._id.toString(),
         user: student2,
         body: { name: student2.name, regNo: `AMB2_${suffix}` }
       });
-      createdOrderIds.push(amb1.session.orderId, amb2.session.orderId);
+      createdOrderIds.push(otherSess.session.orderId);
+
+      const dupOtherRes = await ingestBankObservation({
+        source: 'IMAP_EMAIL',
+        sender: 'alerts@sbi.co.in',
+        receivingAccountId: vpaAmb,
+        subject: 'Credit Alert',
+        text: `INR ${ambiguousFeeRupees}.00 credited via UPI Ref ${uniqueUtr} to your A/c.`,
+        messageKey: `dup-other-${suffix}`
+      });
+      if (dupOtherRes.observation?.fingerprint) createdFingerprints.push(dupOtherRes.observation.fingerprint);
+      assert.strictEqual(dupOtherRes.accepted, false);
+      assert.strictEqual(dupOtherRes.status, 'DUPLICATE_UTR');
+
+      // 6. Anti-Hijack Ambiguity: recent cancelled/expired session on same VPA + amount holds live session in MANUAL_REVIEW
+      await cancelYoupiSession({ paymentId: otherSess.session.paymentId, user: student2 });
+      const liveAfterCancel = await createYoupiPaymentSession({
+        eventId: ambEvent._id.toString(),
+        user: student1,
+        body: { name: student1.name, regNo: `AMB1_${suffix}`, forceNew: true }
+      });
+      createdOrderIds.push(liveAfterCancel.session.orderId);
 
       const ambUtr = `8${String(suffix).slice(-11).padStart(11, '0')}`;
+      const preSlotObsTime = new Date(new Date(liveAfterCancel.session.slotAcquiredAt || Date.now()).getTime() - 5000);
       const ambRes = await ingestBankObservation({
         source: 'IMAP_EMAIL',
         sender: 'alerts@sbi.co.in',
+        receivingAccountId: vpaAmb,
         subject: 'Credit Alert',
+        observedAt: preSlotObsTime,
         text: `INR ${ambiguousFeeRupees}.00 credited via UPI Ref ${ambUtr} to your A/c.`,
         messageKey: `amb-${suffix}`
       });
@@ -1739,16 +1929,13 @@ if input_data:
       assert.strictEqual(ambRes.accepted, false);
       assert.strictEqual(ambRes.status, 'AMBIGUOUS');
 
-      const [reloadedAmb1, reloadedAmb2] = await Promise.all([
-        YoupiPaymentSession.findOne({ paymentId: amb1.session.paymentId }),
-        YoupiPaymentSession.findOne({ paymentId: amb2.session.paymentId })
-      ]);
-      assert.notStrictEqual(reloadedAmb1.status, 'RECONCILED');
-      assert.notStrictEqual(reloadedAmb2.status, 'RECONCILED');
+      const heldLive = await YoupiPaymentSession.findOne({ paymentId: liveAfterCancel.session.paymentId });
+      assert.strictEqual(heldLive.status, 'MANUAL_REVIEW', 'Ambiguous pre-slot observation must hold session in MANUAL_REVIEW');
     } finally {
       if (createdFingerprints.length > 0) {
         await YoupiBankObservation.deleteMany({ fingerprint: { $in: createdFingerprints } });
       }
+      await YoupiBankObservation.deleteMany({ receivingAccountId: { $in: [vpaAuto, vpaAmb] } });
       if (createdOrderIds.length > 0) {
         await YoupiWebhookReceipt.deleteMany({ orderId: { $in: createdOrderIds } });
       }
@@ -1760,11 +1947,15 @@ if input_data:
     }
   });
 
-  // TEST 30: Admin Bulk CSV Bank Statement Reconciler
-  await test('30. reconcileStatementCsv settles open PROCESSING session & skips debit rows', async () => {
+  // TEST 30: Zero-Trust CSV Bank Statement Reconciliation (2-day IST Window, Unobserved Exclusion & Debit Skip)
+  await test('30. reconcileStatementCsv settles OBSERVED_SUCCESS & MANUAL_REVIEW, blocks unobserved ACTIVE & out-of-window CSV', async () => {
     const suffix = Date.now();
     const csvFee = 919 + (suffix % 73);
+    const manualFee = 997 + (suffix % 53);
     const csvUtr = `7${String(suffix).slice(-11).padStart(11, '0')}`;
+    const manualUtr = `6${String(suffix).slice(-11).padStart(11, '0')}`;
+    const recVpa = `csv.${suffix}@okaxis`;
+    const manualVpa = `csvman.${suffix}@oksbi`;
 
     let adminActor = await User.findOne({ role: 'admin' });
     let createdAdmin = false;
@@ -1788,58 +1979,147 @@ if input_data:
       emailVerified: true
     });
 
-    const csvEvent = await Event.create({
-      title: `CSV Reconcile Event ${suffix}`,
-      description: 'CSV bulk bank reconciliation test',
-      date: new Date(Date.now() + 7 * 86400000),
-      time: '03:00 PM',
-      location: 'Auditorium',
-      type: 'tech',
-      department: 'Computer Science',
-      organizer: adminActor._id,
-      capacity: 50,
-      status: 'approved',
-      isPaid: true,
-      registrationFee: csvFee,
-      currency: 'INR',
-      paymentUpiId: `csv.${suffix}@okaxis`
-    });
+    const [csvEvent, manualEvent] = await Event.create([
+      {
+        title: `CSV Observed Event ${suffix}`,
+        description: 'CSV settlement of OBSERVED_SUCCESS session',
+        date: new Date(Date.now() + 7 * 86400000),
+        time: '03:00 PM',
+        location: 'Auditorium',
+        type: 'tech',
+        department: 'Computer Science',
+        organizer: adminActor._id,
+        capacity: 50,
+        status: 'approved',
+        isPaid: true,
+        registrationFee: csvFee,
+        currency: 'INR',
+        paymentUpiId: recVpa,
+        whatsappGroupLink: 'https://chat.whatsapp.com/CsvUnlockedGroup'
+      },
+      {
+        title: `CSV Manual UPI Event ${suffix}`,
+        description: 'CSV settlement of MANUAL_UPI session',
+        date: new Date(Date.now() + 8 * 86400000),
+        time: '04:00 PM',
+        location: 'Seminar Hall',
+        type: 'tech',
+        department: 'Computer Science',
+        organizer: adminActor._id,
+        capacity: 50,
+        status: 'approved',
+        isPaid: true,
+        registrationFee: manualFee,
+        currency: 'INR',
+        paymentUpiId: manualVpa
+      }
+    ]);
 
-    let createdOrderId = '';
+    const createdOrderIds = [];
     try {
+      const todayIst = calendarDateInIndia(new Date());
+      const outOfWindowIst = addCalendarDays(todayIst, 5);
+
       const created = await createYoupiPaymentSession({
         eventId: csvEvent._id.toString(),
         user: student,
         body: { name: student.name, regNo: `CSV${suffix}` }
       });
-      createdOrderId = created.session.orderId;
+      createdOrderIds.push(created.session.orderId);
       await markSessionProcessing({ paymentId: created.session.paymentId, user: student });
 
-      const now = new Date();
-      const dd = String(now.getUTCDate()).padStart(2, '0');
-      const mm = String(now.getUTCMonth() + 1).padStart(2, '0');
-      const yyyy = now.getUTCFullYear();
-      const todayCsv = `${dd}/${mm}/${yyyy}`;
-      const csvText = [
+      // 1. Unobserved PROCESSING session must NEVER settle from CSV alone
+      const preObsCsv = [
         'Date,Narration,Ref No.,Withdrawal,Deposit',
-        `${todayCsv},UPI/DR/000111222333/expense@oksbi,000111222333,${csvFee}.00,`,
-        `${todayCsv},UPI/CR/${csvUtr}/student@okaxis,${csvUtr},,${csvFee}.00`
+        `${todayIst},UPI/CR/${csvUtr}/student@okaxis,${csvUtr},,${csvFee}.00`
       ].join('\n');
+      const preObsSummary = await reconcileStatementCsv({
+        receivingAccountId: recVpa,
+        csvText: preObsCsv,
+        adminUser: adminActor
+      });
+      assert.strictEqual(preObsSummary.reconciled, 0, 'Unobserved PROCESSING session must not reconcile from CSV alone');
+      assert.strictEqual(preObsSummary.unmatched, 1);
 
-      const summary = await reconcileStatementCsv({ csvText, adminUser: adminActor });
+      // 2. Bank SMS moves session -> OBSERVED_SUCCESS (still pending/locked)
+      const obsRes = await ingestBankObservation({
+        source: 'SMS_OBSERVER',
+        sender: 'VK-HDFCBK',
+        receivingAccountId: recVpa,
+        text: `Rs ${csvFee}.00 credited to A/c X1234 UPI Ref ${csvUtr}. Avl Bal Rs 15,000.00`,
+        messageKey: `csv-sms-${suffix}`
+      });
+      assert.strictEqual(obsRes.session.status, 'OBSERVED_SUCCESS');
+
+      // 3. Out-of-window CSV date (+5 days > STATEMENT_POSTING_DAYS=2) triggers CONFLICT / MANUAL_REVIEW hold
+      const badDateCsv = [
+        'Date,Narration,Ref No.,Withdrawal,Deposit',
+        `${outOfWindowIst},UPI/CR/${csvUtr}/student@okaxis,${csvUtr},,${csvFee}.00`
+      ].join('\n');
+      const badDateSummary = await reconcileStatementCsv({
+        receivingAccountId: recVpa,
+        csvText: badDateCsv,
+        adminUser: adminActor
+      });
+      assert.strictEqual(badDateSummary.reconciled, 0);
+      assert.strictEqual(badDateSummary.conflicts, 1);
+
+      // 4. Valid in-window CSV statement settles OBSERVED_SUCCESS / held session -> RECONCILED, skips DEBIT row & unlocks WhatsApp
+      const validCsv = [
+        'Date,Narration,Ref No.,Withdrawal,Deposit',
+        `${todayIst},UPI/DR/000111222333/expense@oksbi,000111222333,${csvFee}.00,`,
+        `${todayIst},UPI/CR/${csvUtr}/student@okaxis,${csvUtr},,${csvFee}.00`
+      ].join('\n');
+      const summary = await reconcileStatementCsv({
+        receivingAccountId: recVpa,
+        csvText: validCsv,
+        adminUser: adminActor
+      });
       assert.strictEqual(summary.totalRows, 2);
       assert.strictEqual(summary.creditRows, 1);
-      assert.strictEqual(summary.matchedCount, 1);
+      assert.strictEqual(summary.reconciled, 1);
 
       const settled = await YoupiPaymentSession.findOne({ paymentId: created.session.paymentId });
       assert.strictEqual(settled.status, 'RECONCILED');
+      assert.strictEqual(settled.settlementState, 'RECONCILED');
       assert.strictEqual(settled.observationSource, 'STATEMENT_CSV');
+
+      const regSettled = await Registration.findOne({ event: csvEvent._id, user: student._id });
+      assert.strictEqual(regSettled.paymentStatus, 'paid');
+
+      // 5. MANUAL_UPI session (MANUAL_REVIEW) settles directly when bank CSV statement contains matching credit + UTR
+      const manualSess = await createYoupiPaymentSession({
+        eventId: manualEvent._id.toString(),
+        user: student,
+        body: { name: student.name, regNo: `CSVM${suffix}`, method: 'MANUAL_UPI' }
+      });
+      createdOrderIds.push(manualSess.session.orderId);
+      await submitUtrAndProcessSession({
+        paymentId: manualSess.session.paymentId,
+        user: student,
+        body: { utr: manualUtr }
+      });
+
+      const manualCsv = [
+        'Date,Narration,Ref No.,Withdrawal,Deposit',
+        `${todayIst},UPI/CR/${manualUtr}/student@okaxis,${manualUtr},,${manualFee}.00`
+      ].join('\n');
+      const manSummary = await reconcileStatementCsv({
+        receivingAccountId: manualVpa,
+        csvText: manualCsv,
+        adminUser: adminActor
+      });
+      assert.strictEqual(manSummary.reconciled, 1);
+      const settledManual = await YoupiPaymentSession.findOne({ paymentId: manualSess.session.paymentId });
+      assert.strictEqual(settledManual.status, 'RECONCILED');
+      assert.strictEqual(settledManual.settlementState, 'RECONCILED');
     } finally {
-      await YoupiBankObservation.deleteMany({ bankRef: csvUtr });
-      if (createdOrderId) await YoupiWebhookReceipt.deleteMany({ orderId: createdOrderId });
-      await YoupiPaymentSession.deleteMany({ event: csvEvent._id });
-      await Registration.deleteMany({ event: csvEvent._id });
-      await Event.deleteMany({ _id: csvEvent._id });
+      await YoupiStatementLine.deleteMany({ receivingAccountId: { $in: [recVpa, manualVpa] } });
+      await YoupiBankObservation.deleteMany({ receivingAccountId: { $in: [recVpa, manualVpa] } });
+      if (createdOrderIds.length > 0) await YoupiWebhookReceipt.deleteMany({ orderId: { $in: createdOrderIds } });
+      await YoupiPaymentSession.deleteMany({ event: { $in: [csvEvent._id, manualEvent._id] } });
+      await Registration.deleteMany({ event: { $in: [csvEvent._id, manualEvent._id] } });
+      await Event.deleteMany({ _id: { $in: [csvEvent._id, manualEvent._id] } });
       await User.deleteMany({ _id: student._id });
       if (createdAdmin) await User.deleteMany({ _id: adminActor._id });
     }
@@ -1955,6 +2235,194 @@ if input_data:
     }
   });
 
+  // TEST 32: FIFO Single-Slot Queue, 30s Lock, Reaper Auto-Promotion, Android HMAC Gateway & Stand QR
+  await test('32. FIFO single-slot lock, QUEUED isolation, 30s PROCESSING cancel guard, reaper promotion & Android HMAC gateway', async () => {
+    const suffix = Date.now();
+    const fifoVpa = `fifo.${suffix}@okaxis`;
+    const orgId = new mongoose.Types.ObjectId();
+
+    const [sA, sB, sC] = await User.create([
+      { name: 'FIFO Student A', email: `fifo_a_${suffix}@example.com`, password: 'Password123!', role: 'student', department: 'CS', emailVerified: true },
+      { name: 'FIFO Student B', email: `fifo_b_${suffix}@example.com`, password: 'Password123!', role: 'student', department: 'CS', emailVerified: true },
+      { name: 'FIFO Student C', email: `fifo_c_${suffix}@example.com`, password: 'Password123!', role: 'student', department: 'CS', emailVerified: true }
+    ]);
+
+    const fifoEvent = await Event.create({
+      title: `FIFO Slot Event ${suffix}`,
+      description: 'Single-slot concurrency & reaper test',
+      date: new Date(Date.now() + 3 * 86400000),
+      time: '10:00 AM',
+      location: 'Main Hall',
+      type: 'tech',
+      department: 'CS',
+      organizer: orgId,
+      capacity: 100,
+      status: 'approved',
+      isPaid: true,
+      registrationFee: 333,
+      currency: 'INR',
+      paymentUpiId: fifoVpa
+    });
+
+    let pairedDeviceId = '';
+    try {
+      // 1. Student A acquires active slot
+      const resA = await createYoupiPaymentSession({
+        eventId: fifoEvent._id.toString(),
+        user: sA,
+        body: { name: sA.name, regNo: `FA_${suffix}` }
+      });
+      assert.strictEqual(resA.session.status, 'ACTIVE');
+      assert.strictEqual(resA.session.slotLockActive, true);
+      assert(resA.session.upiUri && resA.session.qrSvg.includes('<svg'), 'Slot holder receives QR and URI');
+
+      // 2. Student B enters QUEUED with NO QR/URI revealed
+      const resB = await createYoupiPaymentSession({
+        eventId: fifoEvent._id.toString(),
+        user: sB,
+        body: { name: sB.name, regNo: `FB_${suffix}` }
+      });
+      assert.strictEqual(resB.session.status, 'QUEUED');
+      assert.strictEqual(resB.session.queuePosition, 1);
+      assert.strictEqual(resB.session.slotLockActive, false);
+      assert.strictEqual(resB.session.upiUri, '', 'QUEUED session must hide upiUri');
+      assert.strictEqual(resB.session.qrSvg, '', 'QUEUED session must hide qrSvg');
+      assert(resB.session.estimatedWaitSeconds > 0, 'QUEUED session reports estimatedWaitSeconds');
+
+      // 3. Student C enters QUEUED at #2, then cancels cleanly
+      const resC = await createYoupiPaymentSession({
+        eventId: fifoEvent._id.toString(),
+        user: sC,
+        body: { name: sC.name, regNo: `FC_${suffix}` }
+      });
+      assert.strictEqual(resC.session.status, 'QUEUED');
+      assert.strictEqual(resC.session.queuePosition, 2);
+
+      const cancelC = await cancelYoupiSession({ paymentId: resC.session.paymentId, user: sC });
+      assert.strictEqual(cancelC.status, 'CANCELLED');
+
+      // 4. Student A starts 30s PROCESSING -> cancel MUST fail with 409 SESSION_PROCESSING
+      const procA = await markSessionProcessing({ paymentId: resA.session.paymentId, user: sA });
+      assert.strictEqual(procA.session.status, 'PROCESSING');
+      assert(procA.processingExpiresAt, 'PROCESSING window sets processingExpiresAt');
+
+      let procCancelBlocked = false;
+      try {
+        await cancelYoupiSession({ paymentId: resA.session.paymentId, user: sA });
+      } catch (err) {
+        procCancelBlocked = err.status === 409 && err.code === 'SESSION_PROCESSING';
+      }
+      assert.strictEqual(procCancelBlocked, true, 'Cancelling during 30s PROCESSING must reject with 409 SESSION_PROCESSING');
+
+      // 5. Simulate 30s timer elapsed and run 1s reaper -> Student A transitions to FAILED, Student B promotes to ACTIVE
+      await YoupiPaymentSession.updateOne(
+        { paymentId: resA.session.paymentId },
+        { $set: { processingExpiresAt: new Date(Date.now() - 2000) } }
+      );
+      await runReaperTick();
+
+      const [reloadedA, reloadedB] = await Promise.all([
+        YoupiPaymentSession.findOne({ paymentId: resA.session.paymentId }),
+        YoupiPaymentSession.findOne({ paymentId: resB.session.paymentId })
+      ]);
+      assert.strictEqual(reloadedA.status, 'FAILED');
+      assert.strictEqual(reloadedA.slotLockActive, false);
+      assert.strictEqual(reloadedB.status, 'ACTIVE', 'Reaper timeout of slot holder must auto-promote FIFO #1 to ACTIVE');
+      assert.strictEqual(reloadedB.slotLockActive, true);
+      assert.strictEqual(reloadedB.queuePosition, 0);
+      assert(reloadedB.upiUri && reloadedB.qrSvg.includes('<svg'), 'Promoted session must receive freshly generated QR and URI');
+
+      // 6. Android SMS Gateway Pairing + HMAC Signature + Replay Drift Guard + Revoke
+      const enrollmentSecret = await require('../services/payments/paymentAutomationService').getOrCreateAndroidEnrollmentSecret();
+      const paired = await pairAndroidDevice({
+        enrollmentToken: enrollmentSecret,
+        receivingAccountId: fifoVpa,
+        deviceName: `Test Phone ${suffix}`,
+        deviceModel: 'Pixel 8'
+      });
+      pairedDeviceId = paired.deviceId;
+      assert.strictEqual(paired.paired, true);
+      assert(paired.signingKey && paired.signingKey.length >= 32);
+
+      const rawBodyText = JSON.stringify({ clientMessageId: `cmsg-${suffix}`, body: 'Rs 333.00 credited' });
+      const tsHeader = String(Date.now());
+      const validSig = crypto
+        .createHmac('sha256', paired.signingKey)
+        .update(`${rawBodyText}:${tsHeader}`)
+        .digest('hex');
+
+      const verifiedDev = await verifyAndroidDeviceHmac({
+        deviceId: pairedDeviceId,
+        timestampHeader: tsHeader,
+        signatureHeader: `sha256=${validSig}`,
+        rawBodyText
+      });
+      assert.strictEqual(verifiedDev.deviceId, pairedDeviceId);
+
+      let badSigBlocked = false;
+      try {
+        await verifyAndroidDeviceHmac({
+          deviceId: pairedDeviceId,
+          timestampHeader: tsHeader,
+          signatureHeader: '0'.repeat(64),
+          rawBodyText
+        });
+      } catch (err) {
+        badSigBlocked = err.status === 401 && err.code === 'INVALID_HMAC_SIGNATURE';
+      }
+      assert.strictEqual(badSigBlocked, true, 'Tampered HMAC signature must fail with 401 INVALID_HMAC_SIGNATURE');
+
+      let driftBlocked = false;
+      try {
+        await verifyAndroidDeviceHmac({
+          deviceId: pairedDeviceId,
+          timestampHeader: String(Date.now() - 120000),
+          signatureHeader: validSig,
+          rawBodyText
+        });
+      } catch (err) {
+        driftBlocked = err.status === 401 && err.code === 'TIMESTAMP_DRIFT';
+      }
+      assert.strictEqual(driftBlocked, true, 'Stale >60s timestamp must fail with 401 TIMESTAMP_DRIFT');
+
+      await revokeAndroidDevice(pairedDeviceId);
+      let revokedBlocked = false;
+      try {
+        await verifyAndroidDeviceHmac({
+          deviceId: pairedDeviceId,
+          timestampHeader: tsHeader,
+          signatureHeader: validSig,
+          rawBodyText
+        });
+      } catch (err) {
+        revokedBlocked = err.status === 403 && err.code === 'DEVICE_UNAUTHORIZED';
+      }
+      assert.strictEqual(revokedBlocked, true, 'Revoked Android device must fail with 403 DEVICE_UNAUTHORIZED');
+
+      // 7. NPCI Stand QR Data generation check
+      const standQr = await buildStandQrData({
+        payeeVpa: fifoVpa,
+        payeeName: 'Avenor Stand',
+        mode: '02',
+        transactionNote: 'Booth QR'
+      });
+      assert(standQr.upiUri.includes('mode=02') && standQr.qrSvg.includes('<svg'));
+    } finally {
+      if (pairedDeviceId) {
+        await deleteAndroidDevice(pairedDeviceId).catch(() => {});
+        await YoupiAndroidDevice.deleteMany({ deviceId: pairedDeviceId }).catch(() => {});
+      }
+      await YoupiPaymentSession.deleteMany({ event: fifoEvent._id });
+      await Registration.deleteMany({ event: fifoEvent._id });
+      await Event.deleteMany({ _id: fifoEvent._id });
+      await User.deleteMany({ _id: { $in: [sA._id, sB._id, sC._id] } });
+    }
+  });
+
+  stopPaymentAutomationScheduler();
+  stopYoupiReaperDaemon();
+  destroyAttributionTimers();
+
   console.log('\n====================================================');
   console.log(`RESULTS: ${passed} PASSED, ${failed} FAILED`);
   console.log('====================================================');
@@ -1967,6 +2435,9 @@ if input_data:
 }
 
 runTestSuite().catch(err => {
+  stopPaymentAutomationScheduler();
+  stopYoupiReaperDaemon();
+  destroyAttributionTimers();
   console.error('Test runner fatal error:', err);
   process.exit(1);
 });

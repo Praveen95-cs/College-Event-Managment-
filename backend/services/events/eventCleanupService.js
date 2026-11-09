@@ -7,7 +7,9 @@ const AssessmentAssignment = require('../../models/competitions/AssessmentAssign
 const Notification = require('../../models/community/Notification');
 const YoupiPaymentSession = require('../../models/payments/YoupiPaymentSession');
 const YoupiWebhookReceipt = require('../../models/payments/YoupiWebhookReceipt');
+const YoupiStatementLine = require('../../models/payments/YoupiStatementLine');
 const SystemSetting = require('../../models/system/SystemSetting');
+const { promoteNext, reindexQueue, normalizeReceivingAccountId } = require('../payments/youpiGatewayService');
 const { computeEventLifecycle, cleanupFeedForEvent } = require('../feed/feedService');
 
 function removeLocalUploadIfExists(relPath) {
@@ -55,14 +57,27 @@ async function cascadeDeleteEvent(eventDocOrId) {
     deletedCompetitionsCount = compDel.deletedCount || compIds.length;
   }
 
-  // 2. YouPI sessions & webhook receipts
+  // 2. YouPI sessions, webhook receipts & statement line links
   const sessions = await YoupiPaymentSession.find({ event: eventId })
-    .select('paymentId orderId')
+    .select('_id paymentId orderId receivingAccountId payeeVpa slotLockActive status')
     .lean();
   let deletedSessionsCount = 0;
   if (sessions.length > 0) {
+    const sessionObjIds = sessions.map(s => s._id);
     const paymentIds = sessions.map(s => s.paymentId).filter(Boolean);
     const orderIds = sessions.map(s => s.orderId).filter(Boolean);
+    const affectedRecAccounts = Array.from(
+      new Set(
+        sessions
+          .filter(s => s.slotLockActive || s.status === 'QUEUED')
+          .map(s => s.receivingAccountId || normalizeReceivingAccountId(s.payeeVpa))
+          .filter(Boolean)
+      )
+    );
+    await YoupiStatementLine.updateMany(
+      { paymentSessionId: { $in: sessionObjIds } },
+      { $set: { paymentSessionId: null } }
+    ).catch(() => {});
     if (paymentIds.length > 0 || orderIds.length > 0) {
       await YoupiWebhookReceipt.deleteMany({
         $or: [
@@ -73,6 +88,10 @@ async function cascadeDeleteEvent(eventDocOrId) {
     }
     const sessDel = await YoupiPaymentSession.deleteMany({ event: eventId });
     deletedSessionsCount = sessDel.deletedCount || sessions.length;
+    for (const recAcc of affectedRecAccounts) {
+      await promoteNext(recAcc).catch(() => {});
+      await reindexQueue(recAcc).catch(() => {});
+    }
   }
 
   // 3. Registrations & notifications

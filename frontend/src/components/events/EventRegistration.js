@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { useAuth } from '../../contexts/AuthContext';
 import axios from 'axios';
 import { getBackendUrl } from '../../utils/apiConfig';
@@ -11,11 +11,16 @@ import {
   CurrencyRupeeIcon,
   ClipboardDocumentIcon,
   ShieldCheckIcon,
+  ShieldExclamationIcon,
   ClockIcon,
   ArrowPathIcon,
   ArrowUpRightIcon,
   ExclamationTriangleIcon,
   QrCodeIcon,
+  QueueListIcon,
+  LockClosedIcon,
+  BoltIcon,
+  DocumentCheckIcon,
   ChatBubbleLeftRightIcon,
   EnvelopeIcon
 } from '@heroicons/react/24/outline';
@@ -41,19 +46,24 @@ const EventRegistration = ({ event, onClose, onRegistered }) => {
   const accountEmail = user?.email || '';
   const isStudentAccount = user?.role === 'student';
 
+  const [youpiConfig, setYoupiConfig] = useState(null);
   const [formData, setFormData] = useState({
     name: user?.name || '',
     regNo: accountEmail ? accountEmail.split('@')[0] : '',
     email: accountEmail,
-    needsAccommodation: false
+    needsAccommodation: false,
+    method: 'UPI',
+    preferredVpa: ''
   });
   const [youpiSession, setYoupiSession] = useState(null);
+  const [bannedError, setBannedError] = useState('');
   const [utr, setUtr] = useState('');
   const [upiCopied, setUpiCopied] = useState(false);
   const [secondsLeft, setSecondsLeft] = useState(0);
 
   const [loading, setLoading] = useState(false);
   const [submittingUtr, setSubmittingUtr] = useState(false);
+  const [verifyingNow, setVerifyingNow] = useState(false);
   const [pollingStatus, setPollingStatus] = useState(false);
   const [error, setError] = useState('');
   const [bookingSuccess, setBookingSuccess] = useState(false);
@@ -62,6 +72,52 @@ const EventRegistration = ({ event, onClose, onRegistered }) => {
   const [confirmedEmailTarget, setConfirmedEmailTarget] = useState('');
 
   const effectiveEmail = isStudentAccount ? accountEmail : (formData.email.trim() || accountEmail);
+
+  useEffect(() => {
+    if (!isPaidEvent) return undefined;
+    let cancelled = false;
+    axios
+      .get(`${backendUrl}/api/payments/youpi/config`)
+      .then((res) => {
+        if (!cancelled && res.data) {
+          setYoupiConfig(res.data);
+          if (res.data.defaultMethod) {
+            setFormData((p) => ({ ...p, method: res.data.defaultMethod }));
+          }
+        }
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, [backendUrl, isPaidEvent]);
+
+  const availableVpaOptions = useMemo(() => {
+    const raw = [
+      event?.paymentUpiId,
+      ...(Array.isArray(event?.backupPaymentUpiIds) ? event.backupPaymentUpiIds : []),
+      youpiConfig?.defaultPayeeVpa,
+      ...(Array.isArray(youpiConfig?.backupVpas) ? youpiConfig.backupVpas : [])
+    ];
+    const seen = new Set();
+    const list = [];
+    for (const item of raw) {
+      const clean = String(item || '').trim();
+      if (!clean) continue;
+      const key = clean.toLowerCase();
+      if (seen.has(key)) continue;
+      seen.add(key);
+      list.push(clean);
+    }
+    return list;
+  }, [event?.backupPaymentUpiIds, event?.paymentUpiId, youpiConfig?.backupVpas, youpiConfig?.defaultPayeeVpa]);
+
+  const effectivePreferredVpa =
+    (formData.preferredVpa &&
+    (availableVpaOptions.length === 0 ||
+      availableVpaOptions.some((v) => v.toLowerCase() === formData.preferredVpa.toLowerCase()))
+      ? formData.preferredVpa
+      : availableVpaOptions[0]) || '';
 
   const handleInputChange = (e) => {
     const { name, value, type, checked } = e.target;
@@ -72,23 +128,24 @@ const EventRegistration = ({ event, onClose, onRegistered }) => {
     }));
   };
 
-  // Sync live countdown timer from server expiresAt
+  // Sync live countdown timer from server expiresAt / processingExpiresAt
   useEffect(() => {
-    if (!youpiSession?.expiresAt || youpiSession.status !== 'ACTIVE') {
+    const targetIso =
+      youpiSession?.status === 'PROCESSING'
+        ? youpiSession?.processingExpiresAt
+        : youpiSession?.expiresAt;
+    if (!targetIso || !['ACTIVE', 'PROCESSING'].includes(youpiSession?.status)) {
       setSecondsLeft(youpiSession?.timeRemainingSeconds || 0);
       return undefined;
     }
     const updateRemaining = () => {
-      const rem = Math.max(
-        0,
-        Math.ceil((new Date(youpiSession.expiresAt).getTime() - Date.now()) / 1000)
-      );
+      const rem = Math.max(0, Math.ceil((new Date(targetIso).getTime() - Date.now()) / 1000));
       setSecondsLeft(rem);
     };
     updateRemaining();
     const timer = setInterval(updateRemaining, 1000);
     return () => clearInterval(timer);
-  }, [youpiSession?.expiresAt, youpiSession?.status, youpiSession?.timeRemainingSeconds]);
+  }, [youpiSession?.expiresAt, youpiSession?.processingExpiresAt, youpiSession?.status, youpiSession?.timeRemainingSeconds]);
 
   const handleRefreshStatus = useCallback(
     async (silent = false) => {
@@ -102,6 +159,12 @@ const EventRegistration = ({ event, onClose, onRegistered }) => {
         );
         const nextSession = res.data?.session;
         if (!nextSession) return;
+        if (nextSession.status === 'BLOCKED' || nextSession.isBanned || nextSession.fraudDetected) {
+          setBannedError(
+            nextSession.blockedNotice?.message ||
+              'Access restricted due to suspicious payment observation activity. Contact Admin.'
+          );
+        }
         setYoupiSession(nextSession);
         if (nextSession.settled && nextSession.registration) {
           setConfirmedRegistration(nextSession.registration);
@@ -123,7 +186,7 @@ const EventRegistration = ({ event, onClose, onRegistered }) => {
     [backendUrl, effectiveEmail, event?.whatsappGroupLink, onRegistered, youpiSession?.paymentId]
   );
 
-  // Listen for YouPI-PG portal postMessage & poll external gateway sessions automatically
+  // Listen for YouPI-PG portal postMessage & poll inline sessions
   useEffect(() => {
     if (!youpiSession?.paymentId || bookingSuccess) return undefined;
 
@@ -149,11 +212,11 @@ const EventRegistration = ({ event, onClose, onRegistered }) => {
     if (
       (youpiSession.gatewayMode === 'external' &&
         ['INITIATED', 'ACTIVE', 'QUEUED', 'PROCESSING'].includes(youpiSession.status)) ||
-      youpiSession.status === 'MANUAL_REVIEW'
+      ['MANUAL_REVIEW', 'OBSERVED_SUCCESS', 'QUEUED', 'PROCESSING'].includes(youpiSession.status)
     ) {
       pollInterval = setInterval(() => {
         handleRefreshStatus(true);
-      }, 5000);
+      }, 4500);
     }
 
     return () => {
@@ -183,12 +246,6 @@ const EventRegistration = ({ event, onClose, onRegistered }) => {
     }
   };
 
-  const handleFillDemoUtr = () => {
-    const suffix = Date.now().toString().slice(-8);
-    setUtr(`4128${suffix}`);
-    setError('');
-  };
-
   const createOrRestartYoupiSession = async (forceNew = false) => {
     const token = localStorage.getItem('token');
     if (!token) {
@@ -197,6 +254,7 @@ const EventRegistration = ({ event, onClose, onRegistered }) => {
     }
     try {
       setError('');
+      setBannedError('');
       setLoading(true);
       const response = await axios.post(
         `${backendUrl}/api/payments/youpi/sessions`,
@@ -206,6 +264,8 @@ const EventRegistration = ({ event, onClose, onRegistered }) => {
           regNo: formData.regNo.trim(),
           email: effectiveEmail,
           needsAccommodation: formData.needsAccommodation,
+          method: formData.method || 'UPI',
+          preferredVpa: effectivePreferredVpa || undefined,
           forceNew
         },
         {
@@ -238,10 +298,17 @@ const EventRegistration = ({ event, onClose, onRegistered }) => {
       }
     } catch (err) {
       console.error('YouPI session initialization error:', err);
-      setError(
-        err.response?.data?.message ||
-          'Failed to start YouPI-PG checkout session. Please try again.'
-      );
+      if (err.response?.status === 403 && (err.response?.data?.isBanned || err.response?.data?.code === 'BANNED_IDENTITY')) {
+        setBannedError(
+          err.response?.data?.message ||
+            'Account suspended due to fraudulent payment notification activity. Contact Administrator.'
+        );
+      } else {
+        setError(
+          err.response?.data?.message ||
+            'Failed to start YouPI-PG checkout session. Please try again.'
+        );
+      }
     } finally {
       setLoading(false);
     }
@@ -297,6 +364,25 @@ const EventRegistration = ({ event, onClose, onRegistered }) => {
     }
   };
 
+  const handlePaymentDoneInline = async () => {
+    if (!youpiSession?.paymentId) return;
+    try {
+      setError('');
+      setVerifyingNow(true);
+      const token = localStorage.getItem('token');
+      const res = await axios.post(
+        `${backendUrl}/api/payments/youpi/sessions/${youpiSession.paymentId}/payment-done`,
+        {},
+        { headers: { Authorization: `Bearer ${token}` } }
+      );
+      if (res.data?.session) setYoupiSession(res.data.session);
+    } catch (err) {
+      setError(err.response?.data?.message || 'Unable to enter 30s verification window.');
+    } finally {
+      setVerifyingNow(false);
+    }
+  };
+
   const handleSubmitUtr = async (e) => {
     e.preventDefault();
     if (!youpiSession?.paymentId) return;
@@ -311,7 +397,7 @@ const EventRegistration = ({ event, onClose, onRegistered }) => {
       setSubmittingUtr(true);
       const token = localStorage.getItem('token');
       const res = await axios.post(
-        `${backendUrl}/api/payments/youpi/sessions/${youpiSession.paymentId}/submit-utr`,
+        `${backendUrl}/api/payments/youpi/sessions/${youpiSession.paymentId}/manual-utr`,
         {
           utr: cleaned,
           name: formData.name.trim(),
@@ -343,8 +429,8 @@ const EventRegistration = ({ event, onClose, onRegistered }) => {
         onRegistered?.(reg);
       }
     } catch (err) {
-      console.error('YouPI UTR verification error:', err);
-      setError(err.response?.data?.message || 'UTR verification failed. Check the reference ID.');
+      console.error('YouPI UTR submission error:', err);
+      setError(err.response?.data?.message || 'UTR submission failed. Check the reference ID.');
     } finally {
       setSubmittingUtr(false);
     }
@@ -352,6 +438,10 @@ const EventRegistration = ({ event, onClose, onRegistered }) => {
 
   const handleCancelSession = async () => {
     if (!youpiSession?.paymentId) return;
+    if (youpiSession.status === 'PROCESSING' || youpiSession.canCancel === false) {
+      setError('Cannot cancel while 30-second bank verification is in progress.');
+      return;
+    }
     try {
       const token = localStorage.getItem('token');
       await axios.post(
@@ -380,7 +470,11 @@ const EventRegistration = ({ event, onClose, onRegistered }) => {
   const isSessionExpired =
     youpiSession &&
     (youpiSession.status === 'EXPIRED' ||
-      (youpiSession.status === 'ACTIVE' && youpiSession.expiresAt && secondsLeft <= 0));
+      (['ACTIVE', 'PROCESSING'].includes(youpiSession.status) &&
+        ((youpiSession.status === 'PROCESSING'
+          ? youpiSession.processingExpiresAt
+          : youpiSession.expiresAt) &&
+          secondsLeft <= 0)));
   const isSessionTerminalError =
     youpiSession && ['FAILED', 'CANCELLED'].includes(youpiSession.status);
 
@@ -419,7 +513,7 @@ const EventRegistration = ({ event, onClose, onRegistered }) => {
                 </span>
                 {isPaidEvent && (
                   <span className="font-mono text-[11px] px-2 py-0.5 rounded-[5px] bg-[#4cc38a]/12 text-[#4cc38a] border border-[#4cc38a]/25">
-                    YOUPI-PG VERIFIED
+                    RECONCILED
                   </span>
                 )}
               </div>
@@ -444,38 +538,6 @@ const EventRegistration = ({ event, onClose, onRegistered }) => {
                   <span className="font-medium text-[#4cc38a]">Free</span>
                 )}
               </div>
-              {isPaidEvent && (
-                <>
-                  <div className="flex justify-between gap-2">
-                    <span className="text-[#8a847a]">Gateway</span>
-                    <span className="font-mono uppercase text-[#efe9de]">
-                      {confirmedRegistration?.paymentMethod || 'youpi'}
-                    </span>
-                  </div>
-                  {(confirmedRegistration?.youpiOrderId || youpiSession?.orderId) && (
-                    <div className="flex justify-between gap-2">
-                      <span className="text-[#8a847a]">YouPI Order ID</span>
-                      <span className="font-mono text-[#efe9de] truncate max-w-[230px]">
-                        {confirmedRegistration?.youpiOrderId || youpiSession?.orderId}
-                      </span>
-                    </div>
-                  )}
-                  {confirmedRegistration?.transactionId && (
-                    <div className="flex justify-between gap-2">
-                      <span className="text-[#8a847a]">UTR / Transaction Ref</span>
-                      <span className="font-mono text-[#ebb05d] truncate max-w-[230px]">
-                        {confirmedRegistration.transactionId}
-                      </span>
-                    </div>
-                  )}
-                </>
-              )}
-              {formData.needsAccommodation && (
-                <div className="flex justify-between gap-2">
-                  <span className="text-[#8a847a]">Accommodation</span>
-                  <span className="text-[#ebb05d]">Requested</span>
-                </div>
-              )}
               {(confirmedEmailTarget || confirmedRegistration?.email || effectiveEmail) && (
                 <div className="flex justify-between gap-2">
                   <span className="text-[#8a847a]">Confirmation email</span>
@@ -554,6 +616,16 @@ const EventRegistration = ({ event, onClose, onRegistered }) => {
               </div>
             </div>
 
+            {bannedError && (
+              <div className="mb-4 p-4 rounded-[10px] bg-[#e5484d]/12 border border-[#e5484d]/35 text-[#efe9de] space-y-1.5">
+                <div className="flex items-center gap-2 text-[#e5484d] font-medium text-[13px]">
+                  <ShieldExclamationIcon className="h-5 w-5 shrink-0" />
+                  <span>ACCOUNT SUSPENDED (BANNED_IDENTITY)</span>
+                </div>
+                <p className="text-[12px] text-[#d9ceb8] leading-relaxed">{bannedError}</p>
+              </div>
+            )}
+
             {error && (
               <div className="mb-4 p-3 rounded-[8px] bg-[#e5484d]/10 border border-[#e5484d]/30 text-[#e5484d] text-[13px]">
                 {error}
@@ -623,30 +695,86 @@ const EventRegistration = ({ event, onClose, onRegistered }) => {
                   </div>
                   <p className="mt-1 text-[11px] text-[#8a847a]">
                     Your digital pass confirmation{isPaidEvent ? ', YouPI payment receipt,' : ''}{' '}
-                    {event?.hasWhatsappGroup || event?.whatsappGroupLink ? 'and WhatsApp group invite ' : ''}will be mailed directly to your verified student email ID.
+                    {event?.hasWhatsappGroup || event?.whatsappGroupLink ? 'and WhatsApp group invite ' : ''}will be mailed directly once verified.
                   </p>
                 </div>
 
                 {isPaidEvent && (
-                  <div className="rounded-[12px] bg-[#161513] border border-[#e09132]/30 p-4 space-y-2">
+                  <div className="rounded-[12px] bg-[#161513] border border-[#e09132]/30 p-4 space-y-3">
                     <div className="flex items-center justify-between gap-2">
                       <div className="flex items-center gap-2">
                         <ShieldCheckIcon className="h-4 w-4 text-[#ebb05d]" strokeWidth={1.75} />
                         <span className="text-[13px] font-medium text-[#efe9de]">
-                          Powered by YouPI-PG V2
+                          YouPI-PG V2 Method &amp; Payee Channel
                         </span>
                       </div>
                       <span className="text-[11px] font-mono px-2 py-0.5 rounded-[5px] bg-[#4cc38a]/12 text-[#4cc38a] border border-[#4cc38a]/25">
-                        0% transaction fee
+                        0% fee
                       </span>
                     </div>
-                    <p className="text-[12px] text-[#aaa398] leading-relaxed">
-                      Next step generates a dynamic ISO/IEC 18004 UPI QR code, app intents, and cryptographic HMAC webhook session for <strong className="font-mono text-[#efe9de]">{currencySymbol}{fee}</strong> to unlock this event pass and linked competitions.
-                    </p>
+
+                    <div className="grid grid-cols-2 gap-2">
+                      <button
+                        type="button"
+                        onClick={() => setFormData((p) => ({ ...p, method: 'UPI' }))}
+                        className={`p-2.5 rounded-[9px] border text-left text-[12px] transition-colors ${
+                          formData.method === 'UPI'
+                            ? 'bg-[#e09132]/15 border-[#e09132]/45 text-[#efe9de]'
+                            : 'bg-[#12110f] border-[#efe9de]/[0.08] text-[#aaa398]'
+                        }`}
+                      >
+                        <div className="font-medium flex items-center gap-1.5">
+                          <BoltIcon className="h-3.5 w-3.5 text-[#ebb05d]" />
+                          <span>UPI Auto-Verify</span>
+                        </div>
+                        <span className="block text-[10.5px] text-[#8a847a] mt-0.5">
+                          QR + 30s auto listener
+                        </span>
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={() => setFormData((p) => ({ ...p, method: 'MANUAL_UPI' }))}
+                        className={`p-2.5 rounded-[9px] border text-left text-[12px] transition-colors ${
+                          formData.method === 'MANUAL_UPI'
+                            ? 'bg-[#e09132]/15 border-[#e09132]/45 text-[#efe9de]'
+                            : 'bg-[#12110f] border-[#efe9de]/[0.08] text-[#aaa398]'
+                        }`}
+                      >
+                        <div className="font-medium flex items-center gap-1.5">
+                          <DocumentCheckIcon className="h-3.5 w-3.5 text-[#ebb05d]" />
+                          <span>Manual UTR</span>
+                        </div>
+                        <span className="block text-[10.5px] text-[#8a847a] mt-0.5">
+                          Submit 12-digit UTR
+                        </span>
+                      </button>
+                    </div>
+
+                    {availableVpaOptions.length > 0 && (
+                      <div>
+                        <div className="flex items-center justify-between text-[11px] text-[#aaa398] mb-1">
+                          <span>Payee UPI Channel (locks when session starts)</span>
+                          <LockClosedIcon className="h-3 w-3 text-[#ebb05d]" />
+                        </div>
+                        <select
+                          value={effectivePreferredVpa}
+                          onChange={(e) => setFormData((p) => ({ ...p, preferredVpa: e.target.value }))}
+                          className="input-field h-9 py-0 font-mono text-[12px]"
+                        >
+                          {availableVpaOptions.map((vpa, idx) => (
+                            <option key={vpa} value={vpa}>
+                              {idx === 0 ? `Primary · ${vpa}` : `Backup · ${vpa}`}
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+                    )}
+
                     {(event?.hasWhatsappGroup || event?.whatsappGroupLink) && (
-                      <p className="text-[12px] text-[#4cc38a] flex items-center gap-1.5 pt-0.5">
+                      <p className="text-[11.5px] text-[#4cc38a] flex items-center gap-1.5 pt-0.5">
                         <ChatBubbleLeftRightIcon className="h-4 w-4 shrink-0" strokeWidth={1.75} />
-                        <span>Includes official event WhatsApp group link (revealed after payment verification).</span>
+                        <span>Includes official WhatsApp group link (revealed after bank reconciliation).</span>
                       </p>
                     )}
                   </div>
@@ -667,7 +795,7 @@ const EventRegistration = ({ event, onClose, onRegistered }) => {
                   <button type="button" onClick={onClose} className="btn-secondary h-10 px-4 text-[13px]">
                     Cancel
                   </button>
-                  <button type="submit" disabled={loading} className="btn-primary h-10 px-5 text-[13px]">
+                  <button type="submit" disabled={loading || Boolean(bannedError)} className="btn-primary h-10 px-5 text-[13px]">
                     {loading
                       ? isPaidEvent
                         ? 'Initializing YouPI...'
@@ -680,14 +808,13 @@ const EventRegistration = ({ event, onClose, onRegistered }) => {
               </form>
             ) : (
               <div className="space-y-4">
-                {/* YouPI Session Status Bar */}
                 <div className="rounded-[10px] bg-[#161513] border border-[#e09132]/30 p-3.5 flex flex-wrap items-center justify-between gap-2">
                   <div className="min-w-0">
                     <div className="flex items-center gap-2">
                       <QrCodeIcon className="h-4 w-4 text-[#ebb05d] shrink-0" strokeWidth={1.75} />
                       <span className="text-[13px] font-medium text-[#efe9de]">YouPI-PG V2</span>
                       <span className="px-1.5 py-0.5 rounded-[5px] text-[10px] font-mono bg-[#262421] text-[#aaa398] border border-[#efe9de]/[0.08]">
-                        {youpiSession.gatewayMode === 'external' ? 'GATEWAY' : 'UPI QR'}
+                        {youpiSession.method || 'UPI'}
                       </span>
                     </div>
                     <p className="text-[11px] font-mono text-[#8a847a] truncate mt-1">
@@ -697,7 +824,7 @@ const EventRegistration = ({ event, onClose, onRegistered }) => {
                   </div>
 
                   <div className="flex items-center gap-2 shrink-0">
-                    {youpiSession.status === 'ACTIVE' && !isSessionExpired && (
+                    {['ACTIVE', 'PROCESSING'].includes(youpiSession.status) && !isSessionExpired && (
                       <span className="inline-flex items-center gap-1 px-2 py-1 rounded-[6px] text-[11px] font-mono tabular-nums bg-[#262421] text-[#ebb05d] border border-[#e09132]/30">
                         <ClockIcon className="h-3.5 w-3.5" strokeWidth={1.75} />
                         <span>{formatCountdown(secondsLeft)}</span>
@@ -705,7 +832,9 @@ const EventRegistration = ({ event, onClose, onRegistered }) => {
                     )}
                     <span
                       className={`px-2 py-1 rounded-[6px] text-[11px] font-mono border ${
-                        youpiSession.status === 'MANUAL_REVIEW'
+                        ['MANUAL_REVIEW', 'OBSERVED_SUCCESS', 'QUEUED', 'PROCESSING'].includes(
+                          youpiSession.status
+                        )
                           ? 'bg-[#e09132]/15 text-[#ebb05d] border-[#e09132]/35'
                           : isSessionExpired || isSessionTerminalError
                             ? 'bg-[#e5484d]/15 text-[#e5484d] border-[#e5484d]/35'
@@ -717,8 +846,55 @@ const EventRegistration = ({ event, onClose, onRegistered }) => {
                   </div>
                 </div>
 
-                {/* Expired / Failed / Cancelled state */}
-                {isSessionExpired || isSessionTerminalError ? (
+                {youpiSession.status === 'QUEUED' ? (
+                  <div className="rounded-[12px] bg-[#161513] border border-[#e09132]/35 p-4 space-y-3 text-[13px]">
+                    <div className="flex items-start gap-2.5">
+                      <QueueListIcon className="h-5 w-5 text-[#ebb05d] shrink-0 mt-0.5" />
+                      <div>
+                        <p className="font-medium text-[#efe9de]">
+                          Queued in FIFO Slot #{youpiSession.queuePosition || 1}
+                        </p>
+                        <p className="text-[12px] text-[#aaa398] mt-1">
+                          Exclusive slot in use for <span className="font-mono text-[#efe9de]">{youpiSession.payeeVpa}</span>. QR code is withheld until active.
+                        </p>
+                      </div>
+                    </div>
+                    <div className="flex gap-2">
+                      <button
+                        type="button"
+                        onClick={() => handleRefreshStatus(false)}
+                        disabled={pollingStatus}
+                        className="btn-primary flex-1 h-9 text-[12px]"
+                      >
+                        {pollingStatus ? 'Checking...' : 'Check Slot'}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={handleCancelSession}
+                        className="btn-secondary h-9 px-3 text-[12px]"
+                      >
+                        Cancel
+                      </button>
+                    </div>
+                  </div>
+                ) : youpiSession.status === 'OBSERVED_SUCCESS' ? (
+                  <div className="rounded-[12px] bg-[#161513] border border-[#e09132]/35 p-4 space-y-3 text-[13px]">
+                    <p className="font-medium text-[#ebb05d]">
+                      Bank Alert Observed (NOT_RECONCILED)
+                    </p>
+                    <p className="text-[12px] text-[#aaa398]">
+                      Tag: <span className="font-mono text-[#efe9de]">{youpiSession.verificationTag}</span>. Your pass &amp; WhatsApp group unlock after bank CSV statement import or Admin reconciliation.
+                    </p>
+                    <button
+                      type="button"
+                      onClick={() => handleRefreshStatus(false)}
+                      disabled={pollingStatus}
+                      className="btn-primary w-full h-9 text-[12px]"
+                    >
+                      {pollingStatus ? 'Checking...' : 'Sync Settlement Status'}
+                    </button>
+                  </div>
+                ) : isSessionExpired || isSessionTerminalError ? (
                   <div className="rounded-[12px] bg-[#e5484d]/10 border border-[#e5484d]/30 p-4 space-y-3">
                     <div className="flex items-start gap-2.5 text-[#efe9de]">
                       <ExclamationTriangleIcon className="h-5 w-5 text-[#e5484d] shrink-0 mt-0.5" strokeWidth={1.75} />
@@ -730,7 +906,7 @@ const EventRegistration = ({ event, onClose, onRegistered }) => {
                         </p>
                         <p className="text-[#aaa398] mt-1">
                           {youpiSession.failureReason ||
-                            'UPI checkout sessions stay open for 5 minutes to keep transaction matching conflict-free.'}
+                            'UPI checkout sessions stay open for 5 minutes.'}
                         </p>
                       </div>
                     </div>
@@ -744,79 +920,46 @@ const EventRegistration = ({ event, onClose, onRegistered }) => {
                     </button>
                   </div>
                 ) : youpiSession.status === 'MANUAL_REVIEW' ? (
-                  /* Manual Bank Review state */
                   <div className="rounded-[12px] bg-[#161513] border border-[#e09132]/35 p-4 space-y-3 text-[13px]">
                     <div className="flex items-start gap-2.5">
                       <ClockIcon className="h-5 w-5 text-[#ebb05d] shrink-0 mt-0.5" strokeWidth={1.75} />
                       <div>
                         <p className="font-medium text-[#efe9de]">
-                          UTR submitted · awaiting reconciliation
+                          {youpiSession.settlementState || 'PENDING_VERIFICATION'} · awaiting bank reconciliation
                         </p>
                         <p className="text-[12px] text-[#aaa398] mt-1">
-                          Reference <span className="font-mono text-[#ebb05d]">{youpiSession.utr}</span> has been recorded. Once an organizer or admin reconciles this payment, your pass and linked competitions unlock automatically.
+                          Reference <span className="font-mono text-[#ebb05d]">{youpiSession.utr || 'Pending'}</span> has been recorded. Pass unlocks after merchant reconciliation.
                         </p>
                       </div>
                     </div>
-                    <div className="flex flex-wrap gap-2 pt-1">
-                      <button
-                        type="button"
-                        onClick={() => handleRefreshStatus(false)}
-                        disabled={pollingStatus}
-                        className="btn-primary flex-1 h-9 text-[12px]"
-                      >
-                        <ArrowPathIcon
-                          className={`h-4 w-4 ${pollingStatus ? 'animate-spin' : ''}`}
-                          strokeWidth={1.75}
-                        />
-                        <span>{pollingStatus ? 'Checking...' : 'Check verification status'}</span>
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => createOrRestartYoupiSession(true)}
-                        className="btn-secondary h-9 px-3 text-[12px]"
-                      >
-                        Retry new UTR
-                      </button>
-                    </div>
+                    <button
+                      type="button"
+                      onClick={() => handleRefreshStatus(false)}
+                      disabled={pollingStatus}
+                      className="btn-primary w-full h-9 text-[12px]"
+                    >
+                      {pollingStatus ? 'Checking...' : 'Check verification status'}
+                    </button>
                   </div>
-                ) : youpiSession.gatewayMode === 'external' && youpiSession.checkoutUrl ? (
-                  /* External YouPI-PG Hosted Checkout Gateway */
-                  <div className="space-y-3">
-                    <div className="rounded-[12px] overflow-hidden border border-[#efe9de]/[0.12] bg-[#12110f] h-[340px]">
-                      <iframe
-                        src={youpiSession.checkoutUrl}
-                        title="YouPI-PG Hosted Checkout"
-                        className="w-full h-full border-0"
-                        allow="payment"
-                      />
-                    </div>
-                    <div className="flex flex-wrap items-center justify-between gap-2">
-                      <a
-                        href={youpiSession.checkoutUrl}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="inline-flex items-center gap-1 text-[12px] text-[#ebb05d] hover:underline"
-                      >
-                        <span>Open external checkout portal</span>
-                        <ArrowUpRightIcon className="h-3.5 w-3.5" strokeWidth={1.75} />
-                      </a>
-                      <button
-                        type="button"
-                        onClick={() => handleRefreshStatus(false)}
-                        disabled={pollingStatus}
-                        className="btn-primary h-9 px-4 text-[12px]"
-                      >
-                        <ArrowPathIcon
-                          className={`h-3.5 w-3.5 ${pollingStatus ? 'animate-spin' : ''}`}
-                          strokeWidth={1.75}
-                        />
-                        <span>{pollingStatus ? 'Syncing...' : 'Sync payment status'}</span>
-                      </button>
-                    </div>
+                ) : youpiSession.status === 'PROCESSING' ? (
+                  <div className="rounded-[12px] bg-[#161513] border border-[#e09132]/35 p-4 space-y-3 text-[13px]">
+                    <p className="font-medium text-[#ebb05d]">
+                      30s Bank Alert Listener Active ({formatCountdown(secondsLeft)})
+                    </p>
+                    <p className="text-[12px] text-[#aaa398]">
+                      Listening for SMS/Email bank credit confirmation. Cancel is locked during active verification.
+                    </p>
+                    <button
+                      type="button"
+                      onClick={() => handleRefreshStatus(false)}
+                      disabled={pollingStatus}
+                      className="btn-primary w-full h-9 text-[12px]"
+                    >
+                      {pollingStatus ? 'Checking...' : 'Refresh Status'}
+                    </button>
                   </div>
                 ) : (
-                  /* Embedded YouPI-PG V2 QR + App Intents + UTR Webhook Verification */
-                  <form onSubmit={handleSubmitUtr} className="space-y-3.5">
+                  <div className="space-y-3.5">
                     {youpiSession.qrSvg && (
                       <div className="rounded-[12px] bg-[#161513] border border-[#efe9de]/[0.08] p-4 flex flex-col sm:flex-row items-center gap-4">
                         <div className="bg-white p-2.5 rounded-[10px] shrink-0 shadow-sm">
@@ -826,14 +969,9 @@ const EventRegistration = ({ event, onClose, onRegistered }) => {
                             className="w-36 h-36 block"
                           />
                         </div>
-                        <div className="flex-1 min-w-0 space-y-2.5 text-[12px]">
+                        <div className="flex-1 min-w-0 space-y-2 text-[12px]">
                           <div>
-                            <span className="block text-[11px] text-[#8a847a]">Pay to UPI ID (scan QR with any UPI app)</span>
-                            {youpiSession.payeeName && (
-                              <span className="block text-[12px] font-medium text-[#efe9de] mt-0.5">
-                                Banking name: <span className="text-[#ebb05d]">{youpiSession.payeeName}</span>
-                              </span>
-                            )}
+                            <span className="block text-[11px] text-[#8a847a]">Pay to locked UPI ID</span>
                             <div className="flex items-center gap-2 mt-1">
                               <span className="font-mono text-[13px] text-[#efe9de] break-all">
                                 {youpiSession.payeeVpa}
@@ -841,103 +979,52 @@ const EventRegistration = ({ event, onClose, onRegistered }) => {
                               <button
                                 type="button"
                                 onClick={handleCopyUpi}
-                                className="inline-flex items-center gap-1 px-2 py-0.5 rounded-[5px] bg-[#262421] hover:bg-[#302d29] text-[#efe9de] border border-[#efe9de]/[0.08] shrink-0"
+                                className="inline-flex items-center gap-1 px-2 py-0.5 rounded-[5px] bg-[#262421] text-[#efe9de] border border-[#efe9de]/[0.08] shrink-0"
                               >
-                                <ClipboardDocumentIcon className="h-3.5 w-3.5 text-[#ebb05d]" strokeWidth={1.5} />
+                                <ClipboardDocumentIcon className="h-3.5 w-3.5 text-[#ebb05d]" />
                                 <span>{upiCopied ? 'Copied' : 'Copy'}</span>
                               </button>
                             </div>
                           </div>
-
-                          <div className="text-[11px] font-mono text-[#8a847a]">
-                            Slot: {youpiSession.queuePosition === 0 ? 'Active immediate slot' : `Concurrent #${youpiSession.queuePosition + 1}`}
-                          </div>
-
-                          {youpiSession.upiAppIntents?.length > 0 && (
-                            <div className="flex flex-wrap gap-1.5">
-                              {youpiSession.upiAppIntents.slice(0, 4).map((app) => (
-                                <a
-                                  key={app.id}
-                                  href={app.upiUri}
-                                  className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-[6px] bg-[#262421] hover:bg-[#302d29] text-[#efe9de] border border-[#efe9de]/[0.08] text-[11px] transition-colors"
-                                >
-                                  <span
-                                    className="w-2 h-2 rounded-full shrink-0"
-                                    style={{ backgroundColor: app.brandColor }}
-                                  />
-                                  <span>{app.shortName}</span>
-                                </a>
-                              ))}
-                            </div>
-                          )}
                         </div>
                       </div>
                     )}
 
-                    {youpiSession.paymentInstructions && (
-                      <p className="text-[12px] text-[#aaa398] leading-relaxed">
-                        {youpiSession.paymentInstructions}
-                      </p>
-                    )}
-
-                    <div>
-                      <div className="flex items-center justify-between mb-1">
-                        <label htmlFor="utr" className="text-[12px] font-medium text-[#aaa398]">
-                          Enter real 12-digit UPI / UTR reference after paying *
-                        </label>
-                        {youpiSession?.allowDemoUtr && (
-                          <button
-                            type="button"
-                            onClick={handleFillDemoUtr}
-                            className="text-[11px] font-mono text-[#ebb05d] hover:underline"
-                          >
-                            Fill dev test UTR
+                    {youpiSession.method === 'MANUAL_UPI' ? (
+                      <form onSubmit={handleSubmitUtr} className="space-y-3">
+                        <input
+                          type="text"
+                          value={utr}
+                          onChange={(e) => setUtr(e.target.value)}
+                          required
+                          placeholder="e.g. 412895123456 (12-digit UTR)"
+                          className="input-field font-mono text-[13px]"
+                        />
+                        <div className="flex gap-2">
+                          <button type="button" onClick={handleCancelSession} className="btn-secondary h-10 px-4 text-[13px]">
+                            Cancel
                           </button>
-                        )}
-                      </div>
-                      <input
-                        type="text"
-                        id="utr"
-                        value={utr}
-                        onChange={(e) => setUtr(e.target.value)}
-                        required
-                        placeholder="e.g. 412895123456 (12-digit UTR)"
-                        className="input-field font-mono text-[13px]"
-                      />
-                    </div>
-
-                    <div className="flex flex-wrap items-center justify-between gap-2 text-[11px] text-[#8a847a]">
-                      {youpiSession.checkoutUrl ? (
-                        <a
-                          href={youpiSession.checkoutUrl}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          className="inline-flex items-center gap-1 text-[#aaa398] hover:text-[#ebb05d] transition-colors"
+                          <button type="submit" disabled={submittingUtr} className="btn-primary flex-1 h-10 text-[13px]">
+                            {submittingUtr ? 'Submitting UTR...' : 'Submit UTR'}
+                          </button>
+                        </div>
+                      </form>
+                    ) : (
+                      <div className="flex gap-2">
+                        <button type="button" onClick={handleCancelSession} className="btn-secondary h-10 px-4 text-[13px]">
+                          Cancel
+                        </button>
+                        <button
+                          type="button"
+                          onClick={handlePaymentDoneInline}
+                          disabled={verifyingNow}
+                          className="btn-primary flex-1 h-10 text-[13px]"
                         >
-                          <span>Hosted YouPI portal</span>
-                          <ArrowUpRightIcon className="h-3 w-3" strokeWidth={1.75} />
-                        </a>
-                      ) : (
-                        <span />
-                      )}
-                      <button
-                        type="button"
-                        onClick={handleCancelSession}
-                        className="text-[#8a847a] hover:text-[#e5484d] transition-colors"
-                      >
-                        Cancel session &amp; edit details
-                      </button>
-                    </div>
-
-                    <div className="pt-3 border-t border-[#efe9de]/[0.08] flex justify-end gap-3">
-                      <button type="button" onClick={onClose} className="btn-secondary h-10 px-4 text-[13px]">
-                        Close
-                      </button>
-                      <button type="submit" disabled={submittingUtr} className="btn-primary h-10 px-5 text-[13px]">
-                        {submittingUtr ? 'Verifying via YouPI...' : `Verify & confirm ${currencySymbol}${fee}`}
-                      </button>
-                    </div>
-                  </form>
+                          {verifyingNow ? 'Starting 30s Check...' : 'I Have Paid — Verify (30s)'}
+                        </button>
+                      </div>
+                    )}
+                  </div>
                 )}
               </div>
             )}

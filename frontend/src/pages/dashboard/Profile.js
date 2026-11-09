@@ -403,9 +403,15 @@ const Profile = () => {
                                 {isPaidEvent
                                   ? isPaidComplete
                                     ? `Paid ${feeSymbol}${reg.amountPaid || event.registrationFee}`
-                                    : reg.youpiStatus === 'MANUAL_REVIEW'
-                                      ? 'YouPI under review'
-                                      : 'Payment pending'
+                                    : reg.youpiStatus === 'OBSERVED_SUCCESS'
+                                      ? 'Observed · Not reconciled'
+                                      : reg.youpiStatus === 'MANUAL_REVIEW'
+                                        ? 'Pending verification'
+                                        : reg.youpiStatus === 'PROCESSING'
+                                          ? 'Verifying bank alert'
+                                          : reg.youpiStatus === 'QUEUED'
+                                            ? 'In payment queue'
+                                            : 'Payment pending'
                                   : 'Issued (Free)'}
                               </span>
                             </span>
@@ -466,6 +472,11 @@ const Profile = () => {
                                 <span className="text-[#aaa398]">{reg.youpiOrderId}</span>
                               </div>
                             )}
+                            {isPaidEvent && !isPaidComplete && reg.youpiStatus === 'OBSERVED_SUCCESS' && (
+                              <div className="pt-2 font-sans text-[11.5px] text-[#ebb05d]">
+                                Bank alert observed (NOT_RECONCILED) — pass &amp; WhatsApp group unlock after bank CSV reconciliation.
+                              </div>
+                            )}
                             {isPaidComplete && event.whatsappGroupLink && (
                               <div className="pt-2 font-sans">
                                 <a
@@ -516,7 +527,11 @@ const Profile = () => {
                               }
                               className="btn-primary flex-1 h-9 text-[13px]"
                             >
-                              Complete {feeSymbol}{event.registrationFee} payment
+                              {['OBSERVED_SUCCESS', 'MANUAL_REVIEW', 'PROCESSING', 'QUEUED'].includes(
+                                reg.youpiStatus
+                              )
+                                ? 'View YouPI verification status'
+                                : `Complete ${feeSymbol}${event.registrationFee} payment`}
                             </Link>
                           )}
                         </div>

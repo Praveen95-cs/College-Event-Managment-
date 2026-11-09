@@ -7,13 +7,21 @@ const User = require('../../models/auth/User');
 const SystemSetting = require('../../models/system/SystemSetting');
 const YoupiPaymentSession = require('../../models/payments/YoupiPaymentSession');
 const YoupiBankObservation = require('../../models/payments/YoupiBankObservation');
+const YoupiStatementLine = require('../../models/payments/YoupiStatementLine');
+const YoupiAndroidDevice = require('../../models/payments/YoupiAndroidDevice');
 const Event = require('../../models/events/Event');
 const { sanitizePlainText } = require('../../utils/sanitize');
 const {
   PaymentEventBus,
+  PaymentStatus,
   UPI_PROVIDERS,
+  ALLOWED_NOTIFICATION_PACKAGES,
+  isAllowedNotificationPackage,
   getYoupiConfig,
   parseVpaList,
+  isValidVpa,
+  normalizeReceivingAccountId,
+  buildStandQrData,
   createYoupiPaymentSession,
   syncAndGetYoupiSession,
   submitUtrAndProcessSession,
@@ -23,15 +31,25 @@ const {
   reconcileSessionByAdmin,
   listAdminYoupiSessions,
   processIncomingWebhook,
+  toPaise,
   toRupeesString
 } = require('../../services/payments/youpiGatewayService');
 const {
   getAutomationConfig,
+  buildSmsGatewayPairingQrData,
+  pairAndroidDevice,
+  verifyAndroidDeviceHmac,
+  listAndroidDevices,
+  revokeAndroidDevice,
+  deleteAndroidDevice,
+  recordAndroidHeartbeat,
+  getActivePollWindowStatus,
   ingestBankObservation,
   pollBankInboxOnce,
   reconcileStatementCsv
 } = require('../../services/payments/paymentAutomationService');
 const { generateQrSvg } = require('../../utils/qrGenerator');
+const { MAX_SCAN_CHARS } = require('../../services/payments/bankAlertParserService');
 
 function escapeHtml(value) {
   return String(value ?? '')
@@ -51,6 +69,13 @@ function constantTimeSecretEqual(expected, actual) {
   } catch {
     return false;
   }
+}
+
+function buildPublicOrigin(req) {
+  const host = req.get('x-forwarded-host') || req.get('host');
+  const proto = (req.get('x-forwarded-proto') || req.protocol || 'http').split(',')[0].trim();
+  if (host) return `${proto}://${host}`;
+  return `http://localhost:${process.env.PORT || 5000}`;
 }
 
 async function authStream(req, res, next) {
@@ -73,20 +98,46 @@ async function authStream(req, res, next) {
   }
 }
 
+async function tryAuthenticateAdminOrObserver(req) {
+  const cfg = await getAutomationConfig({ includeSecrets: true });
+  const authHeader = String(req.headers.authorization || '').trim();
+  const bearer = authHeader.startsWith('Bearer ') ? authHeader.slice(7).trim() : '';
+  const suppliedSecret = String(req.headers['x-youpi-observer-secret'] || bearer || '').trim();
+
+  if (cfg.observerSecret && suppliedSecret && constantTimeSecretEqual(cfg.observerSecret, suppliedSecret)) {
+    return { authorized: true, kind: 'OBSERVER_SECRET' };
+  }
+
+  if (bearer) {
+    try {
+      const decoded = jwt.verify(bearer, process.env.JWT_SECRET);
+      const user = await User.findById(decoded.userId).select('role email name');
+      if (user && ['admin', 'organizer'].includes(user.role)) {
+        return { authorized: true, kind: 'ADMIN_JWT', user };
+      }
+    } catch {}
+  }
+
+  return { authorized: false, cfg };
+}
+
 router.get('/config', async (req, res) => {
   const cfg = getYoupiConfig();
   const autoCfg = await getAutomationConfig().catch(() => ({
     autoVerifyEnabled: false,
-    autoReconcileObserved: true,
+    fulfillOnObserved: false,
     backupVpas: cfg.backupPayeeVpas,
     imapConfigured: false,
-    observerConfigured: false
+    observerConfigured: false,
+    activeWindowMs: cfg.activeDurationMs,
+    processingWindowMs: cfg.processingDurationMs,
+    gracePeriodMs: 5000
   }));
   res.json({
     gateway: 'YouPI-PG V2',
     gatewayMode: cfg.gatewayMode,
     verificationMode: cfg.verificationMode,
-    fulfillOnObserved: cfg.fulfillOnObserved,
+    fulfillOnObserved: false,
     allowDemoUtr: cfg.allowDemoUtr,
     defaultMethod: cfg.defaultMethod,
     vpaConfigured: Boolean(cfg.defaultPayeeVpa),
@@ -95,11 +146,74 @@ router.get('/config', async (req, res) => {
     backupVpaCount: (autoCfg.backupVpas || cfg.backupPayeeVpas || []).length,
     defaultPayeeName: cfg.defaultPayeeName,
     autoVerifyEnabled: Boolean(autoCfg.autoVerifyEnabled),
-    autoReconcileObserved: Boolean(autoCfg.autoReconcileObserved),
     automationActive: Boolean(autoCfg.imapConfigured || autoCfg.observerConfigured),
-    sessionTtlSeconds: Math.round(cfg.sessionTtlMs / 1000),
-    providers: UPI_PROVIDERS
+    sessionTtlSeconds: Math.round(cfg.activeDurationMs / 1000),
+    activeWindowMs: cfg.activeDurationMs,
+    processingWindowMs: cfg.processingDurationMs,
+    gracePeriodMs: autoCfg.gracePeriodMs,
+    providers: UPI_PROVIDERS,
+    allowedNotificationPackagesCount: ALLOWED_NOTIFICATION_PACKAGES.length
   });
+});
+
+// NPCI Static (`mode=02`) or Fixed-Amount (`mode=04`) Stand QR Endpoint
+router.get('/stand-qr', async (req, res) => {
+  try {
+    const cfg = getYoupiConfig();
+    let vpa = String(req.query.preferredVpa || req.query.vpa || '').trim();
+    let payeeName = cfg.defaultPayeeName;
+    let tn = sanitizePlainText(req.query.tn || req.query.note || '', 80);
+
+    if (req.query.eventId) {
+      const ev = await Event.findById(req.query.eventId)
+        .populate('club', 'name')
+        .select('title paymentUpiId backupPaymentUpiIds');
+      if (ev) {
+        if (!vpa && ev.paymentUpiId) vpa = ev.paymentUpiId;
+        if (!tn) tn = sanitizePlainText(ev.title, 60);
+        if (ev.paymentUpiId && vpa === ev.paymentUpiId && ev.club?.name) {
+          payeeName = `${ev.club.name} · Avenor`;
+        }
+      }
+    }
+
+    if (!vpa) vpa = cfg.defaultPayeeVpa;
+    if (!vpa || !isValidVpa(vpa)) {
+      return res.status(400).json({ code: 'INVALID_VPA', message: 'A valid payee UPI VPA is required for Stand QR.' });
+    }
+
+    let amountPaise = null;
+    if (req.query.amount !== undefined && String(req.query.amount).trim() !== '') {
+      amountPaise = toPaise(req.query.amount);
+    }
+    const mode = req.query.mode ? String(req.query.mode).trim() : (amountPaise ? '04' : '02');
+    const mc = sanitizePlainText(req.query.mc || '', 12);
+
+    const data = await buildStandQrData({
+      payeeVpa: vpa,
+      payeeName,
+      amountPaise,
+      merchantCategoryCode: mc,
+      mode,
+      transactionNote: tn,
+      currency: 'INR'
+    });
+
+    res.json({
+      payeeVpa: vpa,
+      payeeName,
+      mode,
+      amountPaise: amountPaise !== null ? String(amountPaise) : null,
+      amount: amountPaise !== null ? toRupeesString(amountPaise) : null,
+      upiUri: data.upiUri,
+      qrSvg: data.qrSvg
+    });
+  } catch (err) {
+    res.status(err.status || 400).json({
+      code: err.code || 'STAND_QR_ERROR',
+      message: err.message || 'Unable to generate Stand QR.'
+    });
+  }
 });
 
 router.get('/youpi.js', (req, res) => {
@@ -150,7 +264,7 @@ router.get('/youpi.js', (req, res) => {
       if (!this.iframe || e.source !== this.iframe.contentWindow) return;
       var evt = e.data && e.data.event;
       if (!evt) return;
-      if (evt === 'youpi.payment_reconciled' || evt === 'youpi.payment_success' || evt === 'youpi.payment_observed') {
+      if (evt === 'youpi.payment_reconciled' || evt === 'youpi.payment_success') {
         if (typeof this.options.onSuccess === 'function') this.options.onSuccess(e.data.data || e.data);
       } else if (evt === 'youpi.modal_close' || evt === 'youpi.cancel') {
         this.close();
@@ -170,17 +284,22 @@ router.get('/portal/:paymentId', async (req, res) => {
     }
 
     const eventDoc = await Event.findById(session.event).select('title location date time').lean();
-    if (!session.qrSvg && session.upiUri) {
+    const isQueued = session.status === PaymentStatus.QUEUED;
+
+    if (!isQueued && !session.qrSvg && session.upiUri) {
       session.qrSvg = await generateQrSvg(session.upiUri, { boxSize: 220 });
       await session.save();
     }
 
-    const qrBase64 = session.qrSvg ? Buffer.from(session.qrSvg, 'utf8').toString('base64') : '';
+    const qrBase64 = !isQueued && session.qrSvg ? Buffer.from(session.qrSvg, 'utf8').toString('base64') : '';
     const amountStr = toRupeesString(session.amountPaise);
+    const nowMs = Date.now();
     const remainingSec =
-      ['ACTIVE', 'PROCESSING'].includes(session.status) && session.expiresAt
-        ? Math.max(0, Math.ceil((new Date(session.expiresAt).getTime() - Date.now()) / 1000))
-        : 0;
+      session.status === PaymentStatus.PROCESSING && session.processingExpiresAt
+        ? Math.max(0, Math.ceil((new Date(session.processingExpiresAt).getTime() - nowMs) / 1000))
+        : session.status === PaymentStatus.ACTIVE && session.expiresAt
+          ? Math.max(0, Math.ceil((new Date(session.expiresAt).getTime() - nowMs) / 1000))
+          : 0;
 
     res.setHeader('Content-Type', 'text/html; charset=utf-8');
     res.send(`<!DOCTYPE html>
@@ -208,28 +327,40 @@ router.get('/portal/:paymentId', async (req, res) => {
 <body>
   <div class="card">
     <div class="top">
-      <div class="brand">AVENOR · YOUPI-PG V2</div>
+      <div class="brand">AVENOR · YOUPI-PG V2 (${escapeHtml(session.method || 'UPI')})</div>
       <span class="badge">${escapeHtml(session.status)}</span>
     </div>
     <div class="muted">${escapeHtml(eventDoc?.title || 'Avenor Event Pass')}</div>
     <div class="amt">₹${escapeHtml(amountStr)}</div>
     <div class="muted">Order: <code>${escapeHtml(session.orderId)}</code> · Remaining: <span id="timer">${escapeHtml(remainingSec)}s</span></div>
     ${
-      qrBase64
+      isQueued
+        ? `<div class="hint"><strong>Queued in FIFO Payment Slot #${escapeHtml(session.queuePosition || 1)}</strong><br/>Another checkout currently holds the exclusive payment slot for this UPI ID. Keep this window open—QR code will reveal automatically as soon as your turn arrives.</div>`
+        : session.status === PaymentStatus.OBSERVED_SUCCESS
+          ? `<div class="hint"><strong>Bank Alert Observed (NOT_RECONCILED)</strong><br/>UTR: <code>${escapeHtml(session.utr || 'Recorded')}</code>. Awaiting bank statement CSV import or admin reconciliation to unlock your pass.</div>`
+          : session.status === PaymentStatus.PROCESSING
+            ? `<div class="hint"><strong>Verifying Bank Alert (30s Window)</strong><br/>Listening for official bank SMS/email alert. Do not close this page.</div>`
+            : ''
+    }
+    ${
+      qrBase64 && [PaymentStatus.ACTIVE, PaymentStatus.PROCESSING].includes(session.status)
         ? `<div class="qr-box"><img src="data:image/svg+xml;base64,${qrBase64}" alt="UPI QR" /><div style="color:#0f172a;font-size:11px;font-family:monospace;margin-top:6px;">Scan directly with GPay, PhonePe, Paytm or BHIM</div></div>`
         : ''
     }
-    <div class="vpa">
+    ${
+      !isQueued
+        ? `<div class="vpa">
       <span id="vpa-text">${escapeHtml(session.payeeVpa)}</span>
       <button type="button" class="copy-btn" onclick="navigator.clipboard && navigator.clipboard.writeText(${JSON.stringify(session.payeeVpa).replace(/</g, '\\u003c')}).then(function(){this.textContent='Copied';}.bind(this))">Copy VPA</button>
-    </div>
+    </div>`
+        : ''
+    }
     ${
-      session.upiUri
+      !isQueued && session.upiUri && session.status === PaymentStatus.ACTIVE
         ? `<a class="btn" href="${escapeHtml(session.upiUri)}">Open UPI App to Pay ₹${escapeHtml(amountStr)}</a>`
         : ''
     }
-    <div class="hint">Seeing GPay "Day limit exceeded"? Copy the UPI ID above, open Google Pay → <strong>Pay UPI ID or number</strong> manually, or switch to an alternate UPI ID inside Avenor Checkout.</div>
-    <p class="muted" style="margin-top:12px;">Once paid, Avenor auto-verifies bank alerts or you can submit your 12-digit UTR to unlock your pass &amp; linked competitions.</p>
+    <div class="hint">Pay exact amount <strong>₹${escapeHtml(amountStr)}</strong> using <strong>${escapeHtml(session.payeeVpa)}</strong> before the window closes.</div>
   </div>
   <script>
     var status = ${JSON.stringify(session.status).replace(/</g, '\\u003c')};
@@ -252,6 +383,8 @@ router.get('/portal/:paymentId', async (req, res) => {
     if (window.parent && window.parent !== window) {
       if (status === 'RECONCILED' || status === 'SUCCESS') {
         window.parent.postMessage({ event: 'youpi.payment_reconciled', data: payload }, '*');
+      } else if (status === 'OBSERVED_SUCCESS') {
+        window.parent.postMessage({ event: 'youpi.payment_observed', data: payload }, '*');
       } else if (status === 'MANUAL_REVIEW') {
         window.parent.postMessage({ event: 'youpi.payment_manual_review', data: payload }, '*');
       }
@@ -259,7 +392,7 @@ router.get('/portal/:paymentId', async (req, res) => {
   </script>
 </body>
 </html>`);
-  } catch (err) {
+  } catch {
     res.status(500).send('<h1>Failed to load YouPI checkout portal</h1>');
   }
 });
@@ -276,7 +409,8 @@ router.post('/sessions', auth, async (req, res) => {
   } catch (err) {
     res.status(err.status || 400).json({
       code: err.code || 'YOUPI_SESSION_ERROR',
-      message: err.message || 'Unable to create YouPI payment session.'
+      message: err.message || 'Unable to create YouPI payment session.',
+      ...(err.isBanned ? { isBanned: true } : {})
     });
   }
 });
@@ -348,6 +482,7 @@ router.get('/sessions/:paymentId/stream', authStream, async (req, res) => {
   }
 });
 
+// Immutable receiving account: post-creation VPA switching returns 409 IMMUTABLE_RECEIVING_ACCOUNT
 router.post('/sessions/:paymentId/switch-vpa', auth, async (req, res) => {
   try {
     const session = await switchSessionVpa({
@@ -357,14 +492,14 @@ router.post('/sessions/:paymentId/switch-vpa', auth, async (req, res) => {
     });
     res.json({ session });
   } catch (err) {
-    res.status(err.status || 400).json({
-      code: err.code || 'YOUPI_VPA_SWITCH_ERROR',
-      message: err.message || 'Unable to switch merchant UPI VPA.'
+    res.status(err.status || 409).json({
+      code: err.code || 'IMMUTABLE_RECEIVING_ACCOUNT',
+      message: err.message || 'Receiving VPA cannot be changed after checkout session creation.'
     });
   }
 });
 
-router.post('/sessions/:paymentId/verify-now', auth, async (req, res) => {
+async function handlePaymentDone(req, res) {
   try {
     const marked = await markSessionProcessing({
       paymentId: req.params.paymentId,
@@ -384,6 +519,7 @@ router.post('/sessions/:paymentId/verify-now', auth, async (req, res) => {
 
     res.json({
       session: latestSession,
+      processingExpiresAt: latestSession.processingExpiresAt || marked.processingExpiresAt || null,
       pollSummary
     });
   } catch (err) {
@@ -392,9 +528,12 @@ router.post('/sessions/:paymentId/verify-now', auth, async (req, res) => {
       message: err.message || 'Unable to start verification.'
     });
   }
-});
+}
 
-router.post('/sessions/:paymentId/submit-utr', auth, async (req, res) => {
+router.post('/sessions/:paymentId/payment-done', auth, handlePaymentDone);
+router.post('/sessions/:paymentId/verify-now', auth, handlePaymentDone);
+
+async function handleManualUtr(req, res) {
   try {
     const result = await submitUtrAndProcessSession({
       paymentId: req.params.paymentId,
@@ -405,10 +544,13 @@ router.post('/sessions/:paymentId/submit-utr', auth, async (req, res) => {
   } catch (err) {
     res.status(err.status || 400).json({
       code: err.code || 'YOUPI_UTR_ERROR',
-      message: err.message || 'Unable to verify UPI / UTR reference.'
+      message: err.message || 'Unable to submit UPI / UTR reference.'
     });
   }
-});
+}
+
+router.post('/sessions/:paymentId/manual-utr', auth, handleManualUtr);
+router.post('/sessions/:paymentId/submit-utr', auth, handleManualUtr);
 
 router.post('/sessions/:paymentId/cancel', auth, async (req, res) => {
   try {
@@ -421,6 +563,329 @@ router.post('/sessions/:paymentId/cancel', auth, async (req, res) => {
     res.status(err.status || 400).json({
       code: err.code || 'YOUPI_CANCEL_ERROR',
       message: err.message || 'Unable to cancel session.'
+    });
+  }
+});
+
+// =============================================================================
+// Pollers, Android SMS Gateway & Observer Ingest Routes (Exact Upstream Spec)
+// =============================================================================
+
+async function handleAndroidPair(req, res) {
+  try {
+    const result = await pairAndroidDevice({
+      token: req.body?.token,
+      enrollmentToken: req.body?.enrollmentToken,
+      expiresAt: req.body?.expiresAt,
+      version: req.body?.version,
+      deviceName: req.body?.deviceName,
+      deviceModel: req.body?.deviceModel,
+      receivingAccountId: req.body?.receivingAccountId || ''
+    });
+    res.json(result);
+  } catch (err) {
+    res.status(err.status || 400).json({
+      code: err.code || 'ANDROID_PAIR_ERROR',
+      message: err.message || 'Failed to pair Android SMS Gateway.'
+    });
+  }
+}
+
+router.post('/pollers/android/pair', handleAndroidPair);
+router.post('/observers/sms/pair', handleAndroidPair);
+
+async function handleAndroidEvents(req, res, { requirePackage = false } = {}) {
+  try {
+    const rawBodyText =
+      typeof req.rawBody === 'string' ? req.rawBody : JSON.stringify(req.body || {});
+    const deviceId = req.headers['x-device-id'] || req.body?.deviceId;
+    const device = await verifyAndroidDeviceHmac({
+      deviceId,
+      timestampHeader: req.headers['x-timestamp'],
+      signatureHeader: req.headers['x-signature'],
+      rawBodyText
+    });
+
+    const clientMessageEcho = req.body?.clientMessageId
+      ? { clientMessageId: String(req.body.clientMessageId) }
+      : {};
+    const rawPkg = req.body?.rawNotification?.package || req.body?.packageName;
+
+    if (requirePackage) {
+      if (!rawPkg || typeof rawPkg !== 'string' || !rawPkg.trim()) {
+        return res.status(400).json({
+          accepted: false,
+          ...clientMessageEcho,
+          error: 'Android notification observation must specify a valid package name in rawNotification.package'
+        });
+      }
+    }
+
+    if (rawPkg && typeof rawPkg === 'string' && rawPkg.trim()) {
+      const cleanPkg = rawPkg.trim().toLowerCase();
+      if (!isAllowedNotificationPackage(cleanPkg)) {
+        return res.status(400).json({
+          accepted: false,
+          ...clientMessageEcho,
+          error: `Untrusted Android notification package: ${cleanPkg}`
+        });
+      }
+    }
+
+    const rawText =
+      req.body?.body ||
+      req.body?.sms ||
+      req.body?.rawSms ||
+      req.body?.message ||
+      req.body?.text ||
+      req.body?.rawText ||
+      req.body?.rawNotification?.text ||
+      '';
+
+    if (!rawText || !String(rawText).trim()) {
+      return res.status(400).json({
+        accepted: false,
+        ...clientMessageEcho,
+        status: 'REJECTED',
+        reason: 'MISSING_RAW_TEXT',
+        error: 'Observation rawText is required for verification.'
+      });
+    }
+
+    if (String(rawText).length > MAX_SCAN_CHARS) {
+      return res.status(413).json({
+        ...clientMessageEcho,
+        error: `Observation body too large (max ${MAX_SCAN_CHARS} characters).`
+      });
+    }
+
+    const recAccId = req.body?.receivingAccountId || device.receivingAccountId || '';
+    const sender =
+      req.body?.sender ||
+      req.headers['x-sender'] ||
+      req.body?.rawNotification?.package ||
+      '';
+
+    const result = await ingestBankObservation({
+      source: requirePackage ? 'ANDROID_OBSERVER' : req.body?.source || 'SMS_GATEWAY',
+      sender,
+      rawText: String(rawText),
+      observedAt: req.body?.observedAt || req.body?.timestamp || new Date(),
+      receivingAccountId: recAccId,
+      paymentSessionId: req.body?.paymentSessionId || '',
+      bankReferenceNumber: req.body?.bankReferenceNumber || req.body?.utr || '',
+      explicitAmountPaise: req.body?.amountPaise ? Number(req.body.amountPaise) : null,
+      rawPayload: req.body?.rawNotification || { text: rawText, deviceId: device.deviceId }
+    });
+
+    await YoupiAndroidDevice.updateOne(
+      { _id: device._id },
+      { $set: { lastObservationAt: new Date() } }
+    ).catch(() => {});
+
+    if (result.status === 'FRAUDULENT_PAYMENT_INJECTION' || result.status === 'BANNED_IDENTITY') {
+      return res.status(403).json({
+        accepted: false,
+        ...clientMessageEcho,
+        status: 'REJECTED',
+        reason: result.status,
+        threatDetected: true,
+        banned: true,
+        error: 'FRAUDULENT_PAYMENT_INJECTION: Fake bank observation detected. Customer identity suspended.'
+      });
+    }
+
+    if (result.accepted) {
+      return res.json({
+        accepted: true,
+        ...clientMessageEcho,
+        status: result.status,
+        verificationLevel: result.verificationLevel || 1,
+        verificationTag: result.verificationTag || '',
+        observationId: result.observation?._id?.toString(),
+        matchedOrderId: result.observation?.matchedOrderId || ''
+      });
+    }
+
+    if (result.status === 'AMBIGUOUS' || result.status === 'MANUAL_REVIEW') {
+      return res.json({
+        accepted: false,
+        ...clientMessageEcho,
+        status: 'MANUAL_REVIEW',
+        reason: result.reason || 'AMBIGUOUS_SESSION_MATCH',
+        observationId: result.observation?._id?.toString()
+      });
+    }
+
+    if (result.status === 'LATE_UNMATCHED') {
+      return res.json({
+        accepted: false,
+        ...clientMessageEcho,
+        status: 'LATE_UNMATCHED',
+        reason: 'LATE_OBSERVATION_NO_ACTIVE_SESSION',
+        observationId: result.observation?._id?.toString()
+      });
+    }
+
+    if (result.status === 'IGNORED_NON_CREDIT') {
+      return res.json({
+        accepted: true,
+        ...clientMessageEcho,
+        status: 'PROCESSED_NON_BANK',
+        bankMatch: false,
+        message: 'Raw SMS observation ingested and evaluated by server pipeline.'
+      });
+    }
+
+    return res.status(400).json({
+      accepted: false,
+      ...clientMessageEcho,
+      status: result.status || 'REJECTED',
+      reason: result.reason || result.observation?.reason || 'UNRESOLVED_OBSERVATION'
+    });
+  } catch (err) {
+    res.status(err.status || 400).json({
+      accepted: false,
+      code: err.code || 'ANDROID_EVENT_ERROR',
+      error: err.message || 'Failed to process Android SMS Gateway observation.'
+    });
+  }
+}
+
+router.post('/pollers/android/events', (req, res) =>
+  handleAndroidEvents(req, res, { requirePackage: true })
+);
+router.post('/observers/sms', (req, res) =>
+  handleAndroidEvents(req, res, { requirePackage: false })
+);
+
+router.post('/pollers/events', async (req, res) => {
+  try {
+    const deviceIdHeader = req.headers['x-device-id'];
+    if (deviceIdHeader) {
+      return handleAndroidEvents(req, res, { requirePackage: false });
+    }
+
+    const authCheck = await tryAuthenticateAdminOrObserver(req);
+    if (!authCheck.authorized) {
+      return res.status(401).json({
+        accepted: false,
+        code: 'AUTH_REQUIRED',
+        message: 'Observer secret, admin token, or paired Android device HMAC signature is required.'
+      });
+    }
+
+    const rawText =
+      req.body?.rawText ||
+      req.body?.text ||
+      req.body?.message ||
+      req.body?.sms ||
+      req.body?.body ||
+      '';
+    if (!rawText || !String(rawText).trim()) {
+      return res.status(400).json({
+        accepted: false,
+        status: 'REJECTED',
+        reason: 'MISSING_RAW_TEXT'
+      });
+    }
+    if (String(rawText).length > MAX_SCAN_CHARS) {
+      return res.status(413).json({
+        accepted: false,
+        reason: 'PAYLOAD_TOO_LARGE',
+        error: `Observation body exceeds max ${MAX_SCAN_CHARS} characters.`
+      });
+    }
+
+    const result = await ingestBankObservation({
+      source: req.body?.source || 'GMAIL',
+      sender: req.body?.sender || req.body?.from || '',
+      subject: req.body?.subject || '',
+      rawText: String(rawText),
+      observedAt: req.body?.observedAt || req.body?.receivedAt || new Date(),
+      receivingAccountId: req.body?.receivingAccountId || '',
+      paymentSessionId: req.body?.paymentSessionId || '',
+      bankReferenceNumber: req.body?.bankReferenceNumber || req.body?.utr || '',
+      messageKey: req.body?.messageKey || req.body?.clientMessageId || '',
+      suppressBan: Boolean(req.body?.suppressBan && authCheck.kind === 'ADMIN_JWT'),
+      rawPayload: req.body?.rawPayload || null
+    });
+
+    if (result.status === 'FRAUDULENT_PAYMENT_INJECTION' || result.status === 'BANNED_IDENTITY') {
+      return res.status(403).json({
+        accepted: false,
+        status: 'REJECTED',
+        reason: result.status,
+        threatDetected: true,
+        banned: true
+      });
+    }
+
+    if (result.accepted || ['MANUAL_REVIEW', 'AMBIGUOUS', 'LATE_UNMATCHED'].includes(result.status)) {
+      return res.json({
+        accepted: Boolean(result.accepted),
+        status: result.status,
+        reason: result.reason || result.observation?.reason || '',
+        verificationLevel: result.verificationLevel || null,
+        verificationTag: result.verificationTag || '',
+        observationId: result.observation?._id?.toString()
+      });
+    }
+
+    return res.status(400).json({
+      accepted: false,
+      status: result.status,
+      reason: result.reason || result.observation?.reason || 'UNRESOLVED_OBSERVATION'
+    });
+  } catch (err) {
+    res.status(err.status || 400).json({
+      accepted: false,
+      code: err.code || 'POLLER_EVENT_ERROR',
+      message: err.message || 'Failed to ingest poller event.'
+    });
+  }
+});
+
+async function handleHeartbeat(req, res) {
+  const result = await recordAndroidHeartbeat(req.headers['x-device-id'] || req.body?.deviceId || '');
+  res.json(result);
+}
+
+router.post('/pollers/android/heartbeat', handleHeartbeat);
+router.post('/pollers/heartbeat', handleHeartbeat);
+router.post('/observers/heartbeat', handleHeartbeat);
+
+router.get('/pollers/active-window', async (req, res) => {
+  try {
+    const authCheck = await tryAuthenticateAdminOrObserver(req);
+    const deviceId = req.headers['x-device-id'];
+    let boundRecId = '';
+
+    if (deviceId) {
+      const device = await YoupiAndroidDevice.findOne({ deviceId: String(deviceId).trim(), isActive: true }).lean();
+      if (!device) {
+        return res.status(403).json({ code: 'DEVICE_UNAUTHORIZED', error: 'Device not authorized or inactive.' });
+      }
+      boundRecId = device.receivingAccountId || '';
+    } else if (!authCheck.authorized) {
+      return res.status(401).json({ code: 'AUTH_REQUIRED', error: 'Unauthorized' });
+    }
+
+    const requestedAcc = req.query.receivingAccountId
+      ? normalizeReceivingAccountId(req.query.receivingAccountId)
+      : '';
+    if (boundRecId && requestedAcc && requestedAcc !== boundRecId) {
+      return res.status(403).json({ code: 'CROSS_ACCOUNT_FORBIDDEN', error: 'Cross-account query forbidden.' });
+    }
+
+    const windowData = await getActivePollWindowStatus({
+      receivingAccountId: requestedAcc || boundRecId
+    });
+    res.json(windowData);
+  } catch (err) {
+    res.status(err.status || 400).json({
+      code: err.code || 'ACTIVE_WINDOW_ERROR',
+      message: err.message || 'Failed to inspect active poll window.'
     });
   }
 });
@@ -450,7 +915,7 @@ async function handleObserverWebhook(req, res) {
 
     const sourceHint = String(req.body?.source || '').toUpperCase();
     const source =
-      req.path.endsWith('/sms') || sourceHint === 'SMS_OBSERVER' ? 'SMS_OBSERVER' : 'IMAP_EMAIL';
+      req.path.endsWith('/sms') || sourceHint === 'SMS_OBSERVER' ? 'SMS_OBSERVER' : 'GMAIL';
 
     const result = await ingestBankObservation({
       source,
@@ -458,8 +923,21 @@ async function handleObserverWebhook(req, res) {
       subject: String(req.body?.subject || '').trim(),
       text: String(req.body?.text || req.body?.body || req.body?.message || '').trim(),
       observedAt: req.body?.timestamp || req.body?.observedAt || new Date(),
+      receivingAccountId: String(req.body?.receivingAccountId || '').trim(),
+      paymentSessionId: String(req.body?.paymentSessionId || '').trim(),
       messageKey: String(req.body?.messageKey || req.body?.id || '').trim()
     });
+
+    if (result.status === 'FRAUDULENT_PAYMENT_INJECTION' || result.status === 'BANNED_IDENTITY') {
+      return res.status(403).json({
+        received: true,
+        accepted: false,
+        status: result.status,
+        threatDetected: true,
+        banned: true,
+        reason: result.reason || 'FRAUDULENT_PAYMENT_INJECTION'
+      });
+    }
 
     res.status(200).json({
       received: true,
@@ -481,6 +959,10 @@ async function handleObserverWebhook(req, res) {
 router.post('/observer/alert', handleObserverWebhook);
 router.post('/observer/sms', handleObserverWebhook);
 
+// =============================================================================
+// Admin Ledger, Queue Monitor, SMS Gateway Devices, Statement CSV & Fraud Unban
+// =============================================================================
+
 router.get('/admin/sessions', auth, authorize('admin', 'organizer'), async (req, res) => {
   try {
     const sessions = await listAdminYoupiSessions({
@@ -496,16 +978,56 @@ router.get('/admin/sessions', auth, authorize('admin', 'organizer'), async (req,
   }
 });
 
+router.get('/admin/queue', auth, authorize('admin', 'organizer'), async (req, res) => {
+  try {
+    const cfg = getYoupiConfig();
+    const recAcc = normalizeReceivingAccountId(req.query.receivingAccountId || cfg.defaultPayeeVpa);
+    const [activeHolder, queued] = await Promise.all([
+      YoupiPaymentSession.findOne({
+        ...(recAcc ? { receivingAccountId: recAcc } : {}),
+        slotLockActive: true
+      })
+        .populate('event', 'title')
+        .select('paymentId orderId amountPaise status method payeeVpa slotAcquiredAt expiresAt processingExpiresAt')
+        .lean(),
+      YoupiPaymentSession.find({
+        ...(recAcc ? { receivingAccountId: recAcc } : {}),
+        status: PaymentStatus.QUEUED
+      })
+        .populate('event', 'title')
+        .sort({ queuePosition: 1, createdAt: 1 })
+        .select('paymentId orderId amountPaise method payeeVpa queuePosition createdAt')
+        .lean()
+    ]);
+
+    res.json({
+      receivingAccountId: recAcc,
+      currentSlot: activeHolder || null,
+      queue: queued
+    });
+  } catch (err) {
+    res.status(500).json({ message: err.message || 'Failed to load FIFO payment queue.' });
+  }
+});
+
 router.get('/admin/automation', auth, authorize('admin', 'organizer'), async (req, res) => {
   try {
-    const [config, observations, openCount] = await Promise.all([
+    const [config, observations, openCount, devices, suspendedCount, statementLineCount] = await Promise.all([
       getAutomationConfig({ includeSecrets: false }),
       YoupiBankObservation.find().sort({ createdAt: -1 }).limit(30).lean(),
-      YoupiPaymentSession.countDocuments({ status: { $in: ['ACTIVE', 'PROCESSING', 'MANUAL_REVIEW'] } })
+      YoupiPaymentSession.countDocuments({
+        status: { $in: ['ACTIVE', 'PROCESSING', 'QUEUED', 'OBSERVED_SUCCESS', 'MANUAL_REVIEW'] }
+      }),
+      listAndroidDevices(),
+      User.countDocuments({ paymentSecurityStatus: 'SUSPENDED' }),
+      YoupiStatementLine.countDocuments({})
     ]);
     res.json({
       config,
       observations,
+      devices,
+      suspendedCount,
+      statementLineCount,
       openSessionCount: openCount
     });
   } catch (err) {
@@ -526,9 +1048,6 @@ router.put('/admin/automation', auth, authorize('admin'), async (req, res) => {
     }
     if (body.autoVerifyEnabled !== undefined) {
       updateFields.youpiAutoVerifyEnabled = Boolean(body.autoVerifyEnabled);
-    }
-    if (body.autoReconcileObserved !== undefined) {
-      updateFields.youpiAutoReconcileObserved = Boolean(body.autoReconcileObserved);
     }
     if (body.imapHost !== undefined) {
       updateFields.youpiImapHost = sanitizePlainText(body.imapHost, 120) || 'imap.gmail.com';
@@ -559,6 +1078,14 @@ router.put('/admin/automation', auth, authorize('admin'), async (req, res) => {
       updateFields.youpiObserverSecret = body.observerSecret.trim();
     }
 
+    let generatedEnrollmentSecret = '';
+    if (body.generateAndroidEnrollmentSecret) {
+      generatedEnrollmentSecret = crypto.randomBytes(24).toString('hex');
+      updateFields.youpiAndroidEnrollmentSecret = generatedEnrollmentSecret;
+    } else if (typeof body.androidEnrollmentSecret === 'string' && body.androidEnrollmentSecret.trim() !== '') {
+      updateFields.youpiAndroidEnrollmentSecret = body.androidEnrollmentSecret.trim();
+    }
+
     await SystemSetting.findOneAndUpdate(
       { key: 'global' },
       { $set: updateFields },
@@ -567,9 +1094,10 @@ router.put('/admin/automation', auth, authorize('admin'), async (req, res) => {
 
     const config = await getAutomationConfig({ includeSecrets: false });
     res.json({
-      message: 'YouPI payment automation & backup UPI settings saved.',
+      message: 'YouPI payment automation & Zero-Trust settings saved.',
       config,
-      ...(generatedObserverSecret ? { generatedObserverSecret } : {})
+      ...(generatedObserverSecret ? { generatedObserverSecret } : {}),
+      ...(generatedEnrollmentSecret ? { generatedEnrollmentSecret } : {})
     });
   } catch (err) {
     res.status(err.status || 400).json({
@@ -595,20 +1123,117 @@ router.post('/admin/poll-now', auth, authorize('admin', 'organizer'), async (req
   }
 });
 
-router.post('/admin/reconcile-csv', auth, authorize('admin', 'organizer'), async (req, res) => {
+async function handleStatementImport(req, res) {
   try {
-    const csvText = typeof req.body?.csvText === 'string' ? req.body.csvText : '';
+    const csvText =
+      typeof req.body?.csv === 'string'
+        ? req.body.csv
+        : typeof req.body?.csvText === 'string'
+          ? req.body.csvText
+          : '';
     if (!csvText.trim()) {
       return res.status(400).json({ message: 'Please upload or paste a bank statement CSV.' });
     }
-    const summary = await reconcileStatementCsv({ csvText, adminUser: req.user });
+    const receivingAccountId = String(req.body?.receivingAccountId || '').trim();
+    const summary = await reconcileStatementCsv({
+      receivingAccountId,
+      csvText,
+      adminUser: req.user
+    });
     const observations = await YoupiBankObservation.find().sort({ createdAt: -1 }).limit(30).lean();
-    res.json({ summary, observations });
+    res.json({
+      summary,
+      reconciled: summary.reconciled,
+      conflicts: summary.conflicts,
+      unmatched: summary.unmatched,
+      lines: summary.lines,
+      observations
+    });
   } catch (err) {
     res.status(err.status || 400).json({
       code: err.code || 'YOUPI_CSV_RECONCILE_ERROR',
       message: err.message || 'Failed to reconcile CSV statement.'
     });
+  }
+}
+
+router.post('/admin/reconcile-csv', auth, authorize('admin', 'organizer'), handleStatementImport);
+router.post('/admin/statements/import', auth, authorize('admin', 'organizer'), handleStatementImport);
+
+// Android SMS Gateway Admin Routes
+router.get('/admin/sms-gateway/pair-qr', auth, authorize('admin'), async (req, res) => {
+  try {
+    const data = await buildSmsGatewayPairingQrData({
+      receivingAccountId: req.query.receivingAccountId || '',
+      baseUrl: buildPublicOrigin(req)
+    });
+    res.json(data);
+  } catch (err) {
+    res.status(err.status || 500).json({ message: err.message || 'Failed to generate pairing QR.' });
+  }
+});
+
+router.get('/admin/sms-gateway/devices', auth, authorize('admin', 'organizer'), async (req, res) => {
+  try {
+    const devices = await listAndroidDevices();
+    res.json({ devices });
+  } catch (err) {
+    res.status(500).json({ message: err.message || 'Failed to load paired Android observers.' });
+  }
+});
+
+router.post('/admin/sms-gateway/devices/:deviceId/revoke', auth, authorize('admin'), async (req, res) => {
+  try {
+    const result = await revokeAndroidDevice(req.params.deviceId);
+    res.json(result);
+  } catch (err) {
+    res.status(err.status || 400).json({ message: err.message || 'Failed to revoke device.' });
+  }
+});
+
+router.delete('/admin/sms-gateway/devices/:deviceId', auth, authorize('admin'), async (req, res) => {
+  try {
+    const result = await deleteAndroidDevice(req.params.deviceId);
+    res.json(result);
+  } catch (err) {
+    res.status(400).json({ message: err.message || 'Failed to delete device.' });
+  }
+});
+
+// Fraud Security & Account Unban Routes
+router.get('/admin/security/suspended', auth, authorize('admin'), async (req, res) => {
+  try {
+    const users = await User.find({ paymentSecurityStatus: { $in: ['SUSPENDED', 'FLAGGED'] } })
+      .select('name email role department paymentSecurityStatus paymentSecurityReason updatedAt')
+      .sort({ updatedAt: -1 })
+      .lean();
+    const recentFraudObs = await YoupiBankObservation.find({ attributionStatus: 'REJECTED_FRAUD' })
+      .sort({ createdAt: -1 })
+      .limit(20)
+      .lean();
+    res.json({ suspendedUsers: users, recentFraudObservations: recentFraudObs });
+  } catch (err) {
+    res.status(500).json({ message: err.message || 'Failed to load suspended payment identities.' });
+  }
+});
+
+router.post('/admin/security/unban', auth, authorize('admin'), async (req, res) => {
+  try {
+    const userId = String(req.body?.userId || '').trim();
+    if (!userId) {
+      return res.status(400).json({ message: 'userId is required to lift payment security suspension.' });
+    }
+    const updated = await User.findByIdAndUpdate(
+      userId,
+      { $set: { paymentSecurityStatus: 'CLEAR', paymentSecurityReason: '' } },
+      { new: true }
+    ).select('name email role paymentSecurityStatus');
+    if (!updated) {
+      return res.status(404).json({ message: 'User not found.' });
+    }
+    res.json({ success: true, user: updated, message: `Cleared security suspension for ${updated.email}.` });
+  } catch (err) {
+    res.status(400).json({ message: err.message || 'Failed to unban user.' });
   }
 });
 

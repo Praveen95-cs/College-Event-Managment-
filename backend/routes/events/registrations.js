@@ -80,10 +80,17 @@ router.post('/', auth, async (req, res) => {
         user: req.user._id
       });
       if (!session || !isSettledStatus(session.status) || Number(session.amountPaise || 0) < toPaise(fee)) {
+        const isObserved = session?.status === 'OBSERVED_SUCCESS';
+        const isReview = session?.status === 'MANUAL_REVIEW';
         return res.status(402).json({
-          code: session?.status === 'MANUAL_REVIEW' ? 'PAYMENT_MANUAL_REVIEW' : 'PAYMENT_REQUIRED',
-          message:
-            session?.status === 'MANUAL_REVIEW'
+          code: isObserved
+            ? 'PAYMENT_NOT_RECONCILED'
+            : isReview
+              ? 'PAYMENT_MANUAL_REVIEW'
+              : 'PAYMENT_REQUIRED',
+          message: isObserved
+            ? 'Bank alert observed (NOT_RECONCILED) — awaiting bank statement CSV or admin reconciliation before registration unlocks.'
+            : isReview
               ? 'Your YouPI payment is awaiting bank reconciliation before registration unlocks.'
               : `Verified YouPI payment of ${e.currency || 'INR'} ${fee} is required before registering.`,
           registrationFee: fee,
@@ -242,8 +249,12 @@ router.patch('/:registrationId/attendance', auth, authorize('admin', 'organizer'
 
     const isPaidEvent = Boolean(reg.event.isPaid && Number(reg.event.registrationFee || 0) > 0);
     if (isPaidEvent && reg.paymentStatus !== 'paid' && nextStatus === 'present') {
-      return res.status(400).json({
-        message: 'Cannot mark attendee present before YouPI payment is reconciled/paid.'
+      return res.status(402).json({
+        code: reg.youpiStatus === 'OBSERVED_SUCCESS' ? 'PAYMENT_NOT_RECONCILED' : 'PAYMENT_NOT_SETTLED',
+        message:
+          reg.youpiStatus === 'OBSERVED_SUCCESS'
+            ? 'Bank alert observed (NOT_RECONCILED) — awaiting bank statement CSV or admin reconciliation before marking attendance.'
+            : 'Cannot mark attendee present before YouPI payment is reconciled/paid.'
       });
     }
 

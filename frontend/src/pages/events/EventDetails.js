@@ -447,10 +447,16 @@ const EventDetails = () => {
   const isPaidRegistration = Boolean(
     event.myRegistration?.paymentStatus === 'paid' || feedMeta?.isPaidRegistration
   );
+  const myYoupiStatus =
+    event.myRegistration?.youpiStatus || feedMeta?.event?.youpiStatus || '';
+  const isObservedPending = Boolean(
+    isPaidEvent && !isPaidRegistration && myYoupiStatus === 'OBSERVED_SUCCESS'
+  );
   const isManualReview = Boolean(
-    isPaidEvent &&
-    !isPaidRegistration &&
-    (event.myRegistration?.youpiStatus === 'MANUAL_REVIEW' || feedMeta?.event?.youpiStatus === 'MANUAL_REVIEW')
+    isPaidEvent && !isPaidRegistration && myYoupiStatus === 'MANUAL_REVIEW'
+  );
+  const isProcessingOrQueued = Boolean(
+    isPaidEvent && !isPaidRegistration && ['PROCESSING', 'QUEUED'].includes(myYoupiStatus)
   );
   const needsPaymentCompletion = Boolean(isAttending && isPaidEvent && !isPaidRegistration);
   const isStudent = user?.role === 'student' || !isAuthenticated;
@@ -676,9 +682,18 @@ const EventDetails = () => {
           {needsPaymentCompletion && (
             <div className="mb-5 px-4 py-3 rounded-[10px] bg-[#e09132]/12 border border-[#e09132]/30 text-[#ebb05d] text-[13px] flex flex-wrap items-center justify-between gap-3">
               <span>
-                {isManualReview ? (
+                {isObservedPending ? (
                   <>
-                    Your YouPI payment (<span className="font-mono">{event.myRegistration?.transactionId || 'UTR submitted'}</span>) is under manual bank review. Check status or retry checkout.
+                    Bank credit alert observed (<span className="font-mono">NOT_RECONCILED</span>
+                    {event.myRegistration?.transactionId ? ` · UTR: ${event.myRegistration.transactionId}` : ''}). Your pass{event.hasWhatsappGroup ? ', WhatsApp group,' : ''} and competitions unlock automatically once the merchant bank statement CSV is reconciled.
+                  </>
+                ) : isManualReview ? (
+                  <>
+                    Your YouPI payment (<span className="font-mono">{event.myRegistration?.transactionId || 'UTR submitted'}</span>) is pending merchant bank verification. Check status or update UTR.
+                  </>
+                ) : isProcessingOrQueued ? (
+                  <>
+                    Your YouPI payment session is currently <span className="font-mono">{myYoupiStatus}</span>. Return to live checkout to watch bank verification or slot status.
                   </>
                 ) : (
                   <>
@@ -691,7 +706,9 @@ const EventDetails = () => {
                 onClick={handleOpenRegistrationModal}
                 className="btn-primary h-8 px-3 text-[12px]"
               >
-                {isManualReview ? 'Check YouPI status' : `Pay ${feeLabel} via YouPI`}
+                {isObservedPending || isManualReview || isProcessingOrQueued
+                  ? 'Check YouPI status'
+                  : `Pay ${feeLabel} via YouPI`}
               </button>
             </div>
           )}
@@ -1046,7 +1063,9 @@ const EventDetails = () => {
                                   {isPaidEvent
                                     ? reg.paymentStatus === 'paid'
                                       ? `Paid ${currencySymbol}${reg.amountPaid || fee}`
-                                      : reg.youpiStatus || 'Pending'
+                                      : reg.youpiStatus === 'OBSERVED_SUCCESS'
+                                        ? 'Observed · Not reconciled'
+                                        : reg.youpiStatus || 'Pending'
                                     : 'Free'}
                                 </span>
                               </td>
@@ -1169,7 +1188,9 @@ const EventDetails = () => {
                         onClick={handleOpenRegistrationModal}
                         className="btn-primary h-10 px-5 text-[13px]"
                       >
-                        {isManualReview ? 'Check payment status' : `Pay ${feeLabel} & confirm`}
+                        {isObservedPending || isManualReview || isProcessingOrQueued
+                          ? 'Check payment status'
+                          : `Pay ${feeLabel} & confirm`}
                       </button>
                     ) : (
                       <span className="inline-flex items-center px-3 h-10 rounded-[8px] text-[13px] font-medium bg-[#4cc38a]/12 text-[#4cc38a] border border-[#4cc38a]/30">

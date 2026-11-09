@@ -196,14 +196,21 @@ async function verifyPaymentPayload(eventDoc, body = {}, user = null) {
     throw err;
   }
   if (!isSettledStatus(session.status)) {
+    const isObserved = session.status === 'OBSERVED_SUCCESS';
     const isReview = session.status === 'MANUAL_REVIEW';
     const err = new Error(
-      isReview
-        ? 'Your YouPI payment is currently under review. It will unlock once reconciled.'
-        : `YouPI payment is ${session.status.toLowerCase()}. Complete payment before confirming registration.`
+      isObserved
+        ? 'Bank alert was observed (NOT_RECONCILED). Awaiting bank statement CSV import or admin reconciliation before unlocking registration.'
+        : isReview
+          ? 'Your YouPI payment is currently under review. It will unlock once reconciled.'
+          : `YouPI payment is ${session.status.toLowerCase()}. Complete payment before confirming registration.`
     );
     err.status = 402;
-    err.code = isReview ? 'PAYMENT_MANUAL_REVIEW' : 'PAYMENT_REQUIRED';
+    err.code = isObserved
+      ? 'PAYMENT_NOT_RECONCILED'
+      : isReview
+        ? 'PAYMENT_MANUAL_REVIEW'
+        : 'PAYMENT_REQUIRED';
     throw err;
   }
   if (Number(session.amountPaise || 0) < toPaise(fee)) {

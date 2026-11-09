@@ -24,15 +24,15 @@ const systemSettingSchema = new mongoose.Schema(
     smtpPassOverride: { type: String, default: '', trim: true },
     smtpFromOverride: { type: String, default: '', trim: true },
     lastEmailStatus: { type: mongoose.Schema.Types.Mixed, default: null },
-    // YouPI-PG V2 Multi-VPA Rotation Pool & Bank Automation Controls
+    // YouPI-PG V2 Multi-VPA Pool, Android SMS Gateway & Bank Automation Controls
     youpiBackupVpas: [{ type: String, trim: true }],
     youpiAutoVerifyEnabled: { type: Boolean, default: false },
-    youpiAutoReconcileObserved: { type: Boolean, default: true },
     youpiImapHost: { type: String, default: 'imap.gmail.com', trim: true },
     youpiImapPort: { type: Number, default: 993 },
     youpiImapUser: { type: String, default: '', trim: true },
     youpiImapPass: { type: String, default: '', trim: true },
     youpiObserverSecret: { type: String, default: '', trim: true },
+    youpiAndroidEnrollmentSecret: { type: String, default: '', trim: true },
     youpiLastPollAt: { type: Date, default: null },
     youpiLastPollResult: { type: mongoose.Schema.Types.Mixed, default: null }
   },

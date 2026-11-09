@@ -7,7 +7,9 @@ const schema = new mongoose.Schema({
   role:{type:String,enum:['student','organizer','admin'],default:'student'},
   department:{type:String,default:'',trim:true},
   emailVerified:{type:Boolean,default:false},
-  emailVerifiedAt:{type:Date,default:null}
+  emailVerifiedAt:{type:Date,default:null},
+  paymentSecurityStatus:{type:String,enum:['CLEAR','FLAGGED','SUSPENDED'],default:'CLEAR'},
+  paymentSecurityReason:{type:String,default:'',trim:true}
 },{timestamps:true});
 schema.pre('save', async function(next){
   if (!this.isModified('password')) return next();
