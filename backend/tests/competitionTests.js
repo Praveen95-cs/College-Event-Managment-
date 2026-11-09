@@ -55,6 +55,7 @@ const {
 const YoupiPaymentSession = require('../models/payments/YoupiPaymentSession');
 const YoupiWebhookReceipt = require('../models/payments/YoupiWebhookReceipt');
 const competitionsRouter = require('../routes/competitions/competitions');
+const authRouter = require('../routes/auth/auth');
 
 async function runTestSuite() {
   console.log('====================================================');
@@ -1331,6 +1332,86 @@ if input_data:
       await Event.deleteMany({ _id: sampleEvent._id });
       await User.deleteMany({ _id: victim._id });
       if (createdTempAdmin) await User.deleteMany({ _id: adminActor._id });
+    }
+  });
+
+  // TEST 26: Cross-Environment OTP Hashing, Resend Grace Preservation & Dotted Gmail Preservation
+  await test('26. Email OTP salted hash portability, previousOtpHash resend survival & dot preservation', async () => {
+    const suffix = Date.now();
+    const dottedEmail = `john.doe+${suffix}@gmail.com`;
+    const firstOtp = '112233';
+    const secondOtp = '778899';
+    const prevSecret = process.env.JWT_SECRET;
+
+    try {
+      // 1. Hash OTP under environment secret A
+      process.env.JWT_SECRET = 'render_secret_alpha';
+      const firstHash = authRouter.hashOtp(dottedEmail, firstOtp, 'register');
+      assert(firstHash.includes(':'), 'Salted SHA-256 OTP hash must include salt:digest format');
+
+      // Hash under environment secret B and verify first OTP still validates seamlessly
+      process.env.JWT_SECRET = 'local_secret_beta';
+      assert.strictEqual(
+        authRouter.verifyStoredOtpHash(firstHash, dottedEmail, ` ${firstOtp} `, 'register'),
+        true,
+        'Salted OTP must verify across differing JWT_SECRET environments and ignore spaces'
+      );
+
+      // 2. Simulate Resend preserving firstHash in previousOtpHash while active
+      const secondHash = authRouter.hashOtp(dottedEmail, secondOtp, 'register');
+      await EmailOtp.findOneAndUpdate(
+        { email: dottedEmail, purpose: 'register' },
+        {
+          email: dottedEmail,
+          purpose: 'register',
+          otpHash: secondHash,
+          previousOtpHash: firstHash,
+          previousExpiresAt: new Date(Date.now() + 5 * 60 * 1000),
+          attempts: 0,
+          maxAttempts: 5,
+          lastSentAt: new Date(),
+          verifiedAt: null,
+          expiresAt: new Date(Date.now() + 10 * 60 * 1000)
+        },
+        { upsert: true, new: true }
+      );
+
+      // Wrong code increments attempts once
+      let wrongThrew = false;
+      try {
+        await authRouter.verifyAndConsumeOtp({ email: dottedEmail, otp: '000000', purpose: 'register', markOnly: true });
+      } catch (err) {
+        wrongThrew = err.code === 'OTP_INVALID';
+      }
+      assert.strictEqual(wrongThrew, true);
+      const afterWrong = await EmailOtp.findOne({ email: dottedEmail, purpose: 'register' });
+      assert.strictEqual(afterWrong.attempts, 1);
+
+      // Delayed user entering FIRST email code after resend must still verify (markOnly=true preserves record for /register)
+      const okFirst = await authRouter.verifyAndConsumeOtp({
+        email: dottedEmail,
+        otp: ` ${firstOtp.slice(0, 3)} ${firstOtp.slice(3)} `,
+        purpose: 'register',
+        markOnly: true
+      });
+      assert.strictEqual(okFirst, true, 'Previous unexpired OTP must remain valid after resend');
+
+      const markedDoc = await EmailOtp.findOne({ email: dottedEmail, purpose: 'register' });
+      assert(markedDoc && markedDoc.verifiedAt instanceof Date, 'markOnly=true should record verifiedAt');
+
+      // Consuming newest code deletes the OTP record
+      const okSecond = await authRouter.verifyAndConsumeOtp({
+        email: dottedEmail,
+        otp: secondOtp,
+        purpose: 'register',
+        markOnly: false
+      });
+      assert.strictEqual(okSecond, true);
+      assert.strictEqual(await EmailOtp.findOne({ email: dottedEmail, purpose: 'register' }), null);
+    } finally {
+      if (prevSecret !== undefined) process.env.JWT_SECRET = prevSecret;
+      else delete process.env.JWT_SECRET;
+      await EmailOtp.deleteMany({ email: dottedEmail });
     }
   });
 

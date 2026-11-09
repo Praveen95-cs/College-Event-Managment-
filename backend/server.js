@@ -130,7 +130,7 @@ const authLimiter = rateLimit({
 });
 const otpLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
-  max: isProd ? 30 : 200,
+  max: isProd ? 120 : 500,
   message: { message: 'Too many OTP verification attempts. Try again shortly.' },
   standardHeaders: true,
   legacyHeaders: false

@@ -132,7 +132,8 @@ const ForgotPassword = () => {
       await resetPassword({
         email: normalizedEmail,
         newPassword,
-        verificationToken
+        verificationToken,
+        otp: otpInput.trim()
       });
       setResetComplete(true);
       setNotice('');
@@ -239,6 +240,28 @@ const ForgotPassword = () => {
                   </button>
                 )}
               </div>
+
+              {!isOtpVerified && (
+                <div className="flex items-center justify-between gap-2 text-[11px] text-[#8a847a]">
+                  <span>Check Spam/Promotions if the email does not arrive immediately.</span>
+                  {!hasActiveOtp && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        if (!normalizedEmail || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(normalizedEmail)) {
+                          setError('Enter your registered email address first.');
+                          return;
+                        }
+                        setError('');
+                        setOtpSentEmail(normalizedEmail);
+                      }}
+                      className="text-[#ebb05d] hover:underline shrink-0"
+                    >
+                      Already have an OTP?
+                    </button>
+                  )}
+                </div>
+              )}
 
               {hasActiveOtp && !isOtpVerified && (
                 <div className="p-3.5 rounded-[10px] bg-[#161513] border border-[#e09132]/30 space-y-2.5">

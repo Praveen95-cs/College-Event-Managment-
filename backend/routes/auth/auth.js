@@ -12,6 +12,15 @@ const { sanitizePlainText } = require('../../utils/sanitize');
 const OTP_TTL_MINUTES = 10;
 const OTP_RESEND_COOLDOWN_SECONDS = 30;
 const VALID_OTP_PURPOSES = new Set(['register', 'verify_email', 'reset_password']);
+const EMAIL_NORMALIZE_OPTIONS = {
+  all_lowercase: true,
+  gmail_lowercase: true,
+  gmail_remove_dots: false,
+  gmail_remove_subaddress: false,
+  outlookdotcom_remove_subaddress: false,
+  yahoo_remove_subaddress: false,
+  icloud_remove_subaddress: false
+};
 
 const tokenFor = (user) => jwt.sign(
   { userId: user._id, role: user.role },
@@ -38,13 +47,15 @@ function normalizePurpose(raw) {
 }
 
 function hashOtp(email, otp, purpose = 'register') {
-  return crypto
-    .createHmac('sha256', getJwtSecret())
-    .update(`${String(email).toLowerCase()}:${purpose}:${String(otp).trim()}`)
+  const salt = crypto.randomBytes(16).toString('hex');
+  const digest = crypto
+    .createHash('sha256')
+    .update(`${salt}:${String(email).trim().toLowerCase()}:${purpose}:${String(otp).replace(/\s+/g, '')}`)
     .digest('hex');
+  return `${salt}:${digest}`;
 }
 
-function isOtpHashMatch(storedHex, candidateHex) {
+function isTimingSafeHexEqual(storedHex, candidateHex) {
   try {
     const a = Buffer.from(String(storedHex || ''), 'hex');
     const b = Buffer.from(String(candidateHex || ''), 'hex');
@@ -55,9 +66,33 @@ function isOtpHashMatch(storedHex, candidateHex) {
   }
 }
 
+function verifyStoredOtpHash(storedValue, email, otp, purpose = 'register') {
+  const raw = String(storedValue || '');
+  if (!raw) return false;
+  const cleanEmail = String(email).trim().toLowerCase();
+  const cleanOtp = String(otp || '').replace(/\s+/g, '');
+
+  if (raw.includes(':')) {
+    const [salt, expectedDigest] = raw.split(':');
+    if (!salt || !expectedDigest) return false;
+    const candidateDigest = crypto
+      .createHash('sha256')
+      .update(`${salt}:${cleanEmail}:${purpose}:${cleanOtp}`)
+      .digest('hex');
+    return isTimingSafeHexEqual(expectedDigest, candidateDigest);
+  }
+
+  // Legacy HMAC fallback
+  const legacyHex = crypto
+    .createHmac('sha256', getJwtSecret())
+    .update(`${cleanEmail}:${purpose}:${cleanOtp}`)
+    .digest('hex');
+  return isTimingSafeHexEqual(raw, legacyHex);
+}
+
 async function verifyAndConsumeOtp({ email, otp, purpose = 'register', markOnly = false }) {
   const cleanEmail = String(email || '').trim().toLowerCase();
-  const cleanOtp = String(otp || '').trim();
+  const cleanOtp = String(otp || '').replace(/\s+/g, '');
   const doc = await EmailOtp.findOne({ email: cleanEmail, purpose });
 
   if (!doc) {
@@ -80,8 +115,14 @@ async function verifyAndConsumeOtp({ email, otp, purpose = 'register', markOnly 
     throw err;
   }
 
-  const candidateHash = hashOtp(cleanEmail, cleanOtp, purpose);
-  if (!isOtpHashMatch(doc.otpHash, candidateHash)) {
+  const matchedCurrent = verifyStoredOtpHash(doc.otpHash, cleanEmail, cleanOtp, purpose);
+  const previousValid =
+    doc.previousOtpHash &&
+    doc.previousExpiresAt &&
+    doc.previousExpiresAt.getTime() > Date.now() &&
+    verifyStoredOtpHash(doc.previousOtpHash, cleanEmail, cleanOtp, purpose);
+
+  if (!matchedCurrent && !previousValid) {
     doc.attempts += 1;
     await doc.save();
     const remaining = Math.max(0, (doc.maxAttempts || 5) - doc.attempts);
@@ -105,7 +146,7 @@ async function verifyAndConsumeOtp({ email, otp, purpose = 'register', markOnly 
 }
 
 router.post('/send-otp', [
-  body('email').isEmail().normalizeEmail().withMessage('Valid email is required')
+  body('email').isEmail().normalizeEmail(EMAIL_NORMALIZE_OPTIONS).withMessage('Valid email is required')
 ], async (req, res) => {
   const errors = validationResult(req);
   if (!errors.isEmpty()) {
@@ -158,6 +199,10 @@ router.post('/send-otp', [
     const otpHash = hashOtp(email, otp, purpose);
     const now = new Date();
     const expiresAt = new Date(now.getTime() + OTP_TTL_MINUTES * 60 * 1000);
+    const keepPrevious =
+      existingOtp?.otpHash &&
+      existingOtp?.expiresAt &&
+      existingOtp.expiresAt.getTime() > now.getTime();
 
     await EmailOtp.findOneAndUpdate(
       { email, purpose },
@@ -165,6 +210,8 @@ router.post('/send-otp', [
         email,
         purpose,
         otpHash,
+        previousOtpHash: keepPrevious ? existingOtp.otpHash : '',
+        previousExpiresAt: keepPrevious ? existingOtp.expiresAt : null,
         attempts: 0,
         maxAttempts: 5,
         lastSentAt: now,
@@ -183,6 +230,21 @@ router.post('/send-otp', [
     });
 
     if (!deliveryRes.delivered && !allowDevPreview) {
+      if (existingOtp) {
+        await EmailOtp.findOneAndUpdate(
+          { email, purpose },
+          {
+            otpHash: existingOtp.otpHash,
+            previousOtpHash: existingOtp.previousOtpHash || '',
+            previousExpiresAt: existingOtp.previousExpiresAt || null,
+            attempts: existingOtp.attempts || 0,
+            lastSentAt: existingOtp.lastSentAt || new Date(0),
+            expiresAt: existingOtp.expiresAt
+          }
+        ).catch(() => {});
+      } else {
+        await EmailOtp.deleteOne({ email, purpose }).catch(() => {});
+      }
       return res.status(502).json({
         message: 'Failed to send verification email. Please verify the email address or try again.'
       });
@@ -206,8 +268,11 @@ router.post('/send-otp', [
 });
 
 router.post('/verify-otp', [
-  body('email').isEmail().normalizeEmail().withMessage('Valid email is required'),
-  body('otp').trim().matches(/^\d{6}$/).withMessage('Please enter a valid 6-digit OTP')
+  body('email').isEmail().normalizeEmail(EMAIL_NORMALIZE_OPTIONS).withMessage('Valid email is required'),
+  body('otp')
+    .customSanitizer(v => String(v || '').replace(/\s+/g, ''))
+    .matches(/^\d{6}$/)
+    .withMessage('Please enter a valid 6-digit OTP')
 ], async (req, res) => {
   const errors = validationResult(req);
   if (!errors.isEmpty()) {
@@ -216,7 +281,7 @@ router.post('/verify-otp', [
 
   try {
     const email = String(req.body.email).trim().toLowerCase();
-    const otp = String(req.body.otp).trim();
+    const otp = String(req.body.otp).replace(/\s+/g, '');
     const purpose = normalizePurpose(req.body.purpose);
 
     await verifyAndConsumeOtp({ email, otp, purpose, markOnly: true });
@@ -251,7 +316,7 @@ router.post('/verify-otp', [
 });
 
 router.post('/reset-password', [
-  body('email').isEmail().normalizeEmail().withMessage('Valid email is required'),
+  body('email').isEmail().normalizeEmail(EMAIL_NORMALIZE_OPTIONS).withMessage('Valid email is required'),
   body('password').optional().isLength({ min: 8 }).withMessage('New password must be at least 8 characters'),
   body('newPassword').optional().isLength({ min: 8 }).withMessage('New password must be at least 8 characters')
 ], async (req, res) => {
@@ -272,6 +337,7 @@ router.post('/reset-password', [
       return res.status(404).json({ message: 'No account found with that email address.' });
     }
 
+    let tokenVerified = false;
     if (req.body.verificationToken) {
       try {
         const decoded = jwt.verify(String(req.body.verificationToken), getJwtSecret());
@@ -285,20 +351,27 @@ router.post('/reset-password', [
             message: 'Password reset verification token is invalid or does not match this email.'
           });
         }
+        tokenVerified = true;
         await EmailOtp.deleteMany({ email, purpose: 'reset_password' }).catch(() => {});
-      } catch {
+      } catch (tokenErr) {
+        if (!req.body.otp) {
+          return res.status(400).json({
+            code: 'RESET_TOKEN_EXPIRED',
+            message: 'Password reset verification expired. Please request a fresh OTP.'
+          });
+        }
+      }
+    }
+
+    if (!tokenVerified) {
+      if (req.body.otp) {
+        await verifyAndConsumeOtp({ email, otp: req.body.otp, purpose: 'reset_password', markOnly: false });
+      } else {
         return res.status(400).json({
-          code: 'RESET_TOKEN_EXPIRED',
-          message: 'Password reset verification expired. Please request a fresh OTP.'
+          code: 'OTP_REQUIRED',
+          message: 'Please verify your 6-digit password reset OTP first.'
         });
       }
-    } else if (req.body.otp) {
-      await verifyAndConsumeOtp({ email, otp: req.body.otp, purpose: 'reset_password', markOnly: false });
-    } else {
-      return res.status(400).json({
-        code: 'OTP_REQUIRED',
-        message: 'Please verify your 6-digit password reset OTP first.'
-      });
     }
 
     user.password = nextPassword;
@@ -323,7 +396,7 @@ router.post('/reset-password', [
 
 router.post('/register', [
   body('name').trim().notEmpty().withMessage('Name is required'),
-  body('email').isEmail().normalizeEmail().withMessage('Valid email is required'),
+  body('email').isEmail().normalizeEmail(EMAIL_NORMALIZE_OPTIONS).withMessage('Valid email is required'),
   body('password').isLength({ min: 8 }).withMessage('Password must be at least 8 characters'),
   body('department').trim().notEmpty().withMessage('Department is required')
 ], async (req, res) => {
@@ -363,20 +436,26 @@ router.post('/register', [
         emailVerifiedAt = new Date();
         await EmailOtp.deleteMany({ email }).catch(() => {});
       } catch {
+        if (!req.body.otp) {
+          return res.status(400).json({
+            code: 'OTP_TOKEN_EXPIRED',
+            message: 'Email verification expired. Please request a fresh OTP.'
+          });
+        }
+      }
+    }
+
+    if (!emailVerified) {
+      if (req.body.otp) {
+        await verifyAndConsumeOtp({ email, otp: req.body.otp, purpose: 'register', markOnly: false });
+        emailVerified = true;
+        emailVerifiedAt = new Date();
+      } else if (requireEmailOtp) {
         return res.status(400).json({
-          code: 'OTP_TOKEN_EXPIRED',
-          message: 'Email verification expired. Please request a fresh OTP.'
+          code: 'EMAIL_OTP_REQUIRED',
+          message: 'Please verify your email with the 6-digit OTP before creating your account.'
         });
       }
-    } else if (req.body.otp) {
-      await verifyAndConsumeOtp({ email, otp: req.body.otp, purpose: 'register', markOnly: false });
-      emailVerified = true;
-      emailVerifiedAt = new Date();
-    } else if (requireEmailOtp) {
-      return res.status(400).json({
-        code: 'EMAIL_OTP_REQUIRED',
-        message: 'Please verify your email with the 6-digit OTP before creating your account.'
-      });
     }
 
     const user = await User.create({
@@ -398,7 +477,7 @@ router.post('/register', [
 });
 
 router.post('/login', [
-  body('email').isEmail().normalizeEmail(),
+  body('email').isEmail().normalizeEmail(EMAIL_NORMALIZE_OPTIONS),
   body('password').notEmpty()
 ], async (req, res) => {
   const errors = validationResult(req);
@@ -411,5 +490,10 @@ router.post('/login', [
 });
 
 router.get('/me', auth, (req, res) => res.json(req.user));
+
+router.EMAIL_NORMALIZE_OPTIONS = EMAIL_NORMALIZE_OPTIONS;
+router.hashOtp = hashOtp;
+router.verifyStoredOtpHash = verifyStoredOtpHash;
+router.verifyAndConsumeOtp = verifyAndConsumeOtp;
 
 module.exports = router;

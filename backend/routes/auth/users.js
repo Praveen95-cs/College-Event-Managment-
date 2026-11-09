@@ -33,7 +33,15 @@ router.get('/admin/system-status', auth, authorize('admin'), (req, res) => {
 
 router.post('/organizers', auth, authorize('admin'), [
   body('name').trim().notEmpty().withMessage('Name is required'),
-  body('email').isEmail().normalizeEmail().withMessage('Valid email is required'),
+  body('email').isEmail().normalizeEmail({
+    all_lowercase: true,
+    gmail_lowercase: true,
+    gmail_remove_dots: false,
+    gmail_remove_subaddress: false,
+    outlookdotcom_remove_subaddress: false,
+    yahoo_remove_subaddress: false,
+    icloud_remove_subaddress: false
+  }).withMessage('Valid email is required'),
   body('password').isLength({ min: 8 }).withMessage('Password must be at least 8 characters'),
   body('department').trim().notEmpty().withMessage('Department is required')
 ], async (req, res) => {

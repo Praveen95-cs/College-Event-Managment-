@@ -26,7 +26,7 @@ const PrivacyPolicy = () => {
             <p>We process only the details needed to run campus events and verify eligibility:</p>
             <ul className="space-y-1.5 list-disc list-inside text-[#efe9de]/90">
               <li>Account identity: full name, verified student email address, salted bcrypt password hash, role, and admin-configured department</li>
-              <li>OTP verification records: HMAC-SHA256 hashed 6-digit verification and password-reset codes (automatically purged after 10 minutes or verification)</li>
+              <li>OTP verification records: salted SHA-256 hashed 6-digit verification and password-reset codes (automatically purged after 10 minutes or verification)</li>
               <li>Event passes &amp; attendance: registration numbers, accommodation preference, venue check-in status, and confirmation mail delivery timestamps</li>
               <li>YouPI-PG V2 payment references: generated order IDs, payee VPA metadata, submitted 12-digit UTR references, and reconciliation audit state (Avenor never collects UPI PINs, bank passwords, or card numbers)</li>
               <li>Competitions &amp; community participation: timed quiz answers, sandboxed code submissions, leaderboard scores/timings, club follows, likes, saves, and moderated comments</li>

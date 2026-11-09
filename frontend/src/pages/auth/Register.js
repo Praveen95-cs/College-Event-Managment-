@@ -139,7 +139,8 @@ const Register = () => {
       await register({
         ...formData,
         email: normalizedEmail,
-        verificationToken
+        verificationToken,
+        otp: otpInput.trim()
       });
       navigate('/');
     } catch (err) {
@@ -242,7 +243,29 @@ const Register = () => {
               )}
             </div>
 
-            {hasActiveOtpForEmail && !isEmailVerified && (
+              {!isEmailVerified && (
+                <div className="flex items-center justify-between gap-2 text-[11px] text-[#8a847a]">
+                  <span>Check Spam/Promotions if the code does not appear in Primary.</span>
+                  {!hasActiveOtpForEmail && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        if (!normalizedEmail || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(normalizedEmail)) {
+                          setError('Enter your email address first before entering an OTP code.');
+                          return;
+                        }
+                        setError('');
+                        setOtpSentEmail(normalizedEmail);
+                      }}
+                      className="text-[#ebb05d] hover:underline shrink-0"
+                    >
+                      Already have an OTP?
+                    </button>
+                  )}
+                </div>
+              )}
+
+              {hasActiveOtpForEmail && !isEmailVerified && (
               <div className="p-3.5 rounded-[10px] bg-[#161513] border border-[#e09132]/30 space-y-2.5">
                 <div className="flex items-center justify-between gap-2">
                   <span className="inline-flex items-center gap-1.5 text-[12px] font-medium text-[#efe9de]">
