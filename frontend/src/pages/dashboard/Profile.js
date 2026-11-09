@@ -404,7 +404,7 @@ const Profile = () => {
                                   ? isPaidComplete
                                     ? `Paid ${feeSymbol}${reg.amountPaid || event.registrationFee}`
                                     : reg.youpiStatus === 'OBSERVED_SUCCESS'
-                                      ? 'Observed · Not reconciled'
+                                      ? 'Alert observed · awaiting CSV match'
                                       : reg.youpiStatus === 'MANUAL_REVIEW'
                                         ? 'Pending verification'
                                         : reg.youpiStatus === 'PROCESSING'
@@ -419,12 +419,12 @@ const Profile = () => {
 
                           <Link
                             to={event._id ? `/events/${event._id}` : '/events'}
-                            className="block text-[16px] font-medium text-[#efe9de] hover:text-[#ebb05d] transition-colors line-clamp-2"
+                            className="block text-[16px] font-medium text-[#efe9de] hover:text-[#ebb05d] transition-colors duration-150 line-clamp-2"
                           >
                             {event.title || 'Campus Event'}
                           </Link>
 
-                          <div className="mt-3 space-y-1.5 text-[13px] text-[#aaa398]">
+                          <div className="mt-3 space-y-2 text-[13px] text-[#aaa398]">
                             {event.department && <p>{event.department}</p>}
                             <div className="flex items-center gap-2 font-mono text-[12px] tabular-nums">
                               <CalendarDaysIcon className="h-4 w-4 text-[#8a847a] shrink-0" strokeWidth={1.5} />
@@ -445,7 +445,7 @@ const Profile = () => {
                                 <span className="text-[#efe9de]">{reg.regNo || user.email?.split('@')[0]}</span>
                               </div>
                               <span
-                                className={`px-1.5 py-0.5 rounded-[5px] text-[11px] border ${
+                                className={`px-2 py-0.5 rounded-[6px] text-[12px] border ${
                                   reg.attendanceStatus === 'present'
                                     ? 'bg-[#4cc38a]/12 text-[#4cc38a] border-[#4cc38a]/30'
                                     : reg.attendanceStatus === 'absent'
@@ -454,7 +454,7 @@ const Profile = () => {
                                 }`}
                               >
                                 {reg.attendanceStatus === 'present'
-                                  ? 'Attended ✓'
+                                  ? 'Attended'
                                   : reg.attendanceStatus === 'absent'
                                     ? 'Absent'
                                     : 'Attendance pending'}
@@ -473,8 +473,8 @@ const Profile = () => {
                               </div>
                             )}
                             {isPaidEvent && !isPaidComplete && reg.youpiStatus === 'OBSERVED_SUCCESS' && (
-                              <div className="pt-2 font-sans text-[11.5px] text-[#ebb05d]">
-                                Bank alert observed (NOT_RECONCILED) — pass &amp; WhatsApp group unlock after bank CSV reconciliation.
+                              <div className="pt-2 font-sans text-[12px] text-[#ebb05d]">
+                                Bank alert received — pass and WhatsApp group unlock after bank statement match
                               </div>
                             )}
                             {isPaidComplete && event.whatsappGroupLink && (
@@ -483,11 +483,11 @@ const Profile = () => {
                                   href={event.whatsappGroupLink}
                                   target="_blank"
                                   rel="noopener noreferrer"
-                                  className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-[6px] text-[12px] font-medium bg-[#4cc38a]/12 text-[#4cc38a] border border-[#4cc38a]/30 hover:bg-[#4cc38a]/20 transition-colors"
+                                  className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-[8px] text-[12px] font-medium bg-[#4cc38a]/12 text-[#4cc38a] border border-[#4cc38a]/30 hover:bg-[#4cc38a]/20 transition-colors duration-150"
                                 >
-                                  <ChatBubbleLeftRightIcon className="h-3.5 w-3.5" strokeWidth={1.75} />
-                                  <span>Join WhatsApp Group</span>
-                                  <ArrowUpRightIcon className="h-3 w-3" strokeWidth={2} />
+                                  <ChatBubbleLeftRightIcon className="h-4 w-4" strokeWidth={1.5} />
+                                  <span>Join WhatsApp group</span>
+                                  <ArrowUpRightIcon className="h-4 w-4" strokeWidth={1.5} />
                                 </a>
                               </div>
                             )}

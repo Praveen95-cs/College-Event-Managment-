@@ -480,10 +480,10 @@ const EventRegistration = ({ event, onClose, onRegistered }) => {
 
   return (
     <div className="fixed inset-0 z-50 bg-black/75 backdrop-blur-sm flex items-center justify-center p-4 overflow-y-auto">
-      <div className="bg-[#1c1a18] border border-[#efe9de]/[0.12] rounded-[16px] p-6 sm:p-7 max-w-lg w-full shadow-[0_16px_48px_rgba(0,0,0,0.5)] relative my-auto">
+      <div className="bg-[#1c1a18] border border-[#efe9de]/[0.12] rounded-[14px] p-6 max-w-lg w-full relative my-auto">
         <button
           onClick={onClose}
-          className="absolute top-4 right-4 p-1.5 rounded-[8px] text-[#8a847a] hover:text-[#efe9de] hover:bg-[#262421] transition-colors duration-150"
+          className="absolute top-4 right-4 p-2 rounded-[8px] text-[#8a847a] hover:text-[#efe9de] hover:bg-[#262421] transition-colors duration-150"
           aria-label="Close modal"
         >
           <XMarkIcon className="h-5 w-5" strokeWidth={1.5} />
@@ -497,23 +497,23 @@ const EventRegistration = ({ event, onClose, onRegistered }) => {
               </div>
               <div>
                 <h3 className="text-[20px] font-medium text-[#efe9de]">
-                  {isPaidEvent ? 'YouPI payment & registration confirmed' : 'Registration confirmed'}
+                  {isPaidEvent ? 'Payment and registration confirmed' : 'Registration confirmed'}
                 </h3>
                 <p className="text-[13px] text-[#aaa398]">
-                  Seat reserved for <span className="text-[#efe9de] font-medium">{event.title}</span>.
+                  Seat reserved for <span className="text-[#efe9de] font-medium">{event.title}</span>
                 </p>
               </div>
             </div>
 
-            <div className="mt-5 bg-[#161513] border border-[#efe9de]/[0.08] rounded-[10px] p-4 space-y-2.5 text-[13px]">
+            <div className="mt-5 bg-[#161513] border border-[#efe9de]/[0.08] rounded-[10px] p-4 space-y-2 text-[13px]">
               <div className="flex items-center justify-between gap-2 text-[12px] text-[#8a847a] pb-2 border-b border-[#efe9de]/[0.06]">
                 <span className="inline-flex items-center gap-2">
                   <TicketIcon className="h-4 w-4 text-[#ebb05d]" strokeWidth={1.5} />
-                  <span>Pass &amp; receipt details</span>
+                  <span>Pass and receipt details</span>
                 </span>
                 {isPaidEvent && (
-                  <span className="font-mono text-[11px] px-2 py-0.5 rounded-[5px] bg-[#4cc38a]/12 text-[#4cc38a] border border-[#4cc38a]/25">
-                    RECONCILED
+                  <span className="font-mono text-[12px] px-2 py-0.5 rounded-[6px] bg-[#4cc38a]/12 text-[#4cc38a] border border-[#4cc38a]/25">
+                    Reconciled
                   </span>
                 )}
               </div>
@@ -530,9 +530,9 @@ const EventRegistration = ({ event, onClose, onRegistered }) => {
               <div className="flex justify-between gap-2">
                 <span className="text-[#8a847a]">Admission</span>
                 {isPaidEvent ? (
-                  <span className="font-mono font-medium text-[#4cc38a]">
+                  <span className="font-mono font-medium text-[#4cc38a] tabular-nums">
                     Paid {currencySymbol}
-                    {confirmedRegistration?.amountPaid || fee}
+                    {Number(confirmedRegistration?.amountPaid || fee).toFixed(2)}
                   </span>
                 ) : (
                   <span className="font-medium text-[#4cc38a]">Free</span>
@@ -549,15 +549,15 @@ const EventRegistration = ({ event, onClose, onRegistered }) => {
             </div>
 
             {confirmedWhatsappLink && (
-              <div className="mt-4 rounded-[12px] bg-[#4cc38a]/10 border border-[#4cc38a]/30 p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-                <div className="flex items-start gap-2.5 min-w-0">
-                  <ChatBubbleLeftRightIcon className="h-5 w-5 text-[#4cc38a] shrink-0 mt-0.5" strokeWidth={1.75} />
+              <div className="mt-4 rounded-[10px] bg-[#4cc38a]/10 border border-[#4cc38a]/30 p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                <div className="flex items-start gap-3 min-w-0">
+                  <ChatBubbleLeftRightIcon className="h-4 w-4 text-[#4cc38a] shrink-0 mt-0.5" strokeWidth={1.5} />
                   <div>
                     <p className="text-[13px] font-medium text-[#efe9de]">
-                      Event WhatsApp group unlocked
+                      WhatsApp group unlocked
                     </p>
                     <p className="text-[12px] text-[#aaa398]">
-                      Join the official attendee group for venue updates and coordination.
+                      Join the attendee group for schedule updates and venue pins
                     </p>
                   </div>
                 </div>
@@ -565,10 +565,10 @@ const EventRegistration = ({ event, onClose, onRegistered }) => {
                   href={confirmedWhatsappLink}
                   target="_blank"
                   rel="noopener noreferrer"
-                  className="inline-flex items-center justify-center gap-1.5 h-9 px-4 rounded-[8px] text-[12px] font-medium bg-[#4cc38a] text-[#12110f] hover:bg-[#5cd199] transition-colors shrink-0"
+                  className="inline-flex items-center justify-center gap-1.5 h-9 px-4 rounded-[8px] text-[12px] font-medium bg-[#4cc38a] text-[#12110f] hover:opacity-90 transition-opacity duration-150 shrink-0"
                 >
-                  <span>Join WhatsApp Group</span>
-                  <ArrowUpRightIcon className="h-3.5 w-3.5" strokeWidth={2} />
+                  <span>Join WhatsApp group</span>
+                  <ArrowUpRightIcon className="h-4 w-4" strokeWidth={1.5} />
                 </a>
               </div>
             )}
@@ -586,16 +586,16 @@ const EventRegistration = ({ event, onClose, onRegistered }) => {
           <div>
             <div className="pr-8 mb-5">
               <span
-                className={`inline-flex items-center gap-1 px-2.5 py-0.5 rounded-[6px] text-[12px] font-medium border mb-2 ${
+                className={`inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-[6px] text-[12px] font-medium border mb-2 tabular-nums ${
                   isPaidEvent
                     ? 'bg-[#e09132]/15 border-[#e09132]/30 text-[#ebb05d]'
                     : 'bg-[#262421] border-[#efe9de]/[0.08] text-[#4cc38a]'
                 }`}
               >
-                {isPaidEvent && <CurrencyRupeeIcon className="h-3.5 w-3.5" strokeWidth={1.75} />}
+                {isPaidEvent && <CurrencyRupeeIcon className="h-4 w-4" strokeWidth={1.5} />}
                 <span>
                   {isPaidEvent
-                    ? `YouPI-PG paid event pass · ${currencySymbol}${fee}`
+                    ? `Paid event pass · ${currencySymbol}${Number(fee).toFixed(2)}`
                     : 'Free event registration'}
                 </span>
               </span>
@@ -617,12 +617,12 @@ const EventRegistration = ({ event, onClose, onRegistered }) => {
             </div>
 
             {bannedError && (
-              <div className="mb-4 p-4 rounded-[10px] bg-[#e5484d]/12 border border-[#e5484d]/35 text-[#efe9de] space-y-1.5">
+              <div className="mb-4 p-4 rounded-[10px] bg-[#e5484d]/12 border border-[#e5484d]/35 text-[#efe9de] space-y-2">
                 <div className="flex items-center gap-2 text-[#e5484d] font-medium text-[13px]">
-                  <ShieldExclamationIcon className="h-5 w-5 shrink-0" />
-                  <span>ACCOUNT SUSPENDED (BANNED_IDENTITY)</span>
+                  <ShieldExclamationIcon className="h-4 w-4 shrink-0" strokeWidth={1.5} />
+                  <span>Checkout access suspended</span>
                 </div>
-                <p className="text-[12px] text-[#d9ceb8] leading-relaxed">{bannedError}</p>
+                <p className="text-[12px] text-[#aaa398] leading-relaxed">{bannedError}</p>
               </div>
             )}
 
@@ -634,7 +634,7 @@ const EventRegistration = ({ event, onClose, onRegistered }) => {
 
             {!youpiSession ? (
               <form onSubmit={handleFreeSubmit} className="space-y-4">
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                   <div>
                     <label className="block text-[13px] font-medium text-[#aaa398] mb-1.5" htmlFor="name">
                       Full name
@@ -662,7 +662,7 @@ const EventRegistration = ({ event, onClose, onRegistered }) => {
                       value={formData.regNo}
                       onChange={handleInputChange}
                       required
-                      placeholder="e.g. 21CS045"
+                      placeholder="e.g. 2023503501"
                       className="input-field font-mono"
                     />
                   </div>
@@ -671,10 +671,10 @@ const EventRegistration = ({ event, onClose, onRegistered }) => {
                 <div>
                   <div className="flex items-center justify-between gap-2 mb-1.5">
                     <label className="block text-[13px] font-medium text-[#aaa398]" htmlFor="regEmail">
-                      Student confirmation email *
+                      Student confirmation email
                     </label>
                     {isStudentAccount && (
-                      <span className="text-[11px] font-mono px-2 py-0.5 rounded-[5px] bg-[#4cc38a]/12 text-[#4cc38a] border border-[#4cc38a]/25">
+                      <span className="text-[12px] font-mono px-2 py-0.5 rounded-[6px] bg-[#4cc38a]/12 text-[#4cc38a] border border-[#4cc38a]/25">
                         Account email locked
                       </span>
                     )}
@@ -693,69 +693,72 @@ const EventRegistration = ({ event, onClose, onRegistered }) => {
                     />
                     <EnvelopeIcon className="h-4 w-4 text-[#8a847a] absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none" strokeWidth={1.5} />
                   </div>
-                  <p className="mt-1 text-[11px] text-[#8a847a]">
+                  <p className="mt-1.5 text-[12px] text-[#8a847a]">
                     Your digital pass confirmation{isPaidEvent ? ', YouPI payment receipt,' : ''}{' '}
-                    {event?.hasWhatsappGroup || event?.whatsappGroupLink ? 'and WhatsApp group invite ' : ''}will be mailed directly once verified.
+                    {event?.hasWhatsappGroup || event?.whatsappGroupLink ? 'and WhatsApp group invite ' : ''}will be mailed once verified
                   </p>
                 </div>
 
                 {isPaidEvent && (
-                  <div className="rounded-[12px] bg-[#161513] border border-[#e09132]/30 p-4 space-y-3">
+                  <div className="rounded-[10px] bg-[#161513] border border-[#e09132]/30 p-4 space-y-3">
                     <div className="flex items-center justify-between gap-2">
                       <div className="flex items-center gap-2">
-                        <ShieldCheckIcon className="h-4 w-4 text-[#ebb05d]" strokeWidth={1.75} />
+                        <ShieldCheckIcon className="h-4 w-4 text-[#ebb05d]" strokeWidth={1.5} />
                         <span className="text-[13px] font-medium text-[#efe9de]">
-                          YouPI-PG V2 Method &amp; Payee Channel
+                          Verification method and payee channel
                         </span>
                       </div>
-                      <span className="text-[11px] font-mono px-2 py-0.5 rounded-[5px] bg-[#4cc38a]/12 text-[#4cc38a] border border-[#4cc38a]/25">
+                      <span className="text-[12px] font-mono text-[#4cc38a]">
                         0% fee
                       </span>
                     </div>
 
-                    <div className="grid grid-cols-2 gap-2">
+                    <div className="grid grid-cols-2 gap-3">
                       <button
                         type="button"
                         onClick={() => setFormData((p) => ({ ...p, method: 'UPI' }))}
-                        className={`p-2.5 rounded-[9px] border text-left text-[12px] transition-colors ${
+                        className={`p-3 rounded-[8px] border text-left text-[12px] transition-colors duration-150 ${
                           formData.method === 'UPI'
                             ? 'bg-[#e09132]/15 border-[#e09132]/45 text-[#efe9de]'
                             : 'bg-[#12110f] border-[#efe9de]/[0.08] text-[#aaa398]'
                         }`}
                       >
                         <div className="font-medium flex items-center gap-1.5">
-                          <BoltIcon className="h-3.5 w-3.5 text-[#ebb05d]" />
+                          <BoltIcon className="h-4 w-4 text-[#ebb05d]" strokeWidth={1.5} />
                           <span>UPI Auto-Verify</span>
                         </div>
-                        <span className="block text-[10.5px] text-[#8a847a] mt-0.5">
-                          QR + 30s auto listener
+                        <span className="block text-[12px] text-[#8a847a] mt-1">
+                          QR + 30s bank check
                         </span>
                       </button>
 
                       <button
                         type="button"
                         onClick={() => setFormData((p) => ({ ...p, method: 'MANUAL_UPI' }))}
-                        className={`p-2.5 rounded-[9px] border text-left text-[12px] transition-colors ${
+                        className={`p-3 rounded-[8px] border text-left text-[12px] transition-colors duration-150 ${
                           formData.method === 'MANUAL_UPI'
                             ? 'bg-[#e09132]/15 border-[#e09132]/45 text-[#efe9de]'
                             : 'bg-[#12110f] border-[#efe9de]/[0.08] text-[#aaa398]'
                         }`}
                       >
                         <div className="font-medium flex items-center gap-1.5">
-                          <DocumentCheckIcon className="h-3.5 w-3.5 text-[#ebb05d]" />
-                          <span>Manual UTR</span>
+                          <DocumentCheckIcon className="h-4 w-4 text-[#ebb05d]" strokeWidth={1.5} />
+                          <span>Manual UTR Entry</span>
                         </div>
-                        <span className="block text-[10.5px] text-[#8a847a] mt-0.5">
-                          Submit 12-digit UTR
+                        <span className="block text-[12px] text-[#8a847a] mt-1">
+                          Enter UPI reference ID
                         </span>
                       </button>
                     </div>
 
                     {availableVpaOptions.length > 0 && (
                       <div>
-                        <div className="flex items-center justify-between text-[11px] text-[#aaa398] mb-1">
-                          <span>Payee UPI Channel (locks when session starts)</span>
-                          <LockClosedIcon className="h-3 w-3 text-[#ebb05d]" />
+                        <div className="flex items-center justify-between text-[12px] text-[#aaa398] mb-1.5">
+                          <span>Payee UPI channel</span>
+                          <span className="inline-flex items-center gap-1 font-mono text-[#ebb05d]">
+                            <LockClosedIcon className="h-4 w-4" strokeWidth={1.5} />
+                            <span>Locked after start</span>
+                          </span>
                         </div>
                         <select
                           value={effectivePreferredVpa}
@@ -772,9 +775,9 @@ const EventRegistration = ({ event, onClose, onRegistered }) => {
                     )}
 
                     {(event?.hasWhatsappGroup || event?.whatsappGroupLink) && (
-                      <p className="text-[11.5px] text-[#4cc38a] flex items-center gap-1.5 pt-0.5">
-                        <ChatBubbleLeftRightIcon className="h-4 w-4 shrink-0" strokeWidth={1.75} />
-                        <span>Includes official WhatsApp group link (revealed after bank reconciliation).</span>
+                      <p className="text-[12px] text-[#4cc38a] flex items-center gap-2 pt-1">
+                        <ChatBubbleLeftRightIcon className="h-4 w-4 shrink-0" strokeWidth={1.5} />
+                        <span>Includes official WhatsApp group invite upon settlement</span>
                       </p>
                     )}
                   </div>
@@ -795,29 +798,29 @@ const EventRegistration = ({ event, onClose, onRegistered }) => {
                   <button type="button" onClick={onClose} className="btn-secondary h-10 px-4 text-[13px]">
                     Cancel
                   </button>
-                  <button type="submit" disabled={loading || Boolean(bannedError)} className="btn-primary h-10 px-5 text-[13px]">
+                  <button type="submit" disabled={loading || Boolean(bannedError)} className="btn-primary h-10 px-5 text-[13px] tabular-nums">
                     {loading
                       ? isPaidEvent
                         ? 'Initializing YouPI...'
                         : 'Confirming...'
                       : isPaidEvent
-                        ? `Pay via YouPI-PG · ${currencySymbol}${fee}`
+                        ? `Pay via YouPI-PG · ${currencySymbol}${Number(fee).toFixed(2)}`
                         : 'Confirm registration'}
                   </button>
                 </div>
               </form>
             ) : (
               <div className="space-y-4">
-                <div className="rounded-[10px] bg-[#161513] border border-[#e09132]/30 p-3.5 flex flex-wrap items-center justify-between gap-2">
+                <div className="rounded-[10px] bg-[#161513] border border-[#e09132]/30 p-4 flex flex-wrap items-center justify-between gap-2">
                   <div className="min-w-0">
                     <div className="flex items-center gap-2">
-                      <QrCodeIcon className="h-4 w-4 text-[#ebb05d] shrink-0" strokeWidth={1.75} />
+                      <QrCodeIcon className="h-4 w-4 text-[#ebb05d] shrink-0" strokeWidth={1.5} />
                       <span className="text-[13px] font-medium text-[#efe9de]">YouPI-PG V2</span>
-                      <span className="px-1.5 py-0.5 rounded-[5px] text-[10px] font-mono bg-[#262421] text-[#aaa398] border border-[#efe9de]/[0.08]">
-                        {youpiSession.method || 'UPI'}
+                      <span className="text-[12px] font-mono text-[#8a847a]">
+                        · {youpiSession.method === 'MANUAL_UPI' ? 'Manual UTR' : 'Auto-Verify'}
                       </span>
                     </div>
-                    <p className="text-[11px] font-mono text-[#8a847a] truncate mt-1">
+                    <p className="text-[12px] font-mono text-[#8a847a] truncate mt-1 tabular-nums">
                       Order: {youpiSession.orderId} · {currencySymbol}
                       {youpiSession.amountDisplay}
                     </p>
@@ -825,13 +828,13 @@ const EventRegistration = ({ event, onClose, onRegistered }) => {
 
                   <div className="flex items-center gap-2 shrink-0">
                     {['ACTIVE', 'PROCESSING'].includes(youpiSession.status) && !isSessionExpired && (
-                      <span className="inline-flex items-center gap-1 px-2 py-1 rounded-[6px] text-[11px] font-mono tabular-nums bg-[#262421] text-[#ebb05d] border border-[#e09132]/30">
-                        <ClockIcon className="h-3.5 w-3.5" strokeWidth={1.75} />
+                      <span className="inline-flex items-center gap-1.5 px-2 py-1 rounded-[6px] text-[12px] font-mono tabular-nums bg-[#262421] text-[#ebb05d] border border-[#e09132]/30">
+                        <ClockIcon className="h-4 w-4" strokeWidth={1.5} />
                         <span>{formatCountdown(secondsLeft)}</span>
                       </span>
                     )}
                     <span
-                      className={`px-2 py-1 rounded-[6px] text-[11px] font-mono border ${
+                      className={`px-2 py-1 rounded-[6px] text-[12px] font-mono border ${
                         ['MANUAL_REVIEW', 'OBSERVED_SUCCESS', 'QUEUED', 'PROCESSING'].includes(
                           youpiSession.status
                         )
@@ -847,15 +850,15 @@ const EventRegistration = ({ event, onClose, onRegistered }) => {
                 </div>
 
                 {youpiSession.status === 'QUEUED' ? (
-                  <div className="rounded-[12px] bg-[#161513] border border-[#e09132]/35 p-4 space-y-3 text-[13px]">
-                    <div className="flex items-start gap-2.5">
-                      <QueueListIcon className="h-5 w-5 text-[#ebb05d] shrink-0 mt-0.5" />
+                  <div className="rounded-[10px] bg-[#161513] border border-[#e09132]/35 p-4 space-y-3 text-[13px]">
+                    <div className="flex items-start gap-3">
+                      <QueueListIcon className="h-4 w-4 text-[#ebb05d] shrink-0 mt-0.5" strokeWidth={1.5} />
                       <div>
-                        <p className="font-medium text-[#efe9de]">
-                          Queued in FIFO Slot #{youpiSession.queuePosition || 1}
+                        <p className="font-medium text-[#efe9de] tabular-nums">
+                          Queued in FIFO slot #{youpiSession.queuePosition || 1}
                         </p>
                         <p className="text-[12px] text-[#aaa398] mt-1">
-                          Exclusive slot in use for <span className="font-mono text-[#efe9de]">{youpiSession.payeeVpa}</span>. QR code is withheld until active.
+                          Exclusive slot in use for <span className="font-mono text-[#efe9de]">{youpiSession.payeeVpa}</span>. QR stays hidden until your turn arrives.
                         </p>
                       </div>
                     </div>
@@ -866,7 +869,7 @@ const EventRegistration = ({ event, onClose, onRegistered }) => {
                         disabled={pollingStatus}
                         className="btn-primary flex-1 h-9 text-[12px]"
                       >
-                        {pollingStatus ? 'Checking...' : 'Check Slot'}
+                        {pollingStatus ? 'Checking...' : 'Check slot'}
                       </button>
                       <button
                         type="button"
@@ -878,12 +881,12 @@ const EventRegistration = ({ event, onClose, onRegistered }) => {
                     </div>
                   </div>
                 ) : youpiSession.status === 'OBSERVED_SUCCESS' ? (
-                  <div className="rounded-[12px] bg-[#161513] border border-[#e09132]/35 p-4 space-y-3 text-[13px]">
+                  <div className="rounded-[10px] bg-[#161513] border border-[#e09132]/35 p-4 space-y-3 text-[13px]">
                     <p className="font-medium text-[#ebb05d]">
-                      Bank Alert Observed (NOT_RECONCILED)
+                      Bank alert observed · awaiting statement match
                     </p>
                     <p className="text-[12px] text-[#aaa398]">
-                      Tag: <span className="font-mono text-[#efe9de]">{youpiSession.verificationTag}</span>. Your pass &amp; WhatsApp group unlock after bank CSV statement import or Admin reconciliation.
+                      Ref: <span className="font-mono text-[#efe9de]">{youpiSession.verificationTag}</span>. Your pass and WhatsApp group unlock after bank statement import or admin reconciliation.
                     </p>
                     <button
                       type="button"
@@ -891,13 +894,13 @@ const EventRegistration = ({ event, onClose, onRegistered }) => {
                       disabled={pollingStatus}
                       className="btn-primary w-full h-9 text-[12px]"
                     >
-                      {pollingStatus ? 'Checking...' : 'Sync Settlement Status'}
+                      {pollingStatus ? 'Checking...' : 'Sync settlement status'}
                     </button>
                   </div>
                 ) : isSessionExpired || isSessionTerminalError ? (
-                  <div className="rounded-[12px] bg-[#e5484d]/10 border border-[#e5484d]/30 p-4 space-y-3">
-                    <div className="flex items-start gap-2.5 text-[#efe9de]">
-                      <ExclamationTriangleIcon className="h-5 w-5 text-[#e5484d] shrink-0 mt-0.5" strokeWidth={1.75} />
+                  <div className="rounded-[10px] bg-[#e5484d]/10 border border-[#e5484d]/30 p-4 space-y-3">
+                    <div className="flex items-start gap-3 text-[#efe9de]">
+                      <ExclamationTriangleIcon className="h-4 w-4 text-[#e5484d] shrink-0 mt-0.5" strokeWidth={1.5} />
                       <div className="text-[13px]">
                         <p className="font-medium text-[#e5484d]">
                           {isSessionExpired
@@ -906,7 +909,7 @@ const EventRegistration = ({ event, onClose, onRegistered }) => {
                         </p>
                         <p className="text-[#aaa398] mt-1">
                           {youpiSession.failureReason ||
-                            'UPI checkout sessions stay open for 5 minutes.'}
+                            'UPI checkout sessions stay open for 5 minutes'}
                         </p>
                       </div>
                     </div>
@@ -920,15 +923,15 @@ const EventRegistration = ({ event, onClose, onRegistered }) => {
                     </button>
                   </div>
                 ) : youpiSession.status === 'MANUAL_REVIEW' ? (
-                  <div className="rounded-[12px] bg-[#161513] border border-[#e09132]/35 p-4 space-y-3 text-[13px]">
-                    <div className="flex items-start gap-2.5">
-                      <ClockIcon className="h-5 w-5 text-[#ebb05d] shrink-0 mt-0.5" strokeWidth={1.75} />
+                  <div className="rounded-[10px] bg-[#161513] border border-[#e09132]/35 p-4 space-y-3 text-[13px]">
+                    <div className="flex items-start gap-3">
+                      <ClockIcon className="h-4 w-4 text-[#ebb05d] shrink-0 mt-0.5" strokeWidth={1.5} />
                       <div>
                         <p className="font-medium text-[#efe9de]">
-                          {youpiSession.settlementState || 'PENDING_VERIFICATION'} · awaiting bank reconciliation
+                          Pending bank statement verification
                         </p>
                         <p className="text-[12px] text-[#aaa398] mt-1">
-                          Reference <span className="font-mono text-[#ebb05d]">{youpiSession.utr || 'Pending'}</span> has been recorded. Pass unlocks after merchant reconciliation.
+                          Reference <span className="font-mono text-[#ebb05d]">{youpiSession.utr || 'Pending'}</span> recorded. Pass unlocks after merchant reconciliation.
                         </p>
                       </div>
                     </div>
@@ -942,12 +945,12 @@ const EventRegistration = ({ event, onClose, onRegistered }) => {
                     </button>
                   </div>
                 ) : youpiSession.status === 'PROCESSING' ? (
-                  <div className="rounded-[12px] bg-[#161513] border border-[#e09132]/35 p-4 space-y-3 text-[13px]">
-                    <p className="font-medium text-[#ebb05d]">
-                      30s Bank Alert Listener Active ({formatCountdown(secondsLeft)})
+                  <div className="rounded-[10px] bg-[#161513] border border-[#e09132]/35 p-4 space-y-3 text-[13px]">
+                    <p className="font-medium text-[#ebb05d] tabular-nums">
+                      30s bank alert listener active ({formatCountdown(secondsLeft)})
                     </p>
                     <p className="text-[12px] text-[#aaa398]">
-                      Listening for SMS/Email bank credit confirmation. Cancel is locked during active verification.
+                      Listening for SMS or email bank credit alerts. Cancel is locked during verification.
                     </p>
                     <button
                       type="button"
@@ -955,14 +958,14 @@ const EventRegistration = ({ event, onClose, onRegistered }) => {
                       disabled={pollingStatus}
                       className="btn-primary w-full h-9 text-[12px]"
                     >
-                      {pollingStatus ? 'Checking...' : 'Refresh Status'}
+                      {pollingStatus ? 'Checking...' : 'Refresh status'}
                     </button>
                   </div>
                 ) : (
-                  <div className="space-y-3.5">
+                  <div className="space-y-4">
                     {youpiSession.qrSvg && (
-                      <div className="rounded-[12px] bg-[#161513] border border-[#efe9de]/[0.08] p-4 flex flex-col sm:flex-row items-center gap-4">
-                        <div className="bg-white p-2.5 rounded-[10px] shrink-0 shadow-sm">
+                      <div className="rounded-[10px] bg-[#161513] border border-[#efe9de]/[0.08] p-4 flex flex-col sm:flex-row items-center gap-4">
+                        <div className="bg-white p-2.5 rounded-[8px] border border-[#efe9de]/[0.12] shrink-0">
                           <img
                             src={`data:image/svg+xml;charset=utf-8,${encodeURIComponent(youpiSession.qrSvg)}`}
                             alt={`YouPI UPI QR for ${youpiSession.orderId}`}
@@ -971,17 +974,17 @@ const EventRegistration = ({ event, onClose, onRegistered }) => {
                         </div>
                         <div className="flex-1 min-w-0 space-y-2 text-[12px]">
                           <div>
-                            <span className="block text-[11px] text-[#8a847a]">Pay to locked UPI ID</span>
+                            <span className="block text-[12px] text-[#8a847a]">Pay to locked UPI ID</span>
                             <div className="flex items-center gap-2 mt-1">
-                              <span className="font-mono text-[13px] text-[#efe9de] break-all">
+                              <span className="font-mono text-[13px] text-[#efe9de] truncate">
                                 {youpiSession.payeeVpa}
                               </span>
                               <button
                                 type="button"
                                 onClick={handleCopyUpi}
-                                className="inline-flex items-center gap-1 px-2 py-0.5 rounded-[5px] bg-[#262421] text-[#efe9de] border border-[#efe9de]/[0.08] shrink-0"
+                                className="inline-flex items-center gap-1 px-2 py-1 rounded-[6px] bg-[#262421] text-[#efe9de] border border-[#efe9de]/[0.08] shrink-0"
                               >
-                                <ClipboardDocumentIcon className="h-3.5 w-3.5 text-[#ebb05d]" />
+                                <ClipboardDocumentIcon className="h-4 w-4 text-[#ebb05d]" strokeWidth={1.5} />
                                 <span>{upiCopied ? 'Copied' : 'Copy'}</span>
                               </button>
                             </div>
@@ -997,7 +1000,7 @@ const EventRegistration = ({ event, onClose, onRegistered }) => {
                           value={utr}
                           onChange={(e) => setUtr(e.target.value)}
                           required
-                          placeholder="e.g. 412895123456 (12-digit UTR)"
+                          placeholder="Enter 12-digit UTR or UPI ref ID"
                           className="input-field font-mono text-[13px]"
                         />
                         <div className="flex gap-2">
@@ -1020,7 +1023,7 @@ const EventRegistration = ({ event, onClose, onRegistered }) => {
                           disabled={verifyingNow}
                           className="btn-primary flex-1 h-10 text-[13px]"
                         >
-                          {verifyingNow ? 'Starting 30s Check...' : 'I Have Paid — Verify (30s)'}
+                          {verifyingNow ? 'Starting 30s check...' : 'I have paid — verify (30s)'}
                         </button>
                       </div>
                     )}

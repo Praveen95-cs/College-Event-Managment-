@@ -32,7 +32,6 @@ import {
   QueueListIcon,
   ShieldCheckIcon,
   ShieldExclamationIcon,
-  SparklesIcon,
   TicketIcon,
   TrophyIcon
 } from '@heroicons/react/24/outline';
@@ -44,7 +43,7 @@ function formatCountdown(seconds) {
   return `${String(mins).padStart(2, '0')}:${String(secs).padStart(2, '0')}`;
 }
 
-const STEP_LABELS = ['Method & VPA', 'UPI Transfer', 'Bank Verify', 'Pass Unlocked'];
+const STEP_LABELS = ['Method & UPI', 'UPI transfer', 'Bank check', 'Pass issued'];
 
 function computeCurrentStep(session, isExpired, isBlocked) {
   if (isBlocked) return 1;
@@ -56,10 +55,10 @@ function computeCurrentStep(session, isExpired, isBlocked) {
 }
 
 const DEFAULT_BLOCKED_NOTICE = {
-  title: 'FRAUDULENT ACTIVITY DETECTED',
-  subtitle: 'Payment Session Terminated & Account Suspended',
+  title: 'Payment access suspended',
+  subtitle: 'Session paused and account flagged for review',
   message:
-    'Access has been restricted due to suspicious payment observation activity. Please contact the campus administrator to review and clear your account.',
+    'Access is restricted due to unverified payment alert activity. Contact the campus administrator to review and clear your account.',
   investigating: true
 };
 
@@ -350,13 +349,13 @@ const Payment = () => {
           if (dto && dto.paymentId === session.paymentId) {
             applySessionUpdate(dto);
             if (dto.settled) {
-              setBannerMessage('Statement reconciled! Event pass, WhatsApp group & competitions unlocked.');
+              setBannerMessage('Statement reconciled. Event pass, WhatsApp group, and competitions unlocked');
             } else if (dto.status === 'OBSERVED_SUCCESS') {
               setBannerMessage(
-                `Bank credit alert observed (${dto.verificationTag || 'NOT_RECONCILED'}). Awaiting bank statement CSV reconciliation.`
+                `Bank credit alert observed (${dto.verificationTag || 'awaiting match'}). Unlocks after bank statement reconciliation`
               );
             } else if (dto.status === 'ACTIVE' && session.status === 'QUEUED') {
-              setBannerMessage('Your exclusive payment slot is now active! Dynamic UPI QR revealed.');
+              setBannerMessage('Your checkout slot is now active and your dynamic UPI QR is ready');
             }
           }
         } catch {
@@ -452,19 +451,19 @@ const Payment = () => {
       if (res.data?.session) {
         applySessionUpdate(res.data.session);
         if (res.data.session.settled) {
-          setBannerMessage('Payment reconciled! Event pass unlocked.');
+          setBannerMessage('Payment reconciled and event pass unlocked');
         } else if (res.data.session.status === 'OBSERVED_SUCCESS') {
           setBannerMessage(
-            `Bank alert observed (${res.data.session.verificationTag || 'NOT_RECONCILED'}). Awaiting bank CSV reconciliation.`
+            `Bank alert observed (${res.data.session.verificationTag || 'awaiting match'}). Unlocks after bank statement import`
           );
         } else if (res.data.session.status === 'PROCESSING') {
           setBannerMessage(
-            'Entered strict 30-second bank verification window. Listening for incoming SMS / Gmail bank alerts...'
+            'Entered 30-second bank verification window. Listening for incoming SMS or Gmail bank alerts'
           );
         }
       }
     } catch (err) {
-      setError(err.response?.data?.message || 'Unable to enter 30s verification window.');
+      setError(err.response?.data?.message || 'Unable to enter 30s verification window');
     } finally {
       setVerifyingNow(false);
     }
@@ -475,7 +474,7 @@ const Payment = () => {
     if (!session?.paymentId) return;
     const cleaned = utr.replace(/\s+/g, '');
     if (!/^[A-Za-z0-9-]{6,35}$/.test(cleaned)) {
-      setError('Enter a valid 6–35 character UPI / UTR reference number.');
+      setError('Enter a valid 6–35 character UPI / UTR reference number');
       return;
     }
 
@@ -504,11 +503,11 @@ const Payment = () => {
       if (res.data?.session) {
         applySessionUpdate(res.data.session);
         if (res.data.session.settled) {
-          setBannerMessage('Payment verified & registration confirmed!');
+          setBannerMessage('Payment verified and registration confirmed');
         } else {
           setBannerMessage(
             res.data.message ||
-              'UTR submitted (PENDING_VERIFICATION). The merchant must reconcile this payment against the bank statement.'
+              'UTR submitted. Merchant reconciliation against the bank statement will unlock your pass'
           );
         }
       }
@@ -612,7 +611,7 @@ const Payment = () => {
     session?.status === 'PROCESSING'
       ? Math.max(10, Math.round((youpiConfig?.processingWindowMs || 30000) / 1000))
       : Math.max(30, youpiConfig?.sessionTtlSeconds || 300);
-  const ringRadius = 22;
+  const ringRadius = 26;
   const ringCircumference = 2 * Math.PI * ringRadius;
   const ringRatio = totalTimerSecs > 0 ? Math.max(0, Math.min(1, secondsLeft / totalTimerSecs)) : 0;
   const ringOffset = ringCircumference * (1 - ringRatio);
@@ -620,11 +619,11 @@ const Payment = () => {
   if (loading) {
     return (
       <div className="min-h-[65vh] flex flex-col items-center justify-center gap-4 text-center px-4">
-        <div className="h-10 w-10 rounded-full border-2 border-[#e09132]/30 border-t-[#ebb05d] animate-spin" />
+        <div className="h-9 w-9 rounded-full border-2 border-[#e09132]/30 border-t-[#ebb05d] animate-spin" />
         <div>
-          <p className="text-[15px] font-medium text-[#efe9de]">Initializing YouPI-PG V2 Gateway</p>
+          <p className="text-[15px] font-medium text-[#efe9de]">Preparing payment session</p>
           <p className="text-[12px] text-[#8a847a] mt-1">
-            Preparing immutable VPA snapshot &amp; Zero-Trust verification stream...
+            Locking payee VPA snapshot and live verification stream
           </p>
         </div>
       </div>
@@ -638,23 +637,23 @@ const Payment = () => {
   return (
     <div className="max-w-5xl mx-auto space-y-6 pb-10">
       {/* Top Gateway Header */}
-      <div className="bg-[#1c1a18] border border-[#efe9de]/[0.08] rounded-[16px] p-4 sm:p-5 flex flex-col md:flex-row md:items-center justify-between gap-4">
+      <div className="bg-[#1c1a18] border border-[#efe9de]/[0.08] rounded-[14px] p-4 sm:p-5 flex flex-col md:flex-row md:items-center justify-between gap-4">
         <div className="flex items-start sm:items-center gap-3 min-w-0">
           <Link
             to={returnEventId ? `/events/${returnEventId}` : '/events'}
-            className="h-9 w-9 rounded-[9px] bg-[#262421] hover:bg-[#302d29] border border-[#efe9de]/[0.08] flex items-center justify-center text-[#efe9de] shrink-0 transition-colors"
+            className="h-9 w-9 rounded-[8px] bg-[#262421] hover:bg-[#302d29] border border-[#efe9de]/[0.08] flex items-center justify-center text-[#efe9de] shrink-0 transition-colors duration-150"
             title="Back to event"
           >
-            <ArrowLeftIcon className="h-4 w-4" strokeWidth={1.75} />
+            <ArrowLeftIcon className="h-4 w-4" strokeWidth={1.5} />
           </Link>
           <div className="min-w-0">
-            <div className="flex flex-wrap items-center gap-2">
-              <span className="inline-flex items-center gap-1.5 text-[11px] font-mono font-semibold uppercase tracking-wider px-2 py-0.5 rounded-[6px] bg-[#e09132]/15 text-[#ebb05d] border border-[#e09132]/30">
-                <ShieldCheckIcon className="h-3.5 w-3.5" strokeWidth={1.75} />
-                <span>YouPI-PG V2 · Zero-Trust</span>
+            <div className="flex flex-wrap items-center gap-2 text-[12px] font-mono">
+              <span className="inline-flex items-center gap-1.5 font-medium px-2.5 py-0.5 rounded-[6px] bg-[#e09132]/15 text-[#ebb05d] border border-[#e09132]/30">
+                <ShieldCheckIcon className="h-4 w-4" strokeWidth={1.5} />
+                <span>YouPI-PG V2</span>
               </span>
               {session?.method && (
-                <span className="text-[10px] font-mono px-2 py-0.5 rounded-[5px] bg-[#262421] text-[#d9ceb8] border border-[#efe9de]/[0.08]">
+                <span className="text-[#aaa398]">
                   {session.method}
                 </span>
               )}
@@ -662,35 +661,37 @@ const Payment = () => {
                 <button
                   type="button"
                   onClick={() => handleCopyText(session.orderId, setOrderCopied)}
-                  className="inline-flex items-center gap-1.5 text-[11px] font-mono px-2 py-0.5 rounded-[6px] bg-[#161513] text-[#aaa398] hover:text-[#efe9de] border border-[#efe9de]/[0.08]"
+                  className="inline-flex items-center gap-1.5 text-[#aaa398] hover:text-[#efe9de] transition-colors duration-150"
+                  title="Copy order reference"
                 >
-                  <span>{session.orderId}</span>
-                  <ClipboardDocumentIcon className="h-3 w-3 text-[#ebb05d]" />
+                  <span>·</span>
+                  <span className="tabular-nums">{session.orderId}</span>
+                  <ClipboardDocumentIcon className="h-3.5 w-3.5 text-[#ebb05d]" strokeWidth={1.5} />
                   {orderCopied && <span className="text-[#4cc38a]">Copied</span>}
                 </button>
               )}
               {sseConnected && !session?.settled && !isBlocked && (
-                <span className="inline-flex items-center gap-1 text-[10px] font-mono text-[#4cc38a]">
-                  <span className="h-1.5 w-1.5 rounded-full bg-[#4cc38a] animate-pulse" />
-                  <span>LIVE STREAM</span>
+                <span className="inline-flex items-center gap-1.5 text-[#4cc38a]">
+                  <span className="h-1.5 w-1.5 rounded-full bg-[#4cc38a]" />
+                  <span>Live stream</span>
                 </span>
               )}
             </div>
-            <h1 className="text-[19px] sm:text-[22px] font-medium text-[#efe9de] truncate mt-1">
-              {session?.eventTitle || eventDoc?.title || 'Event Pass Checkout'}
+            <h1 className="text-[20px] sm:text-[22px] font-medium text-[#efe9de] truncate mt-1">
+              {session?.eventTitle || eventDoc?.title || 'Event pass checkout'}
             </h1>
           </div>
         </div>
 
         {/* Stepper */}
-        <div className="flex items-center gap-1.5 sm:gap-2 overflow-x-auto pb-1 md:pb-0 shrink-0">
+        <div className="flex items-center gap-1.5 overflow-x-auto pb-1 md:pb-0 shrink-0">
           {STEP_LABELS.map((label, idx) => {
             const done = idx < currentStep || (idx === 3 && session?.settled);
             const active = idx === currentStep && !session?.settled;
             return (
               <div key={label} className="flex items-center gap-1.5 shrink-0">
                 <div
-                  className={`flex items-center gap-1.5 px-2.5 py-1 rounded-[7px] text-[11px] font-medium border ${
+                  className={`flex items-center gap-1.5 px-2.5 py-1 rounded-[8px] text-[12px] font-medium border transition-colors duration-150 ${
                     done
                       ? 'bg-[#4cc38a]/12 border-[#4cc38a]/30 text-[#4cc38a]'
                       : active
@@ -698,7 +699,7 @@ const Payment = () => {
                         : 'bg-[#161513] border-[#efe9de]/[0.06] text-[#8a847a]'
                   }`}
                 >
-                  <span className="font-mono text-[10px]">{idx + 1}.</span>
+                  <span className="font-mono tabular-nums">{idx + 1}.</span>
                   <span>{label}</span>
                 </div>
               </div>
@@ -708,15 +709,15 @@ const Payment = () => {
       </div>
 
       {error && (
-        <div className="rounded-[12px] bg-[#e5484d]/10 border border-[#e5484d]/30 p-3.5 text-[13px] text-[#e5484d] flex items-start gap-2.5">
-          <ExclamationTriangleIcon className="h-5 w-5 shrink-0 mt-0.5" strokeWidth={1.75} />
+        <div className="rounded-[10px] bg-[#e5484d]/10 border border-[#e5484d]/30 p-3.5 text-[13px] text-[#e5484d] flex items-start gap-2.5">
+          <ExclamationTriangleIcon className="h-5 w-5 shrink-0 mt-0.5" strokeWidth={1.5} />
           <span>{error}</span>
         </div>
       )}
 
       {bannerMessage && (
-        <div className="rounded-[12px] bg-[#4cc38a]/10 border border-[#4cc38a]/30 p-3.5 text-[13px] text-[#efe9de] flex items-start gap-2.5">
-          <SparklesIcon className="h-5 w-5 text-[#4cc38a] shrink-0 mt-0.5" strokeWidth={1.75} />
+        <div className="rounded-[10px] bg-[#4cc38a]/10 border border-[#4cc38a]/30 p-3.5 text-[13px] text-[#efe9de] flex items-start gap-2.5">
+          <CheckCircleIcon className="h-5 w-5 text-[#4cc38a] shrink-0 mt-0.5" strokeWidth={1.5} />
           <span>{bannerMessage}</span>
         </div>
       )}
@@ -725,7 +726,7 @@ const Payment = () => {
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
         {/* Left Column: Summary, Fee Breakdown & Status */}
         <div className="lg:col-span-5 space-y-4">
-          <div className="bg-[#1c1a18] border border-[#efe9de]/[0.08] rounded-[16px] p-5 space-y-4">
+          <div className="bg-[#1c1a18] border border-[#efe9de]/[0.08] rounded-[14px] p-5 space-y-4">
             {eventDoc?.photo && (
               <div className="rounded-[10px] overflow-hidden border border-[#efe9de]/[0.08] h-36 bg-[#12110f]">
                 <img
@@ -737,16 +738,16 @@ const Payment = () => {
             )}
 
             <div>
-              <span className="text-[11px] font-mono uppercase tracking-wider text-[#8a847a]">
-                Order Summary
+              <span className="text-[12px] text-[#8a847a]">
+                Order summary
               </span>
-              <h2 className="text-[17px] font-medium text-[#efe9de] mt-0.5">
-                {session?.eventTitle || eventDoc?.title || 'Campus Event Pass'}
+              <h2 className="text-[18px] font-medium text-[#efe9de] mt-0.5">
+                {session?.eventTitle || eventDoc?.title || 'Campus event pass'}
               </h2>
               <div className="mt-2 space-y-1 text-[12px] text-[#aaa398]">
                 {formattedEventDate && (
-                  <p className="flex items-center gap-1.5 font-mono">
-                    <CalendarDaysIcon className="h-4 w-4 text-[#8a847a]" />
+                  <p className="flex items-center gap-1.5 font-mono tabular-nums">
+                    <CalendarDaysIcon className="h-4 w-4 text-[#8a847a]" strokeWidth={1.5} />
                     <span>
                       {formattedEventDate} {eventDoc?.time ? `· ${eventDoc.time}` : ''}
                     </span>
@@ -754,7 +755,7 @@ const Payment = () => {
                 )}
                 {eventDoc?.location && (
                   <p className="flex items-center gap-1.5">
-                    <MapPinIcon className="h-4 w-4 text-[#8a847a]" />
+                    <MapPinIcon className="h-4 w-4 text-[#8a847a]" strokeWidth={1.5} />
                     <span>{eventDoc.location}</span>
                   </p>
                 )}
@@ -764,18 +765,18 @@ const Payment = () => {
             <div className="pt-3 border-t border-[#efe9de]/[0.08] space-y-2 text-[13px]">
               <div className="flex justify-between">
                 <span className="text-[#8a847a]">Event pass amount</span>
-                <span className="font-mono text-[#efe9de]">
+                <span className="font-mono text-[#efe9de] tabular-nums">
                   {currencySymbol}
                   {Number(fee).toFixed(2)}
                 </span>
               </div>
               <div className="flex justify-between">
                 <span className="text-[#8a847a]">YouPI-PG gateway fee</span>
-                <span className="font-mono text-[#4cc38a]">₹0.00 (Free)</span>
+                <span className="font-mono text-[#4cc38a] tabular-nums">₹0.00 (Free)</span>
               </div>
               <div className="pt-2 border-t border-[#efe9de]/[0.06] flex justify-between items-baseline">
                 <span className="font-medium text-[#efe9de]">Total payable</span>
-                <span className="text-[22px] font-mono font-semibold text-[#ebb05d]">
+                <span className="text-[22px] font-mono font-medium text-[#ebb05d] tabular-nums">
                   {currencySymbol}
                   {session?.amountDisplay || Number(fee).toFixed(2)}
                 </span>
@@ -784,14 +785,14 @@ const Payment = () => {
 
             {/* Countdown or Status Pill */}
             {session && !session.settled && (
-              <div className="rounded-[12px] bg-[#161513] border border-[#efe9de]/[0.08] p-3.5 flex items-center justify-between gap-3">
+              <div className="rounded-[10px] bg-[#161513] border border-[#efe9de]/[0.08] p-3.5 flex items-center justify-between gap-3">
                 <div className="min-w-0">
-                  <span className="text-[11px] font-mono text-[#8a847a] uppercase">
-                    Session Status · {session.settlementState || 'PENDING'}
+                  <span className="text-[12px] font-mono text-[#8a847a]">
+                    Session status · {session.settlementState || 'PENDING'}
                   </span>
-                  <div className="flex flex-wrap items-center gap-2 mt-1">
+                  <div className="flex flex-wrap items-center gap-2 mt-1.5">
                     <span
-                      className={`text-[12px] font-mono font-semibold px-2 py-0.5 rounded-[5px] border ${
+                      className={`text-[12px] font-mono font-medium px-2 py-0.5 rounded-[6px] border ${
                         isBlocked || isExpired || isTerminalError
                           ? 'bg-[#e5484d]/15 text-[#e5484d] border-[#e5484d]/30'
                           : ['PROCESSING', 'OBSERVED_SUCCESS', 'MANUAL_REVIEW', 'QUEUED'].includes(
@@ -808,12 +809,12 @@ const Payment = () => {
                           : session.status}
                     </span>
                     {session.status === 'PROCESSING' && (
-                      <span className="text-[11px] text-[#ebb05d] animate-pulse">
-                        30s bank check...
+                      <span className="text-[12px] text-[#ebb05d]">
+                        30s bank check in progress
                       </span>
                     )}
                     {session.status === 'QUEUED' && (
-                      <span className="text-[11px] font-mono text-[#ebb05d]">
+                      <span className="text-[12px] font-mono text-[#ebb05d] tabular-nums">
                         Queue #{session.queuePosition || 1}
                       </span>
                     )}
@@ -822,18 +823,18 @@ const Payment = () => {
 
                 {['ACTIVE', 'PROCESSING'].includes(session.status) && !isExpired && !isBlocked && (
                   <div className="relative flex items-center justify-center shrink-0">
-                    <svg className="w-14 h-14 -rotate-90" viewBox="0 0 56 56">
+                    <svg className="w-16 h-16 -rotate-90" viewBox="0 0 64 64">
                       <circle
-                        cx="28"
-                        cy="28"
+                        cx="32"
+                        cy="32"
                         r={ringRadius}
                         fill="none"
                         stroke="rgba(239,233,222,0.1)"
                         strokeWidth="4"
                       />
                       <circle
-                        cx="28"
-                        cy="28"
+                        cx="32"
+                        cy="32"
                         r={ringRadius}
                         fill="none"
                         stroke="#ebb05d"
@@ -843,7 +844,7 @@ const Payment = () => {
                         strokeDashoffset={ringOffset}
                       />
                     </svg>
-                    <span className="absolute text-[11px] font-mono font-semibold text-[#efe9de] tabular-nums">
+                    <span className="absolute text-[12px] font-mono font-medium text-[#efe9de] tabular-nums">
                       {formatCountdown(secondsLeft)}
                     </span>
                   </div>
@@ -852,9 +853,9 @@ const Payment = () => {
             )}
 
             {/* Attendee Summary */}
-            <div className="rounded-[12px] bg-[#161513] border border-[#efe9de]/[0.06] p-3.5 space-y-1.5 text-[12px]">
-              <span className="text-[11px] font-mono uppercase tracking-wider text-[#8a847a]">
-                Attendee Ticket Holder
+            <div className="rounded-[10px] bg-[#161513] border border-[#efe9de]/[0.06] p-3.5 space-y-1.5 text-[12px]">
+              <span className="text-[12px] text-[#8a847a] block">
+                Attendee ticket holder
               </span>
               <div className="flex justify-between gap-2">
                 <span className="text-[#8a847a]">Name</span>
@@ -863,20 +864,20 @@ const Payment = () => {
                 </span>
               </div>
               <div className="flex justify-between gap-2">
-                <span className="text-[#8a847a]">Roll / Reg No</span>
-                <span className="font-mono text-[#ebb05d]">
+                <span className="text-[#8a847a]">Roll / reg no</span>
+                <span className="font-mono text-[#ebb05d] tabular-nums">
                   {session?.customerRegNo || formData.regNo || '—'}
                 </span>
               </div>
               <div className="flex justify-between gap-2">
-                <span className="text-[#8a847a]">Confirmation Email</span>
+                <span className="text-[#8a847a]">Confirmation email</span>
                 <span className="text-[#efe9de] truncate">
                   {session?.customerEmail || effectiveEmail}
                 </span>
               </div>
               {session?.payeeVpa && (
-                <div className="flex justify-between gap-2 pt-1 border-t border-[#efe9de]/[0.06]">
-                  <span className="text-[#8a847a]">Locked Receiver VPA</span>
+                <div className="flex justify-between gap-2 pt-1.5 border-t border-[#efe9de]/[0.06]">
+                  <span className="text-[#8a847a]">Locked receiver VPA</span>
                   <span className="font-mono text-[#ebb05d] truncate">{session.payeeVpa}</span>
                 </div>
               )}
@@ -884,21 +885,21 @@ const Payment = () => {
           </div>
 
           {linkedCompetitions.length > 0 && !session?.settled && (
-            <div className="bg-[#1c1a18] border border-[#efe9de]/[0.08] rounded-[16px] p-4 space-y-2">
-              <div className="flex items-center gap-2 text-[12px] font-medium text-[#ebb05d]">
-                <TrophyIcon className="h-4 w-4" strokeWidth={1.75} />
-                <span>Included Linked Competitions ({linkedCompetitions.length})</span>
+            <div className="bg-[#1c1a18] border border-[#efe9de]/[0.08] rounded-[14px] p-4 space-y-2">
+              <div className="flex items-center gap-2 text-[13px] font-medium text-[#ebb05d]">
+                <TrophyIcon className="h-4 w-4" strokeWidth={1.5} />
+                <span>Included linked competitions ({linkedCompetitions.length})</span>
               </div>
               <p className="text-[12px] text-[#8a847a]">
-                Completing Zero-Trust bank reconciliation unlocks arena access for:
+                Bank statement reconciliation unlocks arena access for:
               </p>
               <div className="flex flex-wrap gap-1.5 pt-1">
                 {linkedCompetitions.map((comp) => (
                   <span
                     key={comp._id}
-                    className="inline-flex items-center gap-1 px-2 py-0.5 rounded-[6px] bg-[#161513] border border-[#efe9de]/[0.08] text-[11px] text-[#efe9de]"
+                    className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-[6px] bg-[#161513] border border-[#efe9de]/[0.08] text-[12px] text-[#efe9de]"
                   >
-                    <LockClosedIcon className="h-3 w-3 text-[#ebb05d]" />
+                    <LockClosedIcon className="h-3.5 w-3.5 text-[#ebb05d]" strokeWidth={1.5} />
                     <span>{comp.title}</span>
                   </span>
                 ))}
@@ -910,14 +911,14 @@ const Payment = () => {
         {/* Right Column: Blocked / Pre-Checkout / Queue / Active / Processing / Observed / Review / Settled */}
         <div className="lg:col-span-7">
           {isBlocked ? (
-            <div className="bg-[#1c1a18] border border-[#e5484d]/40 rounded-[16px] p-6 space-y-5">
+            <div className="bg-[#1c1a18] border border-[#e5484d]/35 rounded-[14px] p-6 space-y-5">
               <div className="flex items-start gap-3.5">
-                <div className="h-12 w-12 rounded-[12px] bg-[#e5484d]/15 border border-[#e5484d]/35 flex items-center justify-center text-[#e5484d] shrink-0">
-                  <ShieldExclamationIcon className="h-7 w-7" strokeWidth={1.75} />
+                <div className="h-10 w-10 rounded-[10px] bg-[#e5484d]/15 border border-[#e5484d]/30 flex items-center justify-center text-[#e5484d] shrink-0">
+                  <ShieldExclamationIcon className="h-5 w-5" strokeWidth={1.5} />
                 </div>
                 <div>
-                  <span className="text-[11px] font-mono uppercase tracking-wider text-[#e5484d]">
-                    Security Engine · BANNED_IDENTITY
+                  <span className="text-[12px] font-mono text-[#e5484d]">
+                    Security engine · account suspended
                   </span>
                   <h2 className="text-[20px] font-medium text-[#efe9de] mt-0.5">
                     {blockedNotice?.title || DEFAULT_BLOCKED_NOTICE.title}
@@ -931,12 +932,12 @@ const Payment = () => {
                 </div>
               </div>
 
-              <div className="pt-2 border-t border-[#efe9de]/[0.08] flex flex-wrap gap-3">
+              <div className="pt-3 border-t border-[#efe9de]/[0.08] flex flex-wrap gap-3">
                 <Link
                   to={returnEventId ? `/events/${returnEventId}` : '/events'}
                   className="btn-secondary h-10 px-5 text-[13px]"
                 >
-                  Return to Event
+                  Return to event
                 </Link>
               </div>
             </div>
@@ -944,21 +945,21 @@ const Payment = () => {
             /* Step 1: Pre-checkout Attendee, Method (`UPI` vs `MANUAL_UPI`) & Receiver VPA Selection */
             <form
               onSubmit={(e) => handleStartCheckoutSession(e, false)}
-              className="bg-[#1c1a18] border border-[#efe9de]/[0.08] rounded-[16px] p-6 space-y-5"
+              className="bg-[#1c1a18] border border-[#efe9de]/[0.08] rounded-[14px] p-6 space-y-5"
             >
               <div>
                 <h2 className="text-[19px] font-medium text-[#efe9de]">
-                  Configure Checkout Method &amp; Payee Channel
+                  Configure checkout method &amp; payee channel
                 </h2>
                 <p className="text-[13px] text-[#8a847a] mt-1">
-                  Select your verification mode and receiving UPI channel before locking your session snapshot.
+                  Select verification mode and receiving UPI channel before locking your session snapshot
                 </p>
               </div>
 
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <div>
                   <label className="block text-[12px] font-medium text-[#aaa398] mb-1.5">
-                    Full Name *
+                    Full name *
                   </label>
                   <input
                     type="text"
@@ -971,14 +972,14 @@ const Payment = () => {
                 </div>
                 <div>
                   <label className="block text-[12px] font-medium text-[#aaa398] mb-1.5">
-                    Roll / Registration No. *
+                    Roll / registration no. *
                   </label>
                   <input
                     type="text"
                     required
                     value={formData.regNo}
                     onChange={(e) => setFormData((p) => ({ ...p, regNo: e.target.value }))}
-                    className="input-field font-mono"
+                    className="input-field font-mono tabular-nums"
                     placeholder="e.g. 2023503501"
                   />
                 </div>
@@ -987,10 +988,10 @@ const Payment = () => {
               <div>
                 <div className="flex items-center justify-between mb-1.5">
                   <label className="block text-[12px] font-medium text-[#aaa398]">
-                    Confirmation Email *
+                    Confirmation email *
                   </label>
                   {isStudentAccount && (
-                    <span className="text-[11px] font-mono px-2 py-0.5 rounded-[5px] bg-[#4cc38a]/12 text-[#4cc38a] border border-[#4cc38a]/25">
+                    <span className="text-[12px] font-mono px-2 py-0.5 rounded-[6px] bg-[#4cc38a]/12 text-[#4cc38a] border border-[#4cc38a]/25">
                       Locked to student account
                     </span>
                   )}
@@ -1007,20 +1008,20 @@ const Payment = () => {
                     }
                     className={`input-field pr-10 ${isStudentAccount ? 'opacity-80 bg-[#12110f] cursor-not-allowed' : ''}`}
                   />
-                  <EnvelopeIcon className="h-4 w-4 text-[#8a847a] absolute right-3 top-1/2 -translate-y-1/2" />
+                  <EnvelopeIcon className="h-4 w-4 text-[#8a847a] absolute right-3 top-1/2 -translate-y-1/2" strokeWidth={1.5} />
                 </div>
               </div>
 
               {/* Verification Method Selection: UPI vs MANUAL_UPI */}
               <div className="space-y-2">
                 <label className="block text-[12px] font-medium text-[#aaa398]">
-                  Checkout Verification Method *
+                  Checkout verification method *
                 </label>
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                   <button
                     type="button"
                     onClick={() => setFormData((p) => ({ ...p, method: 'UPI' }))}
-                    className={`p-3.5 rounded-[11px] border text-left transition-colors ${
+                    className={`p-3.5 rounded-[10px] border text-left transition-colors duration-150 ${
                       formData.method === 'UPI'
                         ? 'bg-[#e09132]/12 border-[#e09132]/45 text-[#efe9de]'
                         : 'bg-[#161513] border-[#efe9de]/[0.08] text-[#aaa398] hover:border-[#efe9de]/25'
@@ -1028,22 +1029,22 @@ const Payment = () => {
                   >
                     <div className="flex items-center justify-between gap-2">
                       <span className="text-[13px] font-medium text-[#efe9de] flex items-center gap-1.5">
-                        <BoltIcon className="h-4 w-4 text-[#ebb05d]" />
+                        <BoltIcon className="h-4 w-4 text-[#ebb05d]" strokeWidth={1.5} />
                         <span>UPI Auto-Verify</span>
                       </span>
-                      <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-[#262421] text-[#ebb05d]">
+                      <span className="text-[12px] font-mono px-1.5 py-0.5 rounded-[6px] bg-[#262421] text-[#ebb05d]">
                         UPI
                       </span>
                     </div>
-                    <p className="text-[11.5px] text-[#8a847a] mt-1 leading-relaxed">
-                      Pay via QR/App and click &ldquo;I Have Paid&rdquo; for the 30s automated bank SMS/Gmail check.
+                    <p className="text-[12px] text-[#8a847a] mt-1 leading-relaxed">
+                      Pay via QR or app, then trigger the 30s automated SMS/Gmail bank check
                     </p>
                   </button>
 
                   <button
                     type="button"
                     onClick={() => setFormData((p) => ({ ...p, method: 'MANUAL_UPI' }))}
-                    className={`p-3.5 rounded-[11px] border text-left transition-colors ${
+                    className={`p-3.5 rounded-[10px] border text-left transition-colors duration-150 ${
                       formData.method === 'MANUAL_UPI'
                         ? 'bg-[#e09132]/12 border-[#e09132]/45 text-[#efe9de]'
                         : 'bg-[#161513] border-[#efe9de]/[0.08] text-[#aaa398] hover:border-[#efe9de]/25'
@@ -1051,15 +1052,15 @@ const Payment = () => {
                   >
                     <div className="flex items-center justify-between gap-2">
                       <span className="text-[13px] font-medium text-[#efe9de] flex items-center gap-1.5">
-                        <DocumentCheckIcon className="h-4 w-4 text-[#ebb05d]" />
+                        <DocumentCheckIcon className="h-4 w-4 text-[#ebb05d]" strokeWidth={1.5} />
                         <span>Manual UTR Entry</span>
                       </span>
-                      <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-[#262421] text-[#aaa398]">
+                      <span className="text-[12px] font-mono px-1.5 py-0.5 rounded-[6px] bg-[#262421] text-[#aaa398]">
                         MANUAL_UPI
                       </span>
                     </div>
-                    <p className="text-[11.5px] text-[#8a847a] mt-1 leading-relaxed">
-                      Pay &amp; submit your 12-digit UTR / reference number for manual bank statement check.
+                    <p className="text-[12px] text-[#8a847a] mt-1 leading-relaxed">
+                      Pay and submit your 12-digit UTR reference for manual bank statement review
                     </p>
                   </button>
                 </div>
@@ -1070,10 +1071,10 @@ const Payment = () => {
                 <div className="space-y-2">
                   <div className="flex flex-wrap items-center justify-between gap-2">
                     <label className="block text-[12px] font-medium text-[#aaa398]">
-                      Receiving Payee UPI Channel ({availableVpaOptions.length} available)
+                      Receiving payee UPI channel ({availableVpaOptions.length} available)
                     </label>
-                    <span className="inline-flex items-center gap-1 text-[10px] font-mono text-[#ebb05d]">
-                      <LockClosedIcon className="h-3 w-3" />
+                    <span className="inline-flex items-center gap-1 text-[12px] font-mono text-[#ebb05d]">
+                      <LockClosedIcon className="h-3.5 w-3.5" strokeWidth={1.5} />
                       <span>Locked once session starts</span>
                     </span>
                   </div>
@@ -1088,8 +1089,8 @@ const Payment = () => {
                       </option>
                     ))}
                   </select>
-                  <p className="text-[11px] text-[#8a847a]">
-                    Per YouPI-PG security rules, the payee VPA snapshot cannot be swapped mid-session. Pick your preferred handle here first.
+                  <p className="text-[12px] text-[#8a847a]">
+                    Payee VPA cannot change once the session starts; select your preferred handle first
                   </p>
                 </div>
               )}
@@ -1116,60 +1117,60 @@ const Payment = () => {
                 <button
                   type="submit"
                   disabled={submittingAction}
-                  className="btn-primary flex-1 h-11 text-[13px]"
+                  className="btn-primary flex-1 h-11 text-[13px] tabular-nums"
                 >
-                  <CurrencyRupeeIcon className="h-4 w-4" strokeWidth={1.75} />
+                  <CurrencyRupeeIcon className="h-4 w-4" strokeWidth={1.5} />
                   <span>
                     {submittingAction
-                      ? 'Acquiring Payment Slot...'
-                      : `Proceed to Pay ${currencySymbol}${Number(fee).toFixed(2)}`}
+                      ? 'Acquiring payment slot...'
+                      : `Proceed to pay ${currencySymbol}${Number(fee).toFixed(2)}`}
                   </span>
                 </button>
               </div>
             </form>
           ) : session.settled ? (
             /* Step 4: Verified Pass, WhatsApp Group & Unlocked Competitions */
-            <div className="bg-[#1c1a18] border border-[#4cc38a]/35 rounded-[16px] p-6 space-y-6">
+            <div className="bg-[#1c1a18] border border-[#4cc38a]/35 rounded-[14px] p-6 space-y-6">
               <div className="flex items-start gap-3.5">
-                <div className="h-12 w-12 rounded-[12px] bg-[#4cc38a]/15 border border-[#4cc38a]/30 flex items-center justify-center text-[#4cc38a] shrink-0">
-                  <CheckCircleIcon className="h-7 w-7" strokeWidth={1.75} />
+                <div className="h-10 w-10 rounded-[10px] bg-[#4cc38a]/15 border border-[#4cc38a]/30 flex items-center justify-center text-[#4cc38a] shrink-0">
+                  <CheckCircleIcon className="h-5 w-5" strokeWidth={1.5} />
                 </div>
                 <div>
-                  <span className="text-[11px] font-mono uppercase tracking-wider text-[#4cc38a]">
-                    Payment Reconciled · Seat Confirmed
+                  <span className="text-[12px] font-mono text-[#4cc38a]">
+                    Payment reconciled · seat confirmed
                   </span>
                   <h2 className="text-[22px] font-medium text-[#efe9de] mt-0.5">
-                    You&apos;re Registered for {session.eventTitle}!
+                    Registration confirmed for {session.eventTitle}
                   </h2>
                   <p className="text-[13px] text-[#aaa398] mt-1">
-                    Your digital pass and receipt have been mailed to{' '}
-                    <span className="text-[#efe9de] font-medium">{session.customerEmail}</span>.
+                    Digital pass and receipt sent to{' '}
+                    <span className="text-[#efe9de] font-medium">{session.customerEmail}</span>
                   </p>
                 </div>
               </div>
 
-              <div className="rounded-[12px] bg-[#161513] border border-[#efe9de]/[0.08] p-4 grid grid-cols-1 sm:grid-cols-2 gap-3 text-[13px]">
+              <div className="rounded-[10px] bg-[#161513] border border-[#efe9de]/[0.08] p-4 grid grid-cols-1 sm:grid-cols-2 gap-3 text-[13px]">
                 <div>
-                  <span className="block text-[11px] text-[#8a847a]">Registration Number</span>
-                  <span className="font-mono text-[#ebb05d] font-semibold">
+                  <span className="block text-[12px] text-[#8a847a]">Registration number</span>
+                  <span className="font-mono text-[#ebb05d] font-medium tabular-nums">
                     {session.registration?.regNo || session.customerRegNo}
                   </span>
                 </div>
                 <div>
-                  <span className="block text-[11px] text-[#8a847a]">Amount Paid</span>
-                  <span className="font-mono text-[#4cc38a] font-semibold">
+                  <span className="block text-[12px] text-[#8a847a]">Amount paid</span>
+                  <span className="font-mono text-[#4cc38a] font-medium tabular-nums">
                     {currencySymbol}
                     {session.amountDisplay} (0% fee)
                   </span>
                 </div>
                 <div>
-                  <span className="block text-[11px] text-[#8a847a]">UTR / Transaction Ref</span>
-                  <span className="font-mono text-[#efe9de] break-all">
+                  <span className="block text-[12px] text-[#8a847a]">UTR / transaction ref</span>
+                  <span className="font-mono text-[#efe9de] truncate block">
                     {session.utr || session.registration?.transactionId || session.orderId}
                   </span>
                 </div>
                 <div>
-                  <span className="block text-[11px] text-[#8a847a]">Verification Ledger</span>
+                  <span className="block text-[12px] text-[#8a847a]">Verification ledger</span>
                   <span className="font-mono text-[#4cc38a] text-[12px]">
                     {session.verificationTag || 'RECONCILED'}
                   </span>
@@ -1177,18 +1178,18 @@ const Payment = () => {
               </div>
 
               {session.whatsappGroupLink && (
-                <div className="rounded-[12px] bg-[#4cc38a]/10 border border-[#4cc38a]/30 p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                <div className="rounded-[10px] bg-[#4cc38a]/10 border border-[#4cc38a]/30 p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
                   <div className="flex items-start gap-2.5">
                     <ChatBubbleLeftRightIcon
                       className="h-5 w-5 text-[#4cc38a] shrink-0 mt-0.5"
-                      strokeWidth={1.75}
+                      strokeWidth={1.5}
                     />
                     <div>
                       <p className="text-[13px] font-medium text-[#efe9de]">
-                        Official Event WhatsApp Group Unlocked
+                        Official event WhatsApp group unlocked
                       </p>
                       <p className="text-[12px] text-[#aaa398]">
-                        Join for live schedule announcements, coordinator alerts, and venue pins.
+                        Schedule updates, coordinator alerts, and venue pins
                       </p>
                     </div>
                   </div>
@@ -1196,10 +1197,10 @@ const Payment = () => {
                     href={session.whatsappGroupLink}
                     target="_blank"
                     rel="noopener noreferrer"
-                    className="inline-flex items-center justify-center gap-1.5 h-10 px-4 rounded-[9px] text-[12px] font-semibold bg-[#4cc38a] text-[#12110f] hover:bg-[#5cd199] transition-colors shrink-0"
+                    className="inline-flex items-center justify-center gap-1.5 h-10 px-4 rounded-[8px] text-[13px] font-medium bg-[#4cc38a] text-[#12110f] hover:bg-[#4cc38a]/90 transition-colors duration-150 shrink-0"
                   >
-                    <span>Join WhatsApp Group</span>
-                    <ArrowUpRightIcon className="h-3.5 w-3.5" strokeWidth={2} />
+                    <span>Join WhatsApp group</span>
+                    <ArrowUpRightIcon className="h-4 w-4" strokeWidth={1.5} />
                   </a>
                 </div>
               )}
@@ -1207,8 +1208,8 @@ const Payment = () => {
               {linkedCompetitions.length > 0 && (
                 <div className="space-y-2.5">
                   <h3 className="text-[13px] font-medium text-[#efe9de] flex items-center gap-2">
-                    <TrophyIcon className="h-4 w-4 text-[#ebb05d]" />
-                    <span>Unlocked Competitions</span>
+                    <TrophyIcon className="h-4 w-4 text-[#ebb05d]" strokeWidth={1.5} />
+                    <span>Unlocked competitions</span>
                   </h3>
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                     {linkedCompetitions.map((comp) => (
@@ -1219,17 +1220,17 @@ const Payment = () => {
                             ? `/competitions/${comp._id}/code`
                             : `/competitions/${comp._id}/quiz`
                         }
-                        className="rounded-[10px] bg-[#161513] hover:bg-[#22201d] border border-[#efe9de]/[0.08] p-3 flex items-center justify-between gap-2 transition-colors"
+                        className="rounded-[10px] bg-[#161513] hover:bg-[#262421] border border-[#efe9de]/[0.08] p-3 flex items-center justify-between gap-2 transition-colors duration-150"
                       >
                         <div className="min-w-0">
                           <p className="text-[13px] font-medium text-[#efe9de] truncate">
                             {comp.title}
                           </p>
-                          <p className="text-[11px] font-mono text-[#ebb05d] uppercase">
-                            {comp.type} arena · Enter
+                          <p className="text-[12px] font-mono text-[#ebb05d] capitalize">
+                            {comp.type} arena · enter
                           </p>
                         </div>
-                        <ArrowUpRightIcon className="h-4 w-4 text-[#ebb05d] shrink-0" />
+                        <ArrowUpRightIcon className="h-4 w-4 text-[#ebb05d] shrink-0" strokeWidth={1.5} />
                       </Link>
                     ))}
                   </div>
@@ -1238,46 +1239,46 @@ const Payment = () => {
 
               <div className="flex flex-wrap gap-3 pt-2 border-t border-[#efe9de]/[0.08]">
                 <Link to="/profile" className="btn-primary h-10 px-5 text-[13px]">
-                  <TicketIcon className="h-4 w-4" />
-                  <span>View Pass in Profile</span>
+                  <TicketIcon className="h-4 w-4" strokeWidth={1.5} />
+                  <span>View pass in profile</span>
                 </Link>
                 <Link
                   to={returnEventId ? `/events/${returnEventId}` : '/events'}
                   className="btn-secondary h-10 px-5 text-[13px]"
                 >
-                  Back to Event Page
+                  Back to event page
                 </Link>
               </div>
             </div>
           ) : session.status === 'QUEUED' ? (
             /* FIFO Single-Slot Queue Waiting Card (Zero-Trust: NO QR / VPA URI Revealed Yet!) */
-            <div className="bg-[#1c1a18] border border-[#e09132]/35 rounded-[16px] p-6 space-y-5">
+            <div className="bg-[#1c1a18] border border-[#e09132]/35 rounded-[14px] p-6 space-y-5">
               <div className="flex items-start gap-3.5">
-                <div className="h-12 w-12 rounded-[12px] bg-[#e09132]/15 border border-[#e09132]/30 flex items-center justify-center text-[#ebb05d] shrink-0">
-                  <QueueListIcon className="h-6 w-6" strokeWidth={1.75} />
+                <div className="h-10 w-10 rounded-[10px] bg-[#e09132]/15 border border-[#e09132]/30 flex items-center justify-center text-[#ebb05d] shrink-0">
+                  <QueueListIcon className="h-5 w-5" strokeWidth={1.5} />
                 </div>
                 <div>
                   <div className="flex flex-wrap items-center gap-2">
-                    <span className="text-[11px] font-mono uppercase tracking-wider px-2 py-0.5 rounded bg-[#e09132]/15 text-[#ebb05d] border border-[#e09132]/30">
-                      Position #{session.queuePosition || 1} in FIFO Queue
+                    <span className="text-[12px] font-mono px-2.5 py-0.5 rounded-[6px] bg-[#e09132]/15 text-[#ebb05d] border border-[#e09132]/30 tabular-nums">
+                      Queue position #{session.queuePosition || 1} · FIFO
                     </span>
-                    <span className="text-[11px] font-mono text-[#8a847a]">
+                    <span className="text-[12px] font-mono text-[#8a847a] tabular-nums">
                       Est. wait: {formatCountdown(queueWaitSeconds)}
                     </span>
                   </div>
                   <h2 className="text-[19px] font-medium text-[#efe9de] mt-2">
-                    Exclusive Checkout Slot Currently in Use
+                    Exclusive checkout slot currently in use
                   </h2>
                   <p className="text-[13px] text-[#aaa398] mt-1 leading-relaxed">
                     To prevent ambiguous bank alert attribution on{' '}
-                    <span className="font-mono text-[#efe9de]">{session.payeeVpa}</span>, only one payment runs per UPI ID at a time. Your QR code will reveal automatically as soon as your turn arrives.
+                    <span className="font-mono text-[#efe9de]">{session.payeeVpa}</span>, only one payment runs per UPI ID at a time. Your QR code reveals automatically when your turn arrives.
                   </p>
                 </div>
               </div>
 
-              <div className="rounded-[12px] bg-[#161513] border border-[#efe9de]/[0.08] p-4 flex items-center justify-between gap-3 text-[12px]">
-                <span className="text-[#8a847a]">QR &amp; UPI deep links withheld while queued (Security Invariant)</span>
-                <span className="font-mono text-[#4cc38a] shrink-0">Auto-promoting...</span>
+              <div className="rounded-[10px] bg-[#161513] border border-[#efe9de]/[0.08] p-4 flex items-center justify-between gap-3 text-[12px]">
+                <span className="text-[#8a847a]">QR &amp; UPI deep links withheld while queued</span>
+                <span className="font-mono text-[#4cc38a] shrink-0">Auto-promoting</span>
               </div>
 
               <div className="flex flex-wrap gap-3">
@@ -1287,8 +1288,8 @@ const Payment = () => {
                   disabled={syncing}
                   className="btn-primary h-10 px-5 text-[13px]"
                 >
-                  <ArrowPathIcon className={`h-4 w-4 ${syncing ? 'animate-spin' : ''}`} />
-                  <span>{syncing ? 'Checking Slot...' : 'Check Slot Status'}</span>
+                  <ArrowPathIcon className={`h-4 w-4 ${syncing ? 'animate-spin' : ''}`} strokeWidth={1.5} />
+                  <span>{syncing ? 'Checking slot...' : 'Check slot status'}</span>
                 </button>
                 <button
                   type="button"
@@ -1296,52 +1297,52 @@ const Payment = () => {
                   disabled={cancellingAction}
                   className="btn-secondary h-10 px-5 text-[13px]"
                 >
-                  {cancellingAction ? 'Releasing...' : 'Cancel & Pick Another UPI ID'}
+                  {cancellingAction ? 'Releasing...' : 'Cancel & pick another UPI ID'}
                 </button>
               </div>
             </div>
           ) : session.status === 'OBSERVED_SUCCESS' ? (
             /* Zero-Trust OBSERVED_SUCCESS State (NOT_RECONCILED) */
-            <div className="bg-[#1c1a18] border border-[#e09132]/40 rounded-[16px] p-6 space-y-5">
+            <div className="bg-[#1c1a18] border border-[#e09132]/35 rounded-[14px] p-6 space-y-5">
               <div className="flex items-start gap-3.5">
-                <div className="h-12 w-12 rounded-[12px] bg-[#e09132]/15 border border-[#e09132]/30 flex items-center justify-center text-[#ebb05d] shrink-0">
-                  <ClockIcon className="h-6 w-6" strokeWidth={1.75} />
+                <div className="h-10 w-10 rounded-[10px] bg-[#e09132]/15 border border-[#e09132]/30 flex items-center justify-center text-[#ebb05d] shrink-0">
+                  <ClockIcon className="h-5 w-5" strokeWidth={1.5} />
                 </div>
                 <div>
-                  <span className="text-[11px] font-mono uppercase tracking-wider px-2 py-0.5 rounded bg-[#e09132]/15 text-[#ebb05d] border border-[#e09132]/30">
-                    NOT_RECONCILED · Bank Alert Observed
+                  <span className="text-[12px] font-mono px-2.5 py-0.5 rounded-[6px] bg-[#e09132]/15 text-[#ebb05d] border border-[#e09132]/30">
+                    Alert observed · awaiting CSV match
                   </span>
                   <h2 className="text-[20px] font-medium text-[#efe9de] mt-2">
-                    Payment Observed — Awaiting Bank Statement Reconciliation
+                    Payment observed — awaiting bank statement reconciliation
                   </h2>
                   <p className="text-[13px] text-[#aaa398] mt-1 leading-relaxed">
-                    YouPI-PG matched a live bank credit observation to this session. Under Zero-Trust security, your Event Pass, Competitions, and WhatsApp Group unlock automatically once your organizer/admin imports the bank statement CSV or reconciles this transaction.
+                    A live bank credit observation matched this session. Your pass, competitions, and WhatsApp group unlock once the admin imports the bank CSV or approves this transaction.
                   </p>
                 </div>
               </div>
 
-              <div className="rounded-[12px] bg-[#161513] border border-[#efe9de]/[0.08] p-4 grid grid-cols-1 sm:grid-cols-2 gap-3 text-[12.5px]">
+              <div className="rounded-[10px] bg-[#161513] border border-[#efe9de]/[0.08] p-4 grid grid-cols-1 sm:grid-cols-2 gap-3 text-[13px]">
                 <div>
-                  <span className="block text-[11px] text-[#8a847a]">Verification Tag</span>
-                  <span className="font-mono text-[#ebb05d]">
+                  <span className="block text-[12px] text-[#8a847a]">Verification tag</span>
+                  <span className="font-mono text-[#ebb05d] text-[12px]">
                     {session.verificationTag || 'OBSERVED_NOT_RECONCILED'}
                   </span>
                 </div>
                 <div>
-                  <span className="block text-[11px] text-[#8a847a]">Verification Level &amp; Channels</span>
-                  <span className="font-mono text-[#efe9de]">
+                  <span className="block text-[12px] text-[#8a847a]">Level &amp; channels</span>
+                  <span className="font-mono text-[#efe9de] text-[12px]">
                     L{session.verificationLevel || 1} ({(session.verificationSources || [session.observationSource]).filter(Boolean).join(' + ')})
                   </span>
                 </div>
                 {session.utr && (
                   <div>
-                    <span className="block text-[11px] text-[#8a847a]">Observed Bank Ref / UTR</span>
-                    <span className="font-mono text-[#4cc38a]">{session.utr}</span>
+                    <span className="block text-[12px] text-[#8a847a]">Observed bank ref / UTR</span>
+                    <span className="font-mono text-[#4cc38a] text-[12px]">{session.utr}</span>
                   </div>
                 )}
                 <div>
-                  <span className="block text-[11px] text-[#8a847a]">Observed Amount</span>
-                  <span className="font-mono text-[#efe9de]">
+                  <span className="block text-[12px] text-[#8a847a]">Observed amount</span>
+                  <span className="font-mono text-[#efe9de] tabular-nums">
                     {currencySymbol}
                     {session.amountDisplay}
                   </span>
@@ -1355,32 +1356,34 @@ const Payment = () => {
                   disabled={syncing}
                   className="btn-primary h-10 px-5 text-[13px]"
                 >
-                  <ArrowPathIcon className={`h-4 w-4 ${syncing ? 'animate-spin' : ''}`} />
-                  <span>{syncing ? 'Checking Ledger...' : 'Sync Settlement Status'}</span>
+                  <ArrowPathIcon className={`h-4 w-4 ${syncing ? 'animate-spin' : ''}`} strokeWidth={1.5} />
+                  <span>{syncing ? 'Checking ledger...' : 'Sync settlement status'}</span>
                 </button>
                 <Link
                   to={returnEventId ? `/events/${returnEventId}` : '/events'}
                   className="btn-secondary h-10 px-5 text-[13px]"
                 >
-                  Back to Event
+                  Back to event
                 </Link>
               </div>
             </div>
           ) : session.status === 'MANUAL_REVIEW' ? (
             /* MANUAL_REVIEW / PENDING_VERIFICATION State */
-            <div className="bg-[#1c1a18] border border-[#e09132]/40 rounded-[16px] p-6 space-y-5">
+            <div className="bg-[#1c1a18] border border-[#e09132]/35 rounded-[14px] p-6 space-y-5">
               <div className="flex items-start gap-3.5">
-                <div className="h-12 w-12 rounded-[12px] bg-[#e09132]/15 border border-[#e09132]/30 flex items-center justify-center text-[#ebb05d] shrink-0">
-                  <DocumentCheckIcon className="h-6 w-6" strokeWidth={1.75} />
+                <div className="h-10 w-10 rounded-[10px] bg-[#e09132]/15 border border-[#e09132]/30 flex items-center justify-center text-[#ebb05d] shrink-0">
+                  <DocumentCheckIcon className="h-5 w-5" strokeWidth={1.5} />
                 </div>
                 <div>
-                  <span className="text-[11px] font-mono uppercase tracking-wider px-2 py-0.5 rounded bg-[#e09132]/15 text-[#ebb05d] border border-[#e09132]/30">
-                    {session.settlementState || 'PENDING_VERIFICATION'}
+                  <span className="text-[12px] font-mono px-2.5 py-0.5 rounded-[6px] bg-[#e09132]/15 text-[#ebb05d] border border-[#e09132]/30">
+                    {session.settlementState === 'PENDING_VERIFICATION' || !session.settlementState
+                      ? 'Pending bank verification'
+                      : session.settlementState}
                   </span>
                   <h2 className="text-[20px] font-medium text-[#efe9de] mt-2">
                     {session.method === 'MANUAL_UPI'
-                      ? 'UTR Submitted — Pending Merchant Bank Verification'
-                      : 'Payment Held for Manual Bank Review'}
+                      ? 'UTR submitted — pending merchant bank verification'
+                      : 'Payment held for manual bank review'}
                   </h2>
                   <p className="text-[13px] text-[#aaa398] mt-1 leading-relaxed">
                     {session.manualReviewNote ||
@@ -1389,23 +1392,23 @@ const Payment = () => {
                 </div>
               </div>
 
-              <div className="rounded-[12px] bg-[#161513] border border-[#efe9de]/[0.08] p-4 grid grid-cols-1 sm:grid-cols-2 gap-3 text-[12.5px]">
+              <div className="rounded-[10px] bg-[#161513] border border-[#efe9de]/[0.08] p-4 grid grid-cols-1 sm:grid-cols-2 gap-3 text-[13px]">
                 <div>
-                  <span className="block text-[11px] text-[#8a847a]">Submitted UTR / Reference</span>
-                  <span className="font-mono text-[#ebb05d]">
+                  <span className="block text-[12px] text-[#8a847a]">Submitted UTR / reference</span>
+                  <span className="font-mono text-[#ebb05d] text-[12px]">
                     {session.utr || 'Awaiting bank match'}
                   </span>
                 </div>
                 <div>
-                  <span className="block text-[11px] text-[#8a847a]">Payee UPI Snapshot</span>
-                  <span className="font-mono text-[#efe9de]">{session.payeeVpa}</span>
+                  <span className="block text-[12px] text-[#8a847a]">Payee UPI snapshot</span>
+                  <span className="font-mono text-[#efe9de] text-[12px] truncate block">{session.payeeVpa}</span>
                 </div>
               </div>
 
               {session.canSubmitManualUtr && (
                 <form onSubmit={handleSubmitUtr} className="space-y-3 pt-2 border-t border-[#efe9de]/[0.08]">
                   <label htmlFor="review-utr" className="block text-[12px] font-medium text-[#aaa398]">
-                    Update 12-Digit UPI / UTR Reference (if entered with a typo)
+                    Update 12-digit UPI / UTR reference
                   </label>
                   <div className="flex flex-col sm:flex-row gap-2.5">
                     <input
@@ -1435,46 +1438,46 @@ const Payment = () => {
                   disabled={syncing}
                   className="btn-primary h-10 px-5 text-[13px]"
                 >
-                  <ArrowPathIcon className={`h-4 w-4 ${syncing ? 'animate-spin' : ''}`} />
-                  <span>{syncing ? 'Checking...' : 'Check Settlement Status'}</span>
+                  <ArrowPathIcon className={`h-4 w-4 ${syncing ? 'animate-spin' : ''}`} strokeWidth={1.5} />
+                  <span>{syncing ? 'Checking...' : 'Check settlement status'}</span>
                 </button>
                 <Link
                   to={returnEventId ? `/events/${returnEventId}` : '/events'}
                   className="btn-secondary h-10 px-5 text-[13px]"
                 >
-                  Back to Event
+                  Back to event
                 </Link>
               </div>
             </div>
           ) : session.status === 'PROCESSING' && !isExpired ? (
             /* Strict 30-Second PROCESSING Bank Observation Window */
-            <div className="bg-[#1c1a18] border border-[#e09132]/40 rounded-[16px] p-6 space-y-5">
+            <div className="bg-[#1c1a18] border border-[#e09132]/35 rounded-[14px] p-6 space-y-5">
               <div className="flex items-start gap-3.5">
-                <div className="h-12 w-12 rounded-[12px] bg-[#e09132]/15 border border-[#e09132]/30 flex items-center justify-center text-[#ebb05d] shrink-0">
-                  <ClockIcon className="h-6 w-6 animate-spin" strokeWidth={1.75} />
+                <div className="h-10 w-10 rounded-[10px] bg-[#e09132]/15 border border-[#e09132]/30 flex items-center justify-center text-[#ebb05d] shrink-0">
+                  <ClockIcon className="h-5 w-5" strokeWidth={1.5} />
                 </div>
                 <div>
-                  <span className="text-[11px] font-mono uppercase tracking-wider px-2 py-0.5 rounded bg-[#e09132]/15 text-[#ebb05d] border border-[#e09132]/30">
-                    PROCESSING · {formatCountdown(secondsLeft)} remaining
+                  <span className="text-[12px] font-mono px-2.5 py-0.5 rounded-[6px] bg-[#e09132]/15 text-[#ebb05d] border border-[#e09132]/30 tabular-nums">
+                    Processing · {formatCountdown(secondsLeft)} remaining
                   </span>
                   <h2 className="text-[20px] font-medium text-[#efe9de] mt-2">
-                    Listening for Bank Credit Alert (30s Window)
+                    Listening for bank credit alert (30s window)
                   </h2>
                   <p className="text-[13px] text-[#aaa398] mt-1 leading-relaxed">
-                    YouPI-PG is scanning Android SMS Gateway &amp; Bank Gmail IMAP alerts for an exact credit of{' '}
-                    <strong className="font-mono text-[#ebb05d]">
+                    Scanning Android SMS Gateway &amp; bank Gmail IMAP alerts for an exact credit of{' '}
+                    <strong className="font-mono font-medium text-[#ebb05d] tabular-nums">
                       {currencySymbol}
                       {session.amountDisplay}
                     </strong>{' '}
-                    to <strong className="font-mono text-[#efe9de]">{session.payeeVpa}</strong>.
+                    to <strong className="font-mono font-medium text-[#efe9de]">{session.payeeVpa}</strong>
                   </p>
                 </div>
               </div>
 
-              <div className="rounded-[12px] bg-[#161513] border border-[#efe9de]/[0.08] p-4 flex items-center justify-between gap-3 text-[12px] text-[#d9ceb8]">
+              <div className="rounded-[10px] bg-[#161513] border border-[#efe9de]/[0.08] p-4 flex items-center justify-between gap-3 text-[12px] text-[#aaa398]">
                 <span className="flex items-center gap-2">
-                  <LockClosedIcon className="h-4 w-4 text-[#ebb05d] shrink-0" />
-                  <span>Session cancel &amp; VPA switch locked until this 30s verification window finishes.</span>
+                  <LockClosedIcon className="h-4 w-4 text-[#ebb05d] shrink-0" strokeWidth={1.5} />
+                  <span>Session cancel &amp; VPA switch locked during the 30s bank check</span>
                 </span>
               </div>
 
@@ -1485,8 +1488,8 @@ const Payment = () => {
                   disabled={syncing}
                   className="btn-primary h-10 px-5 text-[13px]"
                 >
-                  <ArrowPathIcon className={`h-4 w-4 ${syncing ? 'animate-spin' : ''}`} />
-                  <span>{syncing ? 'Checking...' : 'Check Observation Now'}</span>
+                  <ArrowPathIcon className={`h-4 w-4 ${syncing ? 'animate-spin' : ''}`} strokeWidth={1.5} />
+                  <span>{syncing ? 'Checking...' : 'Check observation now'}</span>
                 </button>
                 <button
                   type="button"
@@ -1494,26 +1497,26 @@ const Payment = () => {
                   title="Cannot cancel during 30s bank observation window"
                   className="btn-secondary h-10 px-4 text-[13px] opacity-40 cursor-not-allowed"
                 >
-                  Cancel Locked (PROCESSING)
+                  Cancel locked · processing
                 </button>
               </div>
             </div>
           ) : isExpired || isTerminalError ? (
             /* Expired / Failed / Cancelled Recovery Panel */
-            <div className="bg-[#1c1a18] border border-[#e5484d]/35 rounded-[16px] p-6 space-y-5">
-              <div className="flex items-start gap-3">
-                <div className="h-11 w-11 rounded-[10px] bg-[#e5484d]/15 border border-[#e5484d]/30 flex items-center justify-center text-[#e5484d] shrink-0">
-                  <ExclamationTriangleIcon className="h-6 w-6" strokeWidth={1.75} />
+            <div className="bg-[#1c1a18] border border-[#e5484d]/35 rounded-[14px] p-6 space-y-5">
+              <div className="flex items-start gap-3.5">
+                <div className="h-10 w-10 rounded-[10px] bg-[#e5484d]/15 border border-[#e5484d]/30 flex items-center justify-center text-[#e5484d] shrink-0">
+                  <ExclamationTriangleIcon className="h-5 w-5" strokeWidth={1.5} />
                 </div>
                 <div>
                   <h2 className="text-[19px] font-medium text-[#efe9de]">
                     {isExpired
-                      ? 'UPI Checkout Window Expired'
-                      : `Payment Session ${session.status}`}
+                      ? 'UPI checkout window expired'
+                      : `Payment session ${session.status.toLowerCase()}`}
                   </h2>
                   <p className="text-[13px] text-[#aaa398] mt-1">
                     {session.failureReason ||
-                      'For accurate bank transaction matching, each UPI QR window remains open for 5 minutes.'}
+                      'Each UPI QR window remains open for 5 minutes for accurate bank matching.'}
                   </p>
                 </div>
               </div>
@@ -1527,9 +1530,10 @@ const Payment = () => {
                 >
                   <ArrowPathIcon
                     className={`h-4 w-4 ${submittingAction ? 'animate-spin' : ''}`}
+                    strokeWidth={1.5}
                   />
                   <span>
-                    {submittingAction ? 'Starting Session...' : 'Retry Same Method & VPA'}
+                    {submittingAction ? 'Starting session...' : 'Retry same method & VPA'}
                   </span>
                 </button>
                 <button
@@ -1537,18 +1541,18 @@ const Payment = () => {
                   onClick={handleCancelAndChangeConfig}
                   className="btn-secondary h-11 px-5 text-[13px]"
                 >
-                  Change UPI ID / Method
+                  Change UPI ID / method
                 </button>
               </div>
             </div>
           ) : (
             /* Step 2: ACTIVE Session (`UPI` with I Have Paid -> 30s window, OR `MANUAL_UPI` with UTR form) */
             <div className="space-y-4">
-              <div className="bg-[#1c1a18] border border-[#efe9de]/[0.08] rounded-[16px] p-5 sm:p-6 space-y-5">
+              <div className="bg-[#1c1a18] border border-[#efe9de]/[0.08] rounded-[14px] p-5 sm:p-6 space-y-5">
                 <div className="flex flex-col md:flex-row items-center md:items-start gap-6">
                   {/* White-Backed Dynamic ISO UPI QR */}
                   <div className="flex flex-col items-center shrink-0">
-                    <div className="bg-white p-3.5 rounded-[14px] shadow-[0_8px_30px_rgba(0,0,0,0.45)] border-2 border-[#ebb05d]/40">
+                    <div className="bg-white p-3 rounded-[10px] border border-[#efe9de]/[0.12]">
                       {session.qrSvg ? (
                         <img
                           src={`data:image/svg+xml;charset=utf-8,${encodeURIComponent(session.qrSvg)}`}
@@ -1556,14 +1560,14 @@ const Payment = () => {
                           className="w-44 h-44 block"
                         />
                       ) : (
-                        <div className="w-44 h-44 flex items-center justify-center text-slate-700 text-xs font-mono">
-                          QR Unavailable
+                        <div className="w-44 h-44 flex items-center justify-center text-[#262421] text-[12px] font-mono">
+                          QR unavailable
                         </div>
                       )}
                     </div>
-                    <span className="mt-2.5 inline-flex items-center gap-1.5 text-[11px] font-mono text-[#aaa398]">
-                      <QrCodeIcon className="h-3.5 w-3.5 text-[#ebb05d]" />
-                      <span>Scan live with any UPI app</span>
+                    <span className="mt-2.5 inline-flex items-center gap-1.5 text-[12px] font-mono text-[#aaa398]">
+                      <QrCodeIcon className="h-4 w-4 text-[#ebb05d]" strokeWidth={1.5} />
+                      <span>Scan with any UPI app</span>
                     </span>
                   </div>
 
@@ -1571,47 +1575,47 @@ const Payment = () => {
                   <div className="flex-1 min-w-0 w-full space-y-4">
                     <div>
                       <div className="flex flex-wrap items-center justify-between gap-2">
-                        <span className="text-[11px] font-mono uppercase tracking-wider text-[#8a847a]">
-                          Immutable Receiving Account Snapshot
+                        <span className="text-[12px] font-mono text-[#8a847a]">
+                          Receiving UPI snapshot
                         </span>
-                        <span className="inline-flex items-center gap-1 text-[10px] font-mono px-2 py-0.5 rounded bg-[#262421] text-[#ebb05d] border border-[#efe9de]/[0.08]">
-                          <LockClosedIcon className="h-3 w-3" />
-                          <span>LOCKED</span>
+                        <span className="inline-flex items-center gap-1 text-[12px] font-mono px-2 py-0.5 rounded-[6px] bg-[#262421] text-[#ebb05d] border border-[#efe9de]/[0.08]">
+                          <LockClosedIcon className="h-3.5 w-3.5" strokeWidth={1.5} />
+                          <span>Locked</span>
                         </span>
                       </div>
 
-                      <div className="mt-1 flex flex-wrap items-center gap-2">
+                      <div className="mt-1.5 flex flex-wrap items-center gap-2">
                         <span className="text-[16px] font-medium text-[#efe9de]">
                           {session.payeeName || 'Avenor Campus Events'}
                         </span>
-                        <span className="text-[10px] font-mono px-2 py-0.5 rounded-[5px] bg-[#4cc38a]/12 text-[#4cc38a] border border-[#4cc38a]/25">
-                          BANKING NAME
+                        <span className="text-[12px] font-mono px-2 py-0.5 rounded-[6px] bg-[#4cc38a]/12 text-[#4cc38a] border border-[#4cc38a]/25">
+                          Verified payee
                         </span>
                       </div>
 
-                      <div className="mt-2.5 flex items-center justify-between gap-2 rounded-[10px] bg-[#12110f] border border-[#efe9de]/[0.1] px-3.5 py-2.5">
-                        <span className="font-mono text-[14px] text-[#ebb05d] break-all">
+                      <div className="mt-2.5 flex items-center justify-between gap-2 rounded-[8px] bg-[#12110f] border border-[#efe9de]/[0.1] px-3.5 py-2.5">
+                        <span className="font-mono text-[13px] sm:text-[14px] text-[#ebb05d] truncate min-w-0 flex-1">
                           {session.payeeVpa}
                         </span>
                         <button
                           type="button"
                           onClick={() => handleCopyText(session.payeeVpa, setVpaCopied)}
-                          className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-[6px] bg-[#262421] hover:bg-[#302d29] text-[11px] font-medium text-[#efe9de] border border-[#efe9de]/[0.08] shrink-0"
+                          className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-[6px] bg-[#262421] hover:bg-[#302d29] text-[12px] font-medium text-[#efe9de] border border-[#efe9de]/[0.08] shrink-0 transition-colors duration-150"
                         >
-                          <ClipboardDocumentIcon className="h-3.5 w-3.5 text-[#ebb05d]" />
-                          <span>{vpaCopied ? 'Copied!' : 'Copy VPA'}</span>
+                          <ClipboardDocumentIcon className="h-3.5 w-3.5 text-[#ebb05d]" strokeWidth={1.5} />
+                          <span>{vpaCopied ? 'Copied' : 'Copy VPA'}</span>
                         </button>
                       </div>
 
-                      <div className="mt-2 flex flex-wrap items-center justify-between gap-2 text-[11px] text-[#8a847a]">
-                        <span>Need a backup UPI handle or Manual UTR mode?</span>
+                      <div className="mt-2 flex flex-wrap items-center justify-between gap-2 text-[12px] text-[#8a847a]">
+                        <span>Need a backup UPI handle or manual UTR mode?</span>
                         <button
                           type="button"
                           onClick={handleCancelAndChangeConfig}
                           disabled={cancellingAction || !session.canCancel}
                           className="font-medium text-[#ebb05d] hover:underline disabled:opacity-40"
                         >
-                          {cancellingAction ? 'Cancelling...' : 'Cancel & Switch VPA / Method'}
+                          {cancellingAction ? 'Cancelling...' : 'Cancel & switch VPA / method'}
                         </button>
                       </div>
                     </div>
@@ -1620,26 +1624,26 @@ const Payment = () => {
                     {upiApps.length > 0 && (
                       <div className="space-y-2 pt-1">
                         <div className="flex items-center justify-between gap-2">
-                          <span className="flex items-center gap-1.5 text-[11px] text-[#8a847a]">
-                            <DevicePhoneMobileIcon className="h-3.5 w-3.5" />
-                            <span>Quick-Pay UPI Apps ({upiApps.length} supported)</span>
+                          <span className="flex items-center gap-1.5 text-[12px] text-[#8a847a] whitespace-nowrap">
+                            <DevicePhoneMobileIcon className="h-4 w-4 shrink-0" strokeWidth={1.5} />
+                            <span>Quick-pay UPI apps ({upiApps.length})</span>
                           </span>
                           {upiApps.length > 6 && (
                             <button
                               type="button"
                               onClick={() => setShowAllUpiApps((v) => !v)}
-                              className="inline-flex items-center gap-1 text-[11px] font-medium text-[#ebb05d] hover:underline"
+                              className="inline-flex items-center gap-1 text-[12px] font-medium text-[#ebb05d] hover:underline whitespace-nowrap shrink-0"
                             >
-                              <span>{showAllUpiApps ? 'Show fewer' : `Show all ${upiApps.length} apps`}</span>
+                              <span>{showAllUpiApps ? 'Show fewer' : `Show all ${upiApps.length}`}</span>
                               {showAllUpiApps ? (
-                                <ChevronUpIcon className="h-3.5 w-3.5" />
+                                <ChevronUpIcon className="h-4 w-4" strokeWidth={1.5} />
                               ) : (
-                                <ChevronDownIcon className="h-3.5 w-3.5" />
+                                <ChevronDownIcon className="h-4 w-4" strokeWidth={1.5} />
                               )}
                             </button>
                           )}
                         </div>
-                        <div className="grid grid-cols-3 sm:grid-cols-6 gap-2 max-h-60 overflow-y-auto pr-0.5">
+                        <div className="grid grid-cols-2 gap-2 max-h-64 overflow-y-auto pr-0.5">
                           {visibleApps.map((app) => {
                             const svgDataUrl = app.svgLogo
                               ? `data:image/svg+xml;charset=utf-8,${encodeURIComponent(app.svgLogo)}`
@@ -1649,7 +1653,7 @@ const Payment = () => {
                                 key={app.id}
                                 href={app.upiUri}
                                 title={`Pay using ${app.name || app.shortName}`}
-                                className="flex flex-col items-center justify-center gap-1.5 py-2 px-1.5 rounded-[9px] bg-[#161513] hover:bg-[#262421] border border-[#efe9de]/[0.08] text-[11px] text-[#efe9de] transition-colors text-center"
+                                className="flex items-center gap-2.5 h-10 px-3 rounded-[8px] bg-[#161513] hover:bg-[#262421] border border-[#efe9de]/[0.08] text-[12px] text-[#efe9de] transition-colors duration-150"
                               >
                                 {app.iconUrl || svgDataUrl ? (
                                   <img
@@ -1662,15 +1666,15 @@ const Payment = () => {
                                         e.currentTarget.style.display = 'none';
                                       }
                                     }}
-                                    className="h-5 w-5 rounded-[4px] object-contain"
+                                    className="h-5 w-5 rounded-[4px] object-contain shrink-0"
                                   />
                                 ) : (
                                   <span
-                                    className="h-3 w-3 rounded-full"
+                                    className="h-3 w-3 rounded-full shrink-0"
                                     style={{ backgroundColor: app.brandColor || '#ebb05d' }}
                                   />
                                 )}
-                                <span className="truncate max-w-full font-medium">
+                                <span className="truncate font-medium">
                                   {app.shortName}
                                 </span>
                               </a>
@@ -1683,48 +1687,48 @@ const Payment = () => {
                 </div>
 
                 {/* Google Pay "Day limit exceeded" Fix Banner */}
-                <div className="rounded-[12px] bg-[#e09132]/[0.08] border border-[#e09132]/30 p-4 space-y-2">
+                <div className="rounded-[10px] bg-[#e09132]/[0.08] border border-[#e09132]/30 p-4 space-y-2">
                   <div className="flex items-center justify-between gap-2">
                     <div className="flex items-center gap-2 text-[#ebb05d] text-[13px] font-medium">
-                      <InformationCircleIcon className="h-5 w-5 shrink-0" strokeWidth={1.75} />
+                      <InformationCircleIcon className="h-5 w-5 shrink-0" strokeWidth={1.5} />
                       <span>
-                        Seeing Google Pay &ldquo;Day limit exceeded for this transaction&rdquo;?
+                        Google Pay &ldquo;Day limit exceeded for this transaction&rdquo; help
                       </span>
                     </div>
                     <button
                       type="button"
                       onClick={() => setShowDayLimitGuide((v) => !v)}
-                      className="text-[11px] font-mono text-[#ebb05d] hover:underline shrink-0"
+                      className="text-[12px] font-mono text-[#ebb05d] hover:underline shrink-0"
                     >
                       {showDayLimitGuide ? 'Hide steps' : 'How to fix'}
                     </button>
                   </div>
-                  <p className="text-[12px] text-[#d9ceb8] leading-relaxed">
-                    Google Pay enforces a <strong className="text-[#efe9de]">₹2,000/day cap on scanned QR codes &amp; app links</strong>. Fix it in seconds:
+                  <p className="text-[12px] text-[#aaa398] leading-relaxed">
+                    Google Pay caps scanned QR &amp; gallery intents at{' '}
+                    <span className="text-[#efe9de] font-medium tabular-nums">₹2,000/day</span>. Workarounds:
                   </p>
                   <div
-                    className={`grid grid-cols-1 sm:grid-cols-3 gap-2.5 pt-1 text-[11.5px] text-[#d9ceb8] ${
+                    className={`grid grid-cols-1 sm:grid-cols-3 gap-2.5 pt-1 text-[12px] text-[#aaa398] ${
                       showDayLimitGuide ? '' : 'hidden sm:grid'
                     }`}
                   >
-                    <div className="rounded-[8px] bg-[#161513]/80 border border-[#efe9de]/[0.07] p-2.5">
-                      <span className="block font-semibold text-[#ebb05d] mb-0.5">
-                        1. Copy &amp; Pay Manually
+                    <div className="rounded-[8px] bg-[#161513] border border-[#efe9de]/[0.07] p-2.5">
+                      <span className="block font-medium text-[#ebb05d] mb-0.5">
+                        1. Copy &amp; pay manually
                       </span>
-                      Click <strong>Copy VPA</strong> above → Open GPay → tap{' '}
-                      <em>Pay UPI ID or number</em> → paste VPA &amp; pay ₹{session.amountDisplay} directly.
+                      Click Copy VPA above, open GPay, choose &ldquo;Pay UPI ID or number&rdquo;, and send ₹{session.amountDisplay}
                     </div>
-                    <div className="rounded-[8px] bg-[#161513]/80 border border-[#efe9de]/[0.07] p-2.5">
-                      <span className="block font-semibold text-[#ebb05d] mb-0.5">
-                        2. Switch UPI Pre-Checkout
+                    <div className="rounded-[8px] bg-[#161513] border border-[#efe9de]/[0.07] p-2.5">
+                      <span className="block font-medium text-[#ebb05d] mb-0.5">
+                        2. Switch UPI pre-checkout
                       </span>
-                      Click <strong>Cancel &amp; Switch VPA</strong> above to pick an alternate merchant UPI handle cleanly.
+                      Use Cancel &amp; switch VPA above to pick an alternate merchant UPI handle
                     </div>
-                    <div className="rounded-[8px] bg-[#161513]/80 border border-[#efe9de]/[0.07] p-2.5">
-                      <span className="block font-semibold text-[#ebb05d] mb-0.5">
+                    <div className="rounded-[8px] bg-[#161513] border border-[#efe9de]/[0.07] p-2.5">
+                      <span className="block font-medium text-[#ebb05d] mb-0.5">
                         3. Try PhonePe / Paytm / BHIM
                       </span>
-                      Other NPCI UPI apps let you scan this exact QR without Google Pay&apos;s QR gallery cap.
+                      Other UPI apps scan this same QR without Google Pay&apos;s QR cap
                     </div>
                   </div>
                 </div>
@@ -1742,17 +1746,17 @@ const Payment = () => {
                     <div className="flex items-center justify-between gap-2">
                       <div>
                         <h3 className="text-[14px] font-medium text-[#efe9de]">
-                          Submit 12-Digit UPI / UTR Reference (MANUAL_UPI)
+                          Submit 12-digit UPI / UTR reference
                         </h3>
-                        <p className="text-[12px] text-[#8a847a]">
-                          After scanning the QR above and paying ₹{session.amountDisplay}, enter your UPI reference number below for merchant verification.
+                        <p className="text-[12px] text-[#8a847a] tabular-nums">
+                          After scanning the QR and paying ₹{session.amountDisplay}, enter your UPI reference number below
                         </p>
                       </div>
                       {session.allowDemoUtr && (
                         <button
                           type="button"
                           onClick={() => setUtr(`4128${Date.now().toString().slice(-8)}`)}
-                          className="text-[11px] font-mono text-[#ebb05d] hover:underline shrink-0"
+                          className="text-[12px] font-mono text-[#ebb05d] hover:underline shrink-0"
                         >
                           Fill test UTR
                         </button>
@@ -1773,7 +1777,7 @@ const Payment = () => {
                         disabled={submittingUtr}
                         className="btn-primary h-10 px-5 text-[13px] shrink-0"
                       >
-                        {submittingUtr ? 'Submitting UTR...' : 'Submit UTR for Review'}
+                        {submittingUtr ? 'Submitting UTR...' : 'Submit UTR for review'}
                       </button>
                     </div>
                   </form>
@@ -1787,13 +1791,13 @@ const Payment = () => {
                         className="btn-primary flex-1 h-11 text-[13px]"
                       >
                         <BoltIcon
-                          className={`h-4 w-4 ${verifyingNow ? 'animate-pulse' : ''}`}
-                          strokeWidth={1.75}
+                          className="h-4 w-4"
+                          strokeWidth={1.5}
                         />
                         <span>
                           {verifyingNow
-                            ? 'Entering 30s Verification Window...'
-                            : 'I Have Paid — Verify Payment (30s Window)'}
+                            ? 'Entering 30s verification window...'
+                            : 'I have paid — verify payment (30s window)'}
                         </span>
                       </button>
 
@@ -1805,35 +1809,34 @@ const Payment = () => {
                       >
                         <ArrowPathIcon
                           className={`h-4 w-4 ${syncing ? 'animate-spin' : ''}`}
-                          strokeWidth={1.75}
+                          strokeWidth={1.5}
                         />
                         <span>Refresh</span>
                       </button>
                     </div>
-                    <p className="text-[11.5px] text-[#8a847a]">
+                    <p className="text-[12px] text-[#8a847a]">
                       Want to enter a 12-digit UTR manually instead?{' '}
                       <button
                         type="button"
                         onClick={handleCancelAndChangeConfig}
                         className="text-[#ebb05d] hover:underline"
                       >
-                        Cancel and switch to MANUAL_UPI
+                        Cancel and switch to manual UTR mode
                       </button>
-                      .
                     </p>
                   </div>
                 )}
 
-                <div className="pt-2 border-t border-[#efe9de]/[0.06] flex flex-wrap items-center justify-between gap-2 text-[11.5px] text-[#8a847a]">
+                <div className="pt-2 border-t border-[#efe9de]/[0.06] flex flex-wrap items-center justify-between gap-2 text-[12px] text-[#8a847a]">
                   {session.checkoutUrl ? (
                     <a
                       href={session.checkoutUrl}
                       target="_blank"
                       rel="noopener noreferrer"
-                      className="inline-flex items-center gap-1 hover:text-[#ebb05d]"
+                      className="inline-flex items-center gap-1 hover:text-[#ebb05d] transition-colors duration-150"
                     >
                       <span>Standalone YouPI portal</span>
-                      <ArrowUpRightIcon className="h-3 w-3" />
+                      <ArrowUpRightIcon className="h-3.5 w-3.5" strokeWidth={1.5} />
                     </a>
                   ) : (
                     <span />
@@ -1842,7 +1845,7 @@ const Payment = () => {
                     type="button"
                     onClick={handleCancelAndExit}
                     disabled={session.status === 'PROCESSING' || session.canCancel === false}
-                    className="hover:text-[#e5484d] transition-colors disabled:opacity-40"
+                    className="hover:text-[#e5484d] transition-colors duration-150 disabled:opacity-40"
                   >
                     Cancel checkout &amp; return
                   </button>

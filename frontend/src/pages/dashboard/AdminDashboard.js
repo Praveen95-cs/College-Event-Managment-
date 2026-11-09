@@ -66,6 +66,16 @@ const AdminDashboard = () => {
   const [reconcilingCsv, setReconcilingCsv] = useState(false);
   const [csvSummary, setCsvSummary] = useState(null);
   const [generatedObserverSecret, setGeneratedObserverSecret] = useState('');
+  const [youpiSection, setYoupiSection] = useState('all');
+  const [copiedKey, setCopiedKey] = useState('');
+
+  const handleCopyInline = (key, value) => {
+    if (!value || !navigator.clipboard?.writeText) return;
+    navigator.clipboard.writeText(value).then(() => {
+      setCopiedKey(key);
+      setTimeout(() => setCopiedKey((prev) => (prev === key ? '' : prev)), 1800);
+    });
+  };
 
   const [systemStatus, setSystemStatus] = useState({
     configured: false,
@@ -679,7 +689,7 @@ const AdminDashboard = () => {
       const sum = res.data?.summary || {};
       if (sum.ok) {
         setSuccess(
-          `Bank inbox scanned (${sum.scanned || 0} email(s)) · ${sum.matched || 0} payment(s) auto-reconciled.`
+          `Bank inbox scanned (${sum.scanned || 0} email(s)) · ${sum.matched || 0} credit observation(s) matched.`
         );
         await fetchData();
       } else {
@@ -889,7 +899,7 @@ const AdminDashboard = () => {
           <button
             type="button"
             onClick={() => setShowEmailPanel((v) => !v)}
-            className={`h-9 inline-flex items-center gap-2 px-3 rounded-[8px] text-[12px] font-mono border transition-colors ${
+            className={`h-9 inline-flex items-center gap-2 px-3 rounded-[8px] text-[12px] font-mono border transition-colors duration-150 ${
               systemStatus.configured
                 ? systemStatus.lastEmailStatus?.delivered === false
                   ? 'bg-[#e5484d]/10 text-[#e5484d] border-[#e5484d]/30'
@@ -900,9 +910,9 @@ const AdminDashboard = () => {
             <span>
               {systemStatus.configured
                 ? systemStatus.lastEmailStatus?.delivered === false
-                  ? 'Email Warning · Configure / Test'
-                  : `Email Live (${(systemStatus.activeChannels || []).join(', ') || 'configured'})`
-                : 'Email Console Mode · Configure Relay'}
+                  ? 'Email warning · configure or test'
+                  : `Email live (${(systemStatus.activeChannels || []).join(', ') || 'configured'})`
+                : 'Email console mode · configure relay'}
             </span>
           </button>
           <Link to="/create-event" className="btn-primary h-9 px-4 text-[13px]">
@@ -917,10 +927,11 @@ const AdminDashboard = () => {
           <div className="flex flex-wrap items-start justify-between gap-3 pb-4 border-b border-[#efe9de]/[0.08]">
             <div>
               <h2 className="text-[17px] font-medium text-[#efe9de]">
-                Email Delivery &amp; Cloud HTTPS Relay Diagnostics
+                Email delivery &amp; cloud HTTPS relay
               </h2>
-              <p className="text-[12.5px] text-[#aaa398] mt-1">
-                Cloud hosts (Render Free) frequently throttle or timeout SMTP ports 465/587. Configure a <strong>Port 443 HTTPS relay</strong> (Brevo Free API, Resend, or a 10-line Google Apps Script Gmail Bridge) for sub-second OTP &amp; registration emails without touching Render redeploy.
+              <p className="text-[13px] text-[#aaa398] mt-1">
+                Cloud hosts frequently throttle SMTP ports 465/587. Use a{' '}
+                <span className="text-[#efe9de] font-medium">Port 443 HTTPS relay</span> (Brevo Free API, Resend, or a 10-line Google Apps Script bridge) for instant OTP and registration emails.
               </p>
             </div>
             <button
@@ -935,31 +946,31 @@ const AdminDashboard = () => {
           <div className="grid grid-cols-1 lg:grid-cols-12 gap-5">
             {/* Test Email & Last Status */}
             <div className="lg:col-span-5 space-y-4">
-              <div className="rounded-[12px] bg-[#161513] border border-[#efe9de]/[0.08] p-4 space-y-2.5 text-[12px]">
+              <div className="rounded-[10px] bg-[#161513] border border-[#efe9de]/[0.08] p-4 space-y-2.5 text-[12px]">
                 <div className="flex items-center justify-between">
-                  <span className="text-[#8a847a] font-mono uppercase">Active Channels</span>
+                  <span className="text-[#8a847a] font-mono">Active channels</span>
                   <span className="font-mono text-[#ebb05d]">
                     Mode: {systemStatus.relayProvider || 'auto'}
                   </span>
                 </div>
                 <div className="flex flex-wrap gap-1.5">
                   {systemStatus.brevoConfigured && (
-                    <span className="px-2 py-0.5 rounded-[5px] bg-[#4cc38a]/12 text-[#4cc38a] border border-[#4cc38a]/25 font-mono text-[11px]">
-                      Brevo HTTPS ✓
+                    <span className="px-2 py-0.5 rounded-[6px] bg-[#4cc38a]/12 text-[#4cc38a] border border-[#4cc38a]/25 font-mono text-[12px]">
+                      Brevo HTTPS
                     </span>
                   )}
                   {systemStatus.webhookConfigured && (
-                    <span className="px-2 py-0.5 rounded-[5px] bg-[#4cc38a]/12 text-[#4cc38a] border border-[#4cc38a]/25 font-mono text-[11px]">
-                      Webhook HTTPS ({systemStatus.webhookUrlHost}) ✓
+                    <span className="px-2 py-0.5 rounded-[6px] bg-[#4cc38a]/12 text-[#4cc38a] border border-[#4cc38a]/25 font-mono text-[12px]">
+                      Webhook HTTPS ({systemStatus.webhookUrlHost})
                     </span>
                   )}
                   {systemStatus.resendConfigured && (
-                    <span className="px-2 py-0.5 rounded-[5px] bg-[#4cc38a]/12 text-[#4cc38a] border border-[#4cc38a]/25 font-mono text-[11px]">
-                      Resend HTTPS ✓
+                    <span className="px-2 py-0.5 rounded-[6px] bg-[#4cc38a]/12 text-[#4cc38a] border border-[#4cc38a]/25 font-mono text-[12px]">
+                      Resend HTTPS
                     </span>
                   )}
                   {systemStatus.smtpConfigured && (
-                    <span className="px-2 py-0.5 rounded-[5px] bg-[#262421] text-[#efe9de] border border-[#efe9de]/[0.1] font-mono text-[11px]">
+                    <span className="px-2 py-0.5 rounded-[6px] bg-[#262421] text-[#efe9de] border border-[#efe9de]/[0.1] font-mono text-[12px]">
                       SMTP {systemStatus.smtpHost}:{systemStatus.smtpPort} ({systemStatus.smtpUserMasked})
                     </span>
                   )}
@@ -970,17 +981,17 @@ const AdminDashboard = () => {
 
                 {systemStatus.lastEmailStatus && (
                   <div className="pt-2 border-t border-[#efe9de]/[0.06] space-y-1">
-                    <span className="text-[#8a847a]">Last delivery attempt:</span>
+                    <span className="text-[#8a847a]">Last delivery attempt</span>
                     <div
-                      className={`font-mono text-[11px] ${
+                      className={`font-mono text-[12px] tabular-nums ${
                         systemStatus.lastEmailStatus.delivered ? 'text-[#4cc38a]' : 'text-[#e5484d]'
                       }`}
                     >
-                      {systemStatus.lastEmailStatus.delivered ? 'DELIVERED' : 'FAILED'} via{' '}
+                      {systemStatus.lastEmailStatus.delivered ? 'Delivered' : 'Failed'} via{' '}
                       {systemStatus.lastEmailStatus.provider} ({systemStatus.lastEmailStatus.latencyMs}ms)
                     </div>
                     {systemStatus.lastEmailStatus.reason && (
-                      <p className="text-[11px] text-[#e5484d] break-words">
+                      <p className="text-[12px] text-[#e5484d] break-words">
                         {systemStatus.lastEmailStatus.reason}
                       </p>
                     )}
@@ -990,10 +1001,10 @@ const AdminDashboard = () => {
 
               <form
                 onSubmit={handleSendTestEmail}
-                className="rounded-[12px] bg-[#161513] border border-[#efe9de]/[0.08] p-4 space-y-3"
+                className="rounded-[10px] bg-[#161513] border border-[#efe9de]/[0.08] p-4 space-y-3"
               >
                 <span className="block text-[13px] font-medium text-[#efe9de]">
-                  Send Diagnostic Test Email
+                  Send diagnostic test email
                 </span>
                 <input
                   type="email"
@@ -1007,16 +1018,16 @@ const AdminDashboard = () => {
                   disabled={sendingTestEmail}
                   className="btn-primary w-full h-9 text-[12px]"
                 >
-                  {sendingTestEmail ? 'Testing Transports...' : 'Send Test Email Now'}
+                  {sendingTestEmail ? 'Testing transports...' : 'Send test email now'}
                 </button>
                 {testEmailResult && (
                   <p
-                    className={`text-[11.5px] font-mono ${
+                    className={`text-[12px] font-mono tabular-nums ${
                       testEmailResult.ok ? 'text-[#4cc38a]' : 'text-[#e5484d]'
                     }`}
                   >
                     {testEmailResult.ok
-                      ? `Delivered via ${testEmailResult.provider} in ${testEmailResult.latencyMs}ms.`
+                      ? `Delivered via ${testEmailResult.provider} in ${testEmailResult.latencyMs}ms`
                       : `${testEmailResult.code}: ${testEmailResult.message}`}
                   </p>
                 )}
@@ -1027,8 +1038,8 @@ const AdminDashboard = () => {
             <form onSubmit={handleSaveEmailSettings} className="lg:col-span-7 space-y-3.5">
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <div>
-                  <label className="block text-[11.5px] text-[#aaa398] mb-1">
-                    Relay Priority Mode
+                  <label className="block text-[12px] text-[#aaa398] mb-1">
+                    Relay priority mode
                   </label>
                   <select
                     value={emailForm.emailRelayProvider}
@@ -1037,17 +1048,17 @@ const AdminDashboard = () => {
                     }
                     className="input-field h-9 py-0 text-[12px]"
                   >
-                    <option value="auto">Auto (HTTPS Relays first in Cloud)</option>
-                    <option value="brevo">Brevo HTTPS API First</option>
-                    <option value="webhook">Google Apps Script / Webhook First</option>
-                    <option value="resend">Resend HTTPS API First</option>
-                    <option value="smtp">Direct SMTP First</option>
+                    <option value="auto">Auto (HTTPS relays first in cloud)</option>
+                    <option value="brevo">Brevo HTTPS API first</option>
+                    <option value="webhook">Google Apps Script / Webhook first</option>
+                    <option value="resend">Resend HTTPS API first</option>
+                    <option value="smtp">Direct SMTP first</option>
                   </select>
                 </div>
 
                 <div>
-                  <label className="block text-[11.5px] text-[#aaa398] mb-1">
-                    Sender From Address
+                  <label className="block text-[12px] text-[#aaa398] mb-1">
+                    Sender from address
                   </label>
                   <input
                     type="text"
@@ -1063,8 +1074,8 @@ const AdminDashboard = () => {
 
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <div>
-                  <div className="flex justify-between text-[11.5px] text-[#aaa398] mb-1">
-                    <span>Brevo API Key (300 free/day, Port 443)</span>
+                  <div className="flex justify-between text-[12px] text-[#aaa398] mb-1">
+                    <span>Brevo API key (Port 443)</span>
                     {systemStatus.brevoConfigured && (
                       <button
                         type="button"
@@ -1082,15 +1093,15 @@ const AdminDashboard = () => {
                       setEmailForm((p) => ({ ...p, brevoApiKey: e.target.value }))
                     }
                     placeholder={
-                      systemStatus.brevoConfigured ? 'Saved ✓ (leave blank to keep)' : 'xkeysib-...'
+                      systemStatus.brevoConfigured ? 'Saved (leave blank to keep)' : 'xkeysib-...'
                     }
                     className="input-field h-9 text-[12px] font-mono"
                   />
                 </div>
 
                 <div>
-                  <div className="flex justify-between text-[11.5px] text-[#aaa398] mb-1">
-                    <span>Resend API Key (Optional)</span>
+                  <div className="flex justify-between text-[12px] text-[#aaa398] mb-1">
+                    <span>Resend API key (optional)</span>
                     {systemStatus.resendConfigured && (
                       <button
                         type="button"
@@ -1108,7 +1119,7 @@ const AdminDashboard = () => {
                       setEmailForm((p) => ({ ...p, resendApiKey: e.target.value }))
                     }
                     placeholder={
-                      systemStatus.resendConfigured ? 'Saved ✓ (leave blank to keep)' : 're_...'
+                      systemStatus.resendConfigured ? 'Saved (leave blank to keep)' : 're_...'
                     }
                     className="input-field h-9 text-[12px] font-mono"
                   />
@@ -1117,8 +1128,8 @@ const AdminDashboard = () => {
 
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <div>
-                  <div className="flex justify-between text-[11.5px] text-[#aaa398] mb-1">
-                    <span>Google Apps Script / HTTPS Webhook URL</span>
+                  <div className="flex justify-between text-[12px] text-[#aaa398] mb-1">
+                    <span>Google Apps Script / Webhook URL</span>
                     {systemStatus.webhookConfigured && (
                       <button
                         type="button"
@@ -1145,8 +1156,8 @@ const AdminDashboard = () => {
                 </div>
 
                 <div>
-                  <label className="block text-[11.5px] text-[#aaa398] mb-1">
-                    Webhook Secret Token (Optional)
+                  <label className="block text-[12px] text-[#aaa398] mb-1">
+                    Webhook secret token (optional)
                   </label>
                   <input
                     type="password"
@@ -1155,7 +1166,7 @@ const AdminDashboard = () => {
                       setEmailForm((p) => ({ ...p, emailWebhookSecret: e.target.value }))
                     }
                     placeholder={
-                      systemStatus.webhookSecretConfigured ? 'Saved ✓ (blank to keep)' : 'Shared secret'
+                      systemStatus.webhookSecretConfigured ? 'Saved (blank to keep)' : 'Shared secret'
                     }
                     className="input-field h-9 text-[12px] font-mono"
                   />
@@ -1169,7 +1180,7 @@ const AdminDashboard = () => {
                   onChange={(e) =>
                     setEmailForm((p) => ({ ...p, smtpHostOverride: e.target.value }))
                   }
-                  placeholder="SMTP Host (e.g. smtp.gmail.com)"
+                  placeholder="SMTP host (e.g. smtp.gmail.com)"
                   className="input-field h-9 text-[12px]"
                 />
                 <input
@@ -1178,7 +1189,7 @@ const AdminDashboard = () => {
                   onChange={(e) =>
                     setEmailForm((p) => ({ ...p, smtpUserOverride: e.target.value }))
                   }
-                  placeholder="SMTP Username override"
+                  placeholder="SMTP username override"
                   className="input-field h-9 text-[12px]"
                 />
                 <input
@@ -1196,11 +1207,11 @@ const AdminDashboard = () => {
                 <button
                   type="button"
                   onClick={() => setShowAppsScriptCode((v) => !v)}
-                  className="text-[11.5px] text-[#ebb05d] hover:underline"
+                  className="text-[12px] text-[#ebb05d] hover:underline"
                 >
                   {showAppsScriptCode
-                    ? 'Hide Free Gmail Apps Script Guide'
-                    : 'Free Setup: Use Your Gmail Over HTTPS (No SMTP Port Block)'}
+                    ? 'Hide Gmail Apps Script guide'
+                    : 'Use your Gmail over HTTPS (no SMTP port block)'}
                 </button>
                 <div className="flex gap-2">
                   <button
@@ -1208,23 +1219,25 @@ const AdminDashboard = () => {
                     onClick={() => handleResetEmailChannel({ clearSmtpOverrides: true })}
                     className="btn-secondary h-9 px-3 text-[12px]"
                   >
-                    Clear SMTP Override
+                    Clear SMTP override
                   </button>
                   <button
                     type="submit"
                     disabled={savingEmailCfg}
                     className="btn-primary h-9 px-4 text-[12px]"
                   >
-                    {savingEmailCfg ? 'Saving...' : 'Save Relay Settings'}
+                    {savingEmailCfg ? 'Saving...' : 'Save relay settings'}
                   </button>
                 </div>
               </div>
 
               {showAppsScriptCode && (
-                <div className="rounded-[10px] bg-[#12110f] border border-[#efe9de]/[0.08] p-3 space-y-2">
-                  <div className="flex flex-wrap items-center justify-between gap-2 text-[11px] text-[#aaa398]">
+                <div className="rounded-[10px] bg-[#12110f] border border-[#efe9de]/[0.08] p-3.5 space-y-2">
+                  <div className="flex flex-wrap items-center justify-between gap-2 text-[12px] text-[#aaa398]">
                     <span>
-                      1. Open <strong className="text-[#efe9de]">script.google.com</strong> → New project → paste below → Deploy as <strong className="text-[#efe9de]">Web App</strong> (Execute as: <strong className="text-[#ebb05d]">Me</strong>, Who has access: <strong className="text-[#ebb05d]">Anyone</strong>) → paste the <code className="text-[#ebb05d]">/exec</code> URL above.
+                      1. Open <span className="text-[#efe9de] font-medium">script.google.com</span> · New project · deploy as{' '}
+                      <span className="text-[#efe9de] font-medium">Web App</span> (Execute as Me, Access: Anyone) · paste the{' '}
+                      <code className="text-[#ebb05d]">/exec</code> URL above
                     </span>
                     <button
                       type="button"
@@ -1236,12 +1249,12 @@ const AdminDashboard = () => {
                           });
                         }
                       }}
-                      className="btn-secondary h-7 px-2.5 text-[11px] shrink-0"
+                      className="btn-secondary h-7 px-2.5 text-[12px] shrink-0"
                     >
-                      Copy Script
+                      Copy script
                     </button>
                   </div>
-                  <pre className="text-[11px] font-mono text-[#d9ceb8] overflow-x-auto leading-relaxed">
+                  <pre className="text-[12px] font-mono text-[#aaa398] overflow-x-auto leading-relaxed">
 {`function doPost(e) {
   var body = JSON.parse(e.postData.contents);
   var expectedSecret = ''; // Optional: set same Webhook Secret Token here
@@ -1375,7 +1388,7 @@ const AdminDashboard = () => {
                     <span>Auto-delete expired events from MongoDB Cloud</span>
                   </label>
                   <span
-                    className={`px-2 py-0.5 rounded-[5px] text-[11px] font-mono border ${
+                    className={`px-2 py-0.5 rounded-[6px] text-[12px] font-mono border tabular-nums ${
                       expiredSummary.totalExpiredCount > 0
                         ? 'bg-[#e09132]/12 text-[#ebb05d] border-[#e09132]/30'
                         : 'bg-[#4cc38a]/10 text-[#4cc38a] border-[#4cc38a]/25'
@@ -1387,7 +1400,7 @@ const AdminDashboard = () => {
                 <p className="text-[12px] text-[#8a847a]">
                   Automatically removes past events along with photos, registrations, YouPI sessions, and linked contests from cloud storage.
                   {cleanupPolicy.lastCleanupAt && (
-                    <span className="ml-1.5 font-mono text-[#aaa398]">
+                    <span className="ml-1.5 font-mono text-[#aaa398] tabular-nums">
                       Last sweep: {new Date(cleanupPolicy.lastCleanupAt).toLocaleString()} ({cleanupPolicy.lastDeletedCount || 0} deleted)
                     </span>
                   )}
@@ -1402,7 +1415,7 @@ const AdminDashboard = () => {
                   onChange={(e) =>
                     handleUpdateCleanupPolicy({ expiredEventGraceHours: Number(e.target.value) })
                   }
-                  className="h-9 pl-3 pr-8 rounded-[8px] text-[12px] bg-[#262421] border border-[#efe9de]/[0.12] text-[#efe9de] focus:outline-none focus:border-[#e09132]"
+                  className="h-9 pl-3 pr-8 rounded-[8px] text-[12px] bg-[#262421] border border-[#efe9de]/[0.12] text-[#efe9de] focus:outline-none focus:border-[#e09132] transition-colors duration-150"
                 >
                   <option value="0">Delete immediately after event ends</option>
                   <option value="24">Delete 24 hours after end</option>
@@ -1413,9 +1426,9 @@ const AdminDashboard = () => {
                   type="button"
                   disabled={purgingExpired || expiredSummary.totalExpiredCount === 0}
                   onClick={handlePurgeExpiredNow}
-                  className="h-9 px-3.5 rounded-[8px] text-[12px] font-medium text-[#e5484d] bg-[#e5484d]/10 border border-[#e5484d]/25 hover:bg-[#e5484d]/20 disabled:opacity-40 transition-colors"
+                  className="h-9 px-3.5 rounded-[8px] text-[12px] font-medium text-[#e5484d] bg-[#e5484d]/10 border border-[#e5484d]/25 hover:bg-[#e5484d]/20 disabled:opacity-40 transition-colors duration-150 tabular-nums"
                 >
-                  {purgingExpired ? 'Purging...' : `Purge Expired Now (${expiredSummary.totalExpiredCount})`}
+                  {purgingExpired ? 'Purging...' : `Purge expired (${expiredSummary.totalExpiredCount})`}
                 </button>
               </div>
             </div>
@@ -1443,11 +1456,11 @@ const AdminDashboard = () => {
                       <tr key={event._id} className="hover:bg-[#262421]/40 transition-colors duration-150">
                         <td className="px-5 py-3.5 whitespace-nowrap text-[14px] font-medium text-[#efe9de]">
                           <div className="flex items-center gap-2">
-                            <Link to={`/events/${event._id}`} className="hover:text-[#ebb05d] transition-colors">
+                            <Link to={`/events/${event._id}`} className="hover:text-[#ebb05d] transition-colors duration-150">
                               {event.title}
                             </Link>
                             <span
-                              className={`px-1.5 py-0.5 rounded-[5px] text-[10px] font-mono border ${
+                              className={`px-2 py-0.5 rounded-[6px] text-[12px] font-mono border tabular-nums ${
                                 event.isPaid && Number(event.registrationFee || 0) > 0
                                   ? 'bg-[#e09132]/12 text-[#ebb05d] border-[#e09132]/25'
                                   : 'bg-[#262421] text-[#8a847a] border-[#efe9de]/[0.06]'
@@ -1458,8 +1471,8 @@ const AdminDashboard = () => {
                                 : 'Free'}
                             </span>
                             {event.hasWhatsappGroup && (
-                              <span className="px-1.5 py-0.5 rounded-[5px] text-[10px] font-mono bg-[#4cc38a]/10 text-[#4cc38a] border border-[#4cc38a]/25">
-                                WA Group
+                              <span className="px-2 py-0.5 rounded-[6px] text-[12px] font-mono bg-[#4cc38a]/10 text-[#4cc38a] border border-[#4cc38a]/25">
+                                WA group
                               </span>
                             )}
                           </div>
@@ -1676,7 +1689,7 @@ const AdminDashboard = () => {
                         <td className="px-5 py-3.5 whitespace-nowrap text-[14px] text-[#aaa398]">
                           <div>{item.email}</div>
                           {item.emailVerified && (
-                            <span className="text-[11px] font-mono text-[#4cc38a]">OTP Verified</span>
+                            <span className="text-[12px] font-mono text-[#4cc38a]">OTP verified</span>
                           )}
                         </td>
                         <td className="px-5 py-3.5 whitespace-nowrap text-[13px]">
@@ -1845,7 +1858,7 @@ const AdminDashboard = () => {
                                     type="button"
                                     disabled={busy}
                                     onClick={() => handleSaveDepartment(dept._id)}
-                                    className="h-8 px-3 rounded-[6px] font-medium text-[#4cc38a] bg-[#4cc38a]/10 border border-[#4cc38a]/25 hover:bg-[#4cc38a]/20"
+                                    className="h-8 px-3 rounded-[6px] font-medium text-[#4cc38a] bg-[#4cc38a]/10 border border-[#4cc38a]/25 hover:bg-[#4cc38a]/20 transition-colors duration-150"
                                   >
                                     {busy ? 'Saving...' : 'Save'}
                                   </button>
@@ -1853,7 +1866,7 @@ const AdminDashboard = () => {
                                     type="button"
                                     disabled={busy}
                                     onClick={() => setEditingDeptId('')}
-                                    className="h-8 px-3 rounded-[6px] font-medium text-[#aaa398] bg-[#262421] border border-[#efe9de]/10 hover:text-[#efe9de]"
+                                    className="h-8 px-3 rounded-[6px] font-medium text-[#aaa398] bg-[#262421] border border-[#efe9de]/10 hover:text-[#efe9de] transition-colors duration-150"
                                   >
                                     Cancel
                                   </button>
@@ -1864,7 +1877,7 @@ const AdminDashboard = () => {
                                     type="button"
                                     disabled={busy}
                                     onClick={() => startEditDepartment(dept)}
-                                    className="h-8 px-3 rounded-[6px] font-medium text-[#efe9de] bg-[#262421] hover:bg-[#302d29] border border-[#efe9de]/10"
+                                    className="h-8 px-3 rounded-[6px] font-medium text-[#efe9de] bg-[#262421] hover:bg-[#302d29] border border-[#efe9de]/10 transition-colors duration-150"
                                   >
                                     Modify
                                   </button>
@@ -1872,7 +1885,7 @@ const AdminDashboard = () => {
                                     type="button"
                                     disabled={busy}
                                     onClick={() => handleToggleDepartmentActive(dept)}
-                                    className="h-8 px-3 rounded-[6px] font-medium text-[#ebb05d] bg-[#262421] hover:bg-[#302d29] border border-[#efe9de]/10"
+                                    className="h-8 px-3 rounded-[6px] font-medium text-[#ebb05d] bg-[#262421] hover:bg-[#302d29] border border-[#efe9de]/10 transition-colors duration-150"
                                   >
                                     {dept.isActive !== false ? 'Hide' : 'Activate'}
                                   </button>
@@ -1880,7 +1893,7 @@ const AdminDashboard = () => {
                                     type="button"
                                     disabled={busy}
                                     onClick={() => handleDeleteDepartment(dept)}
-                                    className="h-8 px-2.5 rounded-[6px] font-medium text-[#e5484d] bg-[#e5484d]/10 border border-[#e5484d]/25 hover:bg-[#e5484d]/20"
+                                    className="h-8 px-2.5 rounded-[6px] font-medium text-[#e5484d] bg-[#e5484d]/10 border border-[#e5484d]/25 hover:bg-[#e5484d]/20 transition-colors duration-150"
                                   >
                                     Delete
                                   </button>
@@ -1898,757 +1911,869 @@ const AdminDashboard = () => {
           </div>
         ) : (
           <div className="divide-y divide-[#efe9de]/[0.08]">
-            {/* YouPI-PG Zero-Trust Engine Configuration, Statement CSV & Bank Polling */}
-            <div className="p-5 bg-[#161513]/70 space-y-5">
-              <div className="flex flex-wrap items-start justify-between gap-3">
+            {/* YouPI-PG Header & Sub-Panel Filter */}
+            <div className="p-5 bg-[#161513]/70 space-y-4">
+              <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-3">
                 <div>
-                  <h3 className="text-[15px] font-medium text-[#efe9de]">
-                    YouPI-PG Zero-Trust Automation, Backup VPA Pool &amp; CSV Settlement
+                  <h3 className="text-[16px] font-medium text-[#efe9de]">
+                    YouPI-PG V2 reconciliation &amp; zero-trust ledger
                   </h3>
-                  <p className="text-[12px] text-[#8a847a] mt-0.5">
-                    Configure backup receiver UPI IDs, Gmail IMAP bank polling, or reconcile bank CSV statements across authorized receiving accounts.
-                  </p>
-                </div>
-                <div className="flex flex-wrap items-center gap-2">
-                  <span
-                    className={`px-2.5 py-1 rounded-[6px] text-[11px] font-mono border ${
-                      youpiAutomation.imapConfigured
-                        ? 'bg-[#4cc38a]/10 text-[#4cc38a] border-[#4cc38a]/25'
-                        : 'bg-[#262421] text-[#8a847a] border-[#efe9de]/[0.08]'
-                    }`}
-                  >
-                    {youpiAutomation.imapConfigured ? 'IMAP Auto-Poll Ready' : 'IMAP Not Configured'}
-                  </span>
-                  <span
-                    className={`px-2.5 py-1 rounded-[6px] text-[11px] font-mono border ${
-                      youpiAutomation.observerConfigured
-                        ? 'bg-[#4cc38a]/10 text-[#4cc38a] border-[#4cc38a]/25'
-                        : 'bg-[#262421] text-[#8a847a] border-[#efe9de]/[0.08]'
-                    }`}
-                  >
-                    {youpiAutomation.observerConfigured ? 'SMS/Webhook Bridge Armed' : 'Webhook Secret Unset'}
-                  </span>
-                  <span className="px-2.5 py-1 rounded-[6px] text-[11px] font-mono border bg-[#e09132]/10 text-[#ebb05d] border-[#e09132]/25">
-                    Zero-Trust Mode
-                  </span>
-                </div>
-              </div>
-
-              <div className="rounded-[10px] bg-[#e09132]/10 border border-[#e09132]/30 px-4 py-3 text-[12px] text-[#d9ceb8] leading-relaxed">
-                <strong className="text-[#ebb05d]">Zero-Trust Settlement Invariant:</strong>{' '}
-                Live Gmail IMAP &amp; Android SMS observations move matching sessions to{' '}
-                <code className="font-mono text-[#ebb05d]">OBSERVED_SUCCESS (NOT_RECONCILED)</code> only.
-                Student event passes, certificates &amp; WhatsApp group links unlock <strong>exclusively</strong>{' '}
-                after 2-day IST CSV Bank Statement Reconciliation or manual Admin Approve below.
-              </div>
-
-              <div className="grid grid-cols-1 lg:grid-cols-12 gap-4">
-                <form
-                  onSubmit={handleSaveYoupiAutomation}
-                  className="lg:col-span-8 rounded-[12px] bg-[#12110f] border border-[#efe9de]/[0.08] p-4 space-y-3.5"
-                >
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                    <div>
-                      <label className="block text-[11.5px] text-[#aaa398] mb-1">
-                        Backup UPI VPAs (comma-separated)
-                      </label>
-                      <input
-                        type="text"
-                        value={youpiAutoForm.backupVpas}
-                        onChange={(e) =>
-                          setYoupiAutoForm((p) => ({ ...p, backupVpas: e.target.value }))
-                        }
-                        placeholder="praveensumathi12-2@oksbi, alt@okicici"
-                        className="input-field h-9 text-[12px] font-mono"
+                  <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-[12px] font-mono text-[#8a847a]">
+                    <span className="inline-flex items-center gap-1.5">
+                      <span
+                        className={`h-1.5 w-1.5 rounded-full ${
+                          youpiAutomation.imapConfigured ? 'bg-[#4cc38a]' : 'bg-[#8a847a]'
+                        }`}
                       />
-                    </div>
-                    <div>
-                      <label className="block text-[11.5px] text-[#aaa398] mb-1">
-                        Bank Alert Gmail IMAP Email
-                      </label>
-                      <input
-                        type="email"
-                        value={youpiAutoForm.imapUser}
-                        onChange={(e) =>
-                          setYoupiAutoForm((p) => ({ ...p, imapUser: e.target.value }))
-                        }
-                        placeholder="bank-alerts-gmail@gmail.com"
-                        className="input-field h-9 text-[12px]"
-                      />
-                    </div>
-                  </div>
-
-                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-                    <div>
-                      <label className="block text-[11.5px] text-[#aaa398] mb-1">
-                        Gmail IMAP App Password
-                      </label>
-                      <input
-                        type="password"
-                        value={youpiAutoForm.imapPass}
-                        onChange={(e) =>
-                          setYoupiAutoForm((p) => ({ ...p, imapPass: e.target.value }))
-                        }
-                        placeholder={
-                          youpiAutomation.hasImapPass
-                            ? `Saved (${youpiAutomation.imapPassHint})`
-                            : '16-char Google App Password'
-                        }
-                        className="input-field h-9 text-[12px] font-mono"
-                      />
-                    </div>
-                    <div>
-                      <label className="block text-[11.5px] text-[#aaa398] mb-1">
-                        IMAP Host
-                      </label>
-                      <input
-                        type="text"
-                        value={youpiAutoForm.imapHost}
-                        onChange={(e) =>
-                          setYoupiAutoForm((p) => ({ ...p, imapHost: e.target.value }))
-                        }
-                        className="input-field h-9 text-[12px] font-mono"
-                      />
-                    </div>
-                    <div>
-                      <label className="block text-[11.5px] text-[#aaa398] mb-1">
-                        IMAP Port
-                      </label>
-                      <input
-                        type="number"
-                        value={youpiAutoForm.imapPort}
-                        onChange={(e) =>
-                          setYoupiAutoForm((p) => ({ ...p, imapPort: e.target.value }))
-                        }
-                        className="input-field h-9 text-[12px] font-mono"
-                      />
-                    </div>
-                  </div>
-
-                  <div className="flex flex-wrap items-center gap-4 text-[12px] text-[#d9ceb8]">
-                    <label className="inline-flex items-center gap-2 cursor-pointer">
-                      <input
-                        type="checkbox"
-                        checked={youpiAutoForm.autoVerifyEnabled}
-                        onChange={(e) =>
-                          setYoupiAutoForm((p) => ({ ...p, autoVerifyEnabled: e.target.checked }))
-                        }
-                        className="h-4 w-4 rounded-[4px] border-[#efe9de]/20 bg-[#262421] text-[#e09132]"
-                      />
-                      <span>Enable automated IMAP polling during active 300s/30s checkout windows</span>
-                    </label>
-                  </div>
-
-                  {generatedObserverSecret && (
-                    <div className="p-2.5 rounded-[8px] bg-[#4cc38a]/10 border border-[#4cc38a]/30 text-[11px] font-mono text-[#4cc38a] break-all">
-                      New X-Youpi-Observer-Secret (copy now): {generatedObserverSecret}
-                    </div>
-                  )}
-
-                  <div className="flex flex-wrap items-center justify-between gap-2 pt-1">
-                    <div className="flex flex-wrap gap-2">
-                      <button
-                        type="button"
-                        disabled={pollingInbox}
-                        onClick={handlePollBankInboxNow}
-                        className="btn-secondary h-8 px-3 text-[12px]"
-                      >
-                        {pollingInbox ? 'Polling IMAP...' : 'Poll Bank Inbox Now'}
-                      </button>
-                      <button
-                        type="button"
-                        disabled={savingYoupiAuto}
-                        onClick={() =>
-                          handleSaveYoupiAutomation(null, { generateObserverSecret: true })
-                        }
-                        className="btn-secondary h-8 px-3 text-[12px]"
-                      >
-                        Generate SMS Observer Secret
-                      </button>
-                    </div>
-                    <button
-                      type="submit"
-                      disabled={savingYoupiAuto}
-                      className="btn-primary h-8 px-4 text-[12px]"
-                    >
-                      {savingYoupiAuto ? 'Saving...' : 'Save Automation Settings'}
-                    </button>
-                  </div>
-
-                  {youpiAutomation.lastPollAt && (
-                    <p className="text-[11px] font-mono text-[#8a847a]">
-                      Last IMAP sweep: {new Date(youpiAutomation.lastPollAt).toLocaleString()} ·{' '}
-                      {youpiAutomation.lastPollResult?.ok
-                        ? `Scanned ${youpiAutomation.lastPollResult.scanned || 0}, Observed ${youpiAutomation.lastPollResult.matched || 0}`
-                        : youpiAutomation.lastPollResult?.error || 'Idle'}
-                    </p>
-                  )}
-                </form>
-
-                {/* Bank CSV Bulk Reconciliation */}
-                <div className="lg:col-span-4 rounded-[12px] bg-[#12110f] border border-[#efe9de]/[0.08] p-4 flex flex-col justify-between space-y-3">
-                  <div className="space-y-2">
-                    <span className="text-[13px] font-medium text-[#efe9de]">
-                      Bank CSV Statement Reconciliation
+                      <span className={youpiAutomation.imapConfigured ? 'text-[#4cc38a]' : ''}>
+                        {youpiAutomation.imapConfigured ? 'IMAP ready' : 'IMAP unconfigured'}
+                      </span>
                     </span>
-                    <p className="text-[11.5px] text-[#8a847a] leading-relaxed">
-                      Import your HDFC / SBI / ICICI / Axis CSV statement to settle{' '}
-                      <code className="font-mono text-[#ebb05d]">OBSERVED_SUCCESS</code> &amp;{' '}
-                      <code className="font-mono text-[#ebb05d]">MANUAL_REVIEW</code> sessions within the 2-day IST posting window.
-                    </p>
-
-                    {authorizedVpas.length > 0 && (
-                      <div>
-                        <label className="block text-[11px] text-[#aaa398] mb-1">
-                          Statement Receiving Account (VPA)
-                        </label>
-                        <select
-                          aria-label="Statement Receiving VPA"
-                          value={statementVpa || authorizedVpas[0]}
-                          onChange={(e) => setStatementVpa(e.target.value)}
-                          className="input-field h-8 text-[11.5px] font-mono py-0"
-                        >
-                          {authorizedVpas.map((vpa) => (
-                            <option key={vpa} value={vpa}>
-                              {vpa}
-                            </option>
-                          ))}
-                        </select>
-                      </div>
-                    )}
-
-                    <div className="text-[10px] font-mono text-[#8a847a] space-y-0.5 break-all pt-1">
-                      <div>Android App Endpoint: {(backendUrl || window.location.origin)}/api/payments/youpi/pollers/android/events</div>
-                      <div>Secret SMS Bridge: {(backendUrl || window.location.origin)}/api/payments/youpi/observer/sms</div>
-                    </div>
-                  </div>
-
-                  {csvSummary && (
-                    <div className="p-2.5 rounded-[8px] bg-[#1c1a18] border border-[#efe9de]/[0.08] text-[11px] font-mono space-y-0.5 text-[#d9ceb8]">
-                      <div>Credit rows parsed: {csvSummary.creditRows || 0}</div>
-                      <div className="text-[#4cc38a]">Reconciled (RECONCILED): {csvSummary.reconciled ?? csvSummary.matchedCount ?? 0}</div>
-                      <div className="text-[#ebb05d]">Conflicts / Held: {csvSummary.conflicts ?? csvSummary.ambiguousCount ?? 0}</div>
-                      <div className="text-[#8a847a]">
-                        Unmatched / Dup: {(csvSummary.unmatched ?? csvSummary.unattributedCount ?? 0) + (csvSummary.duplicateCount || 0)}
-                      </div>
-                    </div>
-                  )}
-
-                  <label className="btn-primary h-9 px-3 text-[12px] cursor-pointer text-center">
-                    <span>{reconcilingCsv ? 'Reconciling CSV...' : 'Import Bank Statement (.csv)'}</span>
-                    <input
-                      type="file"
-                      accept=".csv,text/csv"
-                      disabled={reconcilingCsv}
-                      onChange={handleUploadStatementCsv}
-                      className="hidden"
-                    />
-                  </label>
-                </div>
-              </div>
-
-              {/* Android SMS Gateway Pairing, Live FIFO Queue Monitor & NPCI Stand QR */}
-              <div className="grid grid-cols-1 lg:grid-cols-12 gap-4">
-                {/* Android SMS Gateway Pairing & Paired Devices */}
-                <div className="lg:col-span-5 rounded-[12px] bg-[#12110f] border border-[#efe9de]/[0.08] p-4 space-y-3">
-                  <div className="flex flex-wrap items-center justify-between gap-2">
-                    <div>
-                      <h4 className="text-[13px] font-medium text-[#efe9de]">
-                        Android SMS Gateway Pairing (HMAC)
-                      </h4>
-                      <p className="text-[11px] text-[#8a847a]">
-                        Pair an Android companion phone via QR to forward bank SMS &amp; GPay/PhonePe/Paytm alerts securely.
-                      </p>
-                    </div>
-                    <span className="px-2 py-0.5 rounded-[5px] text-[10.5px] font-mono bg-[#262421] text-[#ebb05d] border border-[#efe9de]/[0.08]">
-                      {youpiDevices.filter((d) => d.isActive).length} active device(s)
+                    <span>·</span>
+                    <span className="inline-flex items-center gap-1.5">
+                      <span
+                        className={`h-1.5 w-1.5 rounded-full ${
+                          youpiAutomation.observerConfigured ? 'bg-[#4cc38a]' : 'bg-[#8a847a]'
+                        }`}
+                      />
+                      <span className={youpiAutomation.observerConfigured ? 'text-[#4cc38a]' : ''}>
+                        {youpiAutomation.observerConfigured ? 'SMS observer armed' : 'Webhook secret unset'}
+                      </span>
                     </span>
+                    <span>·</span>
+                    <span className="text-[#ebb05d]">Zero-trust mode</span>
                   </div>
+                </div>
 
-                  <div className="flex flex-wrap items-center gap-2">
-                    {authorizedVpas.length > 0 && (
-                      <select
-                        aria-label="Receiving VPA for Android SMS Gateway"
-                        value={selectedDeviceVpa || authorizedVpas[0]}
-                        onChange={(e) => setSelectedDeviceVpa(e.target.value)}
-                        className="input-field h-8 text-[11.5px] font-mono py-0 flex-1 min-w-[160px]"
-                      >
-                        {authorizedVpas.map((vpa) => (
-                          <option key={vpa} value={vpa}>
-                            {vpa}
-                          </option>
-                        ))}
-                      </select>
-                    )}
+                {/* Segmented Focus Filter */}
+                <div className="inline-flex max-w-full overflow-x-auto p-1 rounded-[10px] bg-[#12110f] border border-[#efe9de]/[0.08] gap-1 self-start lg:self-auto">
+                  {[
+                    { id: 'all', label: 'All panels' },
+                    { id: 'reconciliation', label: 'CSV & automation' },
+                    { id: 'gateways', label: 'Gateways & stand QR' },
+                    { id: 'security', label: `Security (${suspendedUsers.length})` }
+                  ].map((sec) => (
                     <button
+                      key={sec.id}
                       type="button"
-                      disabled={generatingPairQr}
-                      onClick={() => handleGeneratePairQr()}
-                      className="btn-secondary h-8 px-3 text-[11.5px] shrink-0"
+                      onClick={() => setYoupiSection(sec.id)}
+                      className={`h-8 px-3 rounded-[6px] text-[12px] font-medium transition-colors duration-150 whitespace-nowrap shrink-0 tabular-nums ${
+                        youpiSection === sec.id
+                          ? 'bg-[#262421] text-[#efe9de] border border-[#efe9de]/[0.08]'
+                          : 'text-[#8a847a] hover:text-[#efe9de] border border-transparent'
+                      }`}
                     >
-                      {generatingPairQr ? 'Generating...' : 'Generate Pairing QR'}
+                      {sec.label}
                     </button>
+                  ))}
+                </div>
+              </div>
+
+              {(youpiSection === 'all' || youpiSection === 'reconciliation') && (
+                <>
+                  <div className="rounded-[10px] bg-[#e09132]/10 border border-[#e09132]/25 px-4 py-3 text-[12px] text-[#aaa398] leading-relaxed">
+                    <span className="text-[#ebb05d] font-medium">Zero-Trust Settlement Invariant:</span>{' '}
+                    Live Gmail IMAP &amp; Android SMS observations move matching sessions to{' '}
+                    <code className="font-mono text-[#ebb05d]">OBSERVED_SUCCESS</code> only. Event passes, competitions, and WhatsApp group links unlock after 2-day IST CSV Bank Statement Reconciliation or manual Admin approval below.
                   </div>
 
-                  {pairQrData?.qrSvg && (
-                    <div className="rounded-[10px] bg-[#161513] border border-[#efe9de]/[0.08] p-3 flex flex-col sm:flex-row items-center gap-3">
-                      <div className="bg-white p-2 rounded-[8px] shrink-0">
-                        <img
-                          src={`data:image/svg+xml;charset=utf-8,${encodeURIComponent(pairQrData.qrSvg)}`}
-                          alt="Android SMS Gateway Pairing QR"
-                          className="w-28 h-28 block"
-                        />
-                      </div>
-                      <div className="min-w-0 space-y-1 text-[11px]">
-                        <div className="font-medium text-[#efe9de]">Scan inside YouPI Android Companion</div>
-                        <div className="font-mono text-[#ebb05d] break-all">
-                          VPA: {pairQrData.receivingAccountId}
+                  <div className="grid grid-cols-1 lg:grid-cols-12 gap-4">
+                    <form
+                      onSubmit={handleSaveYoupiAutomation}
+                      className="lg:col-span-7 rounded-[10px] bg-[#12110f] border border-[#efe9de]/[0.08] p-4 space-y-3.5"
+                    >
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                        <div>
+                          <label className="block text-[12px] text-[#aaa398] mb-1">
+                            Backup UPI VPAs (comma-separated)
+                          </label>
+                          <input
+                            type="text"
+                            value={youpiAutoForm.backupVpas}
+                            onChange={(e) =>
+                              setYoupiAutoForm((p) => ({ ...p, backupVpas: e.target.value }))
+                            }
+                            placeholder="praveensumathi12-2@oksbi, alt@okicici"
+                            className="input-field h-9 text-[12px] font-mono"
+                          />
                         </div>
-                        <div className="text-[#8a847a]">
-                          Signed with SHA-256 HMAC per device · 60s replay guard
+                        <div>
+                          <label className="block text-[12px] text-[#aaa398] mb-1">
+                            Bank alert Gmail IMAP email
+                          </label>
+                          <input
+                            type="email"
+                            value={youpiAutoForm.imapUser}
+                            onChange={(e) =>
+                              setYoupiAutoForm((p) => ({ ...p, imapUser: e.target.value }))
+                            }
+                            placeholder="bank-alerts-gmail@gmail.com"
+                            className="input-field h-9 text-[12px]"
+                          />
                         </div>
                       </div>
-                    </div>
-                  )}
 
-                  {youpiDevices.length > 0 ? (
-                    <div className="space-y-2 max-h-48 overflow-y-auto pr-1">
-                      {youpiDevices.map((dev) => (
-                        <div
-                          key={dev.deviceId}
-                          className="rounded-[8px] bg-[#161513] border border-[#efe9de]/[0.06] px-3 py-2 flex items-center justify-between gap-2 text-[11px]"
+                      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                        <div>
+                          <label className="block text-[12px] text-[#aaa398] mb-1">
+                            Gmail IMAP app password
+                          </label>
+                          <input
+                            type="password"
+                            value={youpiAutoForm.imapPass}
+                            onChange={(e) =>
+                              setYoupiAutoForm((p) => ({ ...p, imapPass: e.target.value }))
+                            }
+                            placeholder={
+                              youpiAutomation.hasImapPass
+                                ? `Saved (${youpiAutomation.imapPassHint})`
+                                : '16-char Google App Password'
+                            }
+                            className="input-field h-9 text-[12px] font-mono"
+                          />
+                        </div>
+                        <div>
+                          <label className="block text-[12px] text-[#aaa398] mb-1">
+                            IMAP host
+                          </label>
+                          <input
+                            type="text"
+                            value={youpiAutoForm.imapHost}
+                            onChange={(e) =>
+                              setYoupiAutoForm((p) => ({ ...p, imapHost: e.target.value }))
+                            }
+                            className="input-field h-9 text-[12px] font-mono"
+                          />
+                        </div>
+                        <div>
+                          <label className="block text-[12px] text-[#aaa398] mb-1">
+                            IMAP port
+                          </label>
+                          <input
+                            type="number"
+                            value={youpiAutoForm.imapPort}
+                            onChange={(e) =>
+                              setYoupiAutoForm((p) => ({ ...p, imapPort: e.target.value }))
+                            }
+                            className="input-field h-9 text-[12px] font-mono tabular-nums"
+                          />
+                        </div>
+                      </div>
+
+                      <div className="flex flex-wrap items-center gap-4 text-[12px] text-[#aaa398]">
+                        <label className="inline-flex items-center gap-2 cursor-pointer">
+                          <input
+                            type="checkbox"
+                            checked={youpiAutoForm.autoVerifyEnabled}
+                            onChange={(e) =>
+                              setYoupiAutoForm((p) => ({ ...p, autoVerifyEnabled: e.target.checked }))
+                            }
+                            className="h-4 w-4 rounded-[4px] border-[#efe9de]/20 bg-[#262421] text-[#e09132]"
+                          />
+                          <span>Enable automated IMAP polling during 300s / 30s checkout windows</span>
+                        </label>
+                      </div>
+
+                      {generatedObserverSecret && (
+                        <div className="p-2.5 rounded-[8px] bg-[#4cc38a]/10 border border-[#4cc38a]/30 text-[12px] font-mono text-[#4cc38a] flex items-center justify-between gap-2">
+                          <span className="truncate">
+                            X-Youpi-Observer-Secret: {generatedObserverSecret}
+                          </span>
+                          <button
+                            type="button"
+                            onClick={() => handleCopyInline('obsSecret', generatedObserverSecret)}
+                            className="px-2 py-0.5 rounded-[6px] bg-[#161513] border border-[#4cc38a]/30 text-[#4cc38a] shrink-0 transition-colors duration-150"
+                          >
+                            {copiedKey === 'obsSecret' ? 'Copied' : 'Copy'}
+                          </button>
+                        </div>
+                      )}
+
+                      <div className="flex flex-wrap items-center justify-between gap-2 pt-1">
+                        <div className="flex flex-wrap gap-2">
+                          <button
+                            type="button"
+                            disabled={pollingInbox}
+                            onClick={handlePollBankInboxNow}
+                            className="btn-secondary h-9 px-3 text-[12px]"
+                          >
+                            {pollingInbox ? 'Polling IMAP...' : 'Poll bank inbox'}
+                          </button>
+                          <button
+                            type="button"
+                            disabled={savingYoupiAuto}
+                            onClick={() =>
+                              handleSaveYoupiAutomation(null, { generateObserverSecret: true })
+                            }
+                            className="btn-secondary h-9 px-3 text-[12px]"
+                          >
+                            Generate observer secret
+                          </button>
+                        </div>
+                        <button
+                          type="submit"
+                          disabled={savingYoupiAuto}
+                          className="btn-primary h-9 px-4 text-[12px]"
                         >
-                          <div className="min-w-0">
-                            <div className="flex items-center gap-2">
-                              <span className="font-medium text-[#efe9de] truncate">
-                                {dev.deviceName || dev.deviceModel || 'Android Observer'}
-                              </span>
-                              <span
-                                className={`px-1.5 py-0.5 rounded-[4px] font-mono text-[10px] ${statusBadgeClass(
-                                  dev.connectionStatus || (dev.isActive ? 'standby' : 'revoked')
-                                )}`}
-                              >
-                                {dev.connectionStatus || (dev.isActive ? 'STANDBY' : 'REVOKED')}
-                              </span>
-                            </div>
-                            <div className="font-mono text-[10px] text-[#8a847a] truncate mt-0.5">
-                              {dev.receivingAccountId || 'All VPAs'} · ID: {String(dev.deviceId).slice(0, 8)}…
-                            </div>
+                          {savingYoupiAuto ? 'Saving...' : 'Save automation'}
+                        </button>
+                      </div>
+
+                      {youpiAutomation.lastPollAt && (
+                        <p className="text-[12px] font-mono text-[#8a847a] tabular-nums">
+                          Last IMAP sweep: {new Date(youpiAutomation.lastPollAt).toLocaleString()} ·{' '}
+                          {youpiAutomation.lastPollResult?.ok
+                            ? `Scanned ${youpiAutomation.lastPollResult.scanned || 0}, observed ${youpiAutomation.lastPollResult.matched || 0}`
+                            : youpiAutomation.lastPollResult?.error || 'Idle'}
+                        </p>
+                      )}
+                    </form>
+
+                    {/* Bank CSV Bulk Reconciliation */}
+                    <div className="lg:col-span-5 rounded-[10px] bg-[#12110f] border border-[#efe9de]/[0.08] p-4 flex flex-col justify-between space-y-3.5">
+                      <div className="space-y-3">
+                        <div>
+                          <span className="text-[14px] font-medium text-[#efe9de]">
+                            Bank CSV statement reconciliation
+                          </span>
+                          <p className="text-[12px] text-[#8a847a] mt-1 leading-relaxed">
+                            Import your HDFC, SBI, ICICI, or Axis CSV statement to settle{' '}
+                            <code className="font-mono text-[#ebb05d]">OBSERVED_SUCCESS</code> and{' '}
+                            <code className="font-mono text-[#ebb05d]">MANUAL_REVIEW</code> sessions within the 2-day IST window.
+                          </p>
+                        </div>
+
+                        {authorizedVpas.length > 0 && (
+                          <div>
+                            <label className="block text-[12px] text-[#aaa398] mb-1">
+                              Statement receiving account (VPA)
+                            </label>
+                            <select
+                              aria-label="Statement Receiving VPA"
+                              value={statementVpa || authorizedVpas[0]}
+                              onChange={(e) => setStatementVpa(e.target.value)}
+                              className="input-field h-9 text-[12px] font-mono py-0"
+                            >
+                              {authorizedVpas.map((vpa) => (
+                                <option key={vpa} value={vpa}>
+                                  {vpa}
+                                </option>
+                              ))}
+                            </select>
                           </div>
-                          <div className="flex items-center gap-1.5 shrink-0">
-                            {dev.isActive && (
-                              <button
-                                type="button"
-                                onClick={() => handleRevokeAndroidDevice(dev.deviceId)}
-                                className="px-2 py-1 rounded-[5px] text-[10.5px] font-medium text-[#ebb05d] bg-[#e09132]/10 border border-[#e09132]/25 hover:bg-[#e09132]/20"
-                              >
-                                Revoke
-                              </button>
-                            )}
+                        )}
+
+                        <div className="space-y-1.5 pt-1">
+                          <div className="flex items-center justify-between gap-2 rounded-[8px] bg-[#161513] border border-[#efe9de]/[0.06] px-2.5 py-1.5 text-[12px]">
+                            <span className="text-[#8a847a] shrink-0">Android poll</span>
+                            <span className="font-mono text-[#aaa398] truncate flex-1 min-w-0">
+                              {(backendUrl || window.location.origin)}/api/payments/youpi/pollers/android/events
+                            </span>
                             <button
                               type="button"
-                              onClick={() => handleDeleteAndroidDevice(dev.deviceId)}
-                              className="px-2 py-1 rounded-[5px] text-[10.5px] font-medium text-[#e5484d] bg-[#e5484d]/10 border border-[#e5484d]/25 hover:bg-[#e5484d]/20"
+                              onClick={() =>
+                                handleCopyInline(
+                                  'androidEndpoint',
+                                  `${backendUrl || window.location.origin}/api/payments/youpi/pollers/android/events`
+                                )
+                              }
+                              className="text-[#ebb05d] hover:underline font-mono shrink-0"
                             >
-                              Remove
+                              {copiedKey === 'androidEndpoint' ? 'Copied' : 'Copy'}
+                            </button>
+                          </div>
+                          <div className="flex items-center justify-between gap-2 rounded-[8px] bg-[#161513] border border-[#efe9de]/[0.06] px-2.5 py-1.5 text-[12px]">
+                            <span className="text-[#8a847a] shrink-0">SMS bridge</span>
+                            <span className="font-mono text-[#aaa398] truncate flex-1 min-w-0">
+                              {(backendUrl || window.location.origin)}/api/payments/youpi/observer/sms
+                            </span>
+                            <button
+                              type="button"
+                              onClick={() =>
+                                handleCopyInline(
+                                  'smsEndpoint',
+                                  `${backendUrl || window.location.origin}/api/payments/youpi/observer/sms`
+                                )
+                              }
+                              className="text-[#ebb05d] hover:underline font-mono shrink-0"
+                            >
+                              {copiedKey === 'smsEndpoint' ? 'Copied' : 'Copy'}
                             </button>
                           </div>
                         </div>
-                      ))}
-                    </div>
-                  ) : (
-                    <p className="text-[11px] text-[#8a847a]">
-                      No Android SMS Gateway devices paired yet. Generate a QR above to link a phone.
-                    </p>
-                  )}
-                </div>
-
-                {/* Live FIFO Single-Slot Queue Monitor */}
-                <div className="lg:col-span-4 rounded-[12px] bg-[#12110f] border border-[#efe9de]/[0.08] p-4 space-y-3">
-                  <div className="flex items-center justify-between gap-2">
-                    <div>
-                      <h4 className="text-[13px] font-medium text-[#efe9de]">
-                        Live FIFO Payment Slot Monitor
-                      </h4>
-                      <p className="text-[11px] text-[#8a847a]">
-                        1 active checkout per receiving VPA at any time; others queue in strict FIFO order.
-                      </p>
-                    </div>
-                    <button
-                      type="button"
-                      onClick={() => handleRefreshQueue()}
-                      className="btn-secondary h-7 px-2.5 text-[11px] shrink-0"
-                    >
-                      Refresh
-                    </button>
-                  </div>
-
-                  {authorizedVpas.length > 0 && (
-                    <select
-                      aria-label="Inspect Queue for VPA"
-                      value={youpiQueue.receivingAccountId || authorizedVpas[0]}
-                      onChange={(e) => handleRefreshQueue(e.target.value)}
-                      className="input-field h-8 text-[11.5px] font-mono py-0"
-                    >
-                      {authorizedVpas.map((vpa) => (
-                        <option key={vpa} value={vpa}>
-                          Slot Pool: {vpa}
-                        </option>
-                      ))}
-                    </select>
-                  )}
-
-                  {youpiQueue.currentSlot ? (
-                    <div className="rounded-[9px] bg-[#161513] border border-[#4cc38a]/25 p-3 space-y-1 text-[11.5px]">
-                      <div className="flex items-center justify-between gap-2">
-                        <span className="font-mono text-[#4cc38a] font-semibold">
-                          ACTIVE SLOT HOLDER
-                        </span>
-                        <span className={`px-1.5 py-0.5 rounded-[4px] font-mono text-[10px] ${statusBadgeClass(youpiQueue.currentSlot.status)}`}>
-                          {youpiQueue.currentSlot.status}
-                        </span>
                       </div>
-                      <div className="font-mono text-[#efe9de]">
-                        {youpiQueue.currentSlot.orderId} · ₹{((Number(youpiQueue.currentSlot.amountPaise) || 0) / 100).toFixed(2)}
-                      </div>
-                      <div className="text-[#8a847a] truncate">
-                        {youpiQueue.currentSlot.event?.title || 'Event checkout'} · Method: {youpiQueue.currentSlot.method || 'UPI'}
-                      </div>
-                    </div>
-                  ) : (
-                    <div className="rounded-[9px] bg-[#161513] border border-[#efe9de]/[0.06] p-3 text-[11.5px] text-[#8a847a]">
-                      Slot idle — next checkout acquires immediately without queuing.
-                    </div>
-                  )}
 
-                  <div className="space-y-1.5">
-                    <div className="text-[11px] font-mono text-[#aaa398]">
-                      Waiting Queue ({youpiQueue.queue?.length || 0})
-                    </div>
-                    {(youpiQueue.queue || []).length === 0 ? (
-                      <p className="text-[11px] text-[#8a847a]">No sessions waiting in queue.</p>
-                    ) : (
-                      <div className="space-y-1.5 max-h-32 overflow-y-auto pr-1">
-                        {youpiQueue.queue.map((q) => (
-                          <div
-                            key={q.paymentId}
-                            className="rounded-[7px] bg-[#161513] border border-[#efe9de]/[0.06] px-2.5 py-1.5 flex items-center justify-between text-[11px] font-mono"
-                          >
-                            <span className="text-[#ebb05d]">#{q.queuePosition}</span>
-                            <span className="text-[#efe9de] truncate mx-2">{q.orderId}</span>
-                            <span className="text-[#aaa398]">₹{((Number(q.amountPaise) || 0) / 100).toFixed(2)}</span>
+                      {csvSummary && (
+                        <div className="p-3 rounded-[8px] bg-[#161513] border border-[#efe9de]/[0.08] text-[12px] font-mono space-y-1 text-[#aaa398] tabular-nums">
+                          <div>Credit rows parsed: {csvSummary.creditRows || 0}</div>
+                          <div className="text-[#4cc38a]">
+                            Reconciled: {csvSummary.reconciled ?? csvSummary.matchedCount ?? 0}
                           </div>
-                        ))}
-                      </div>
-                    )}
-                  </div>
-                </div>
+                          <div className="text-[#ebb05d]">
+                            Conflicts / held: {csvSummary.conflicts ?? csvSummary.ambiguousCount ?? 0}
+                          </div>
+                          <div className="text-[#8a847a]">
+                            Unmatched / dup:{' '}
+                            {(csvSummary.unmatched ?? csvSummary.unattributedCount ?? 0) +
+                              (csvSummary.duplicateCount || 0)}
+                          </div>
+                        </div>
+                      )}
 
-                {/* NPCI Stand QR Generator (mode=02 Static / mode=04 Fixed Amount) */}
-                <form
-                  onSubmit={handleGenerateStandQr}
-                  className="lg:col-span-3 rounded-[12px] bg-[#12110f] border border-[#efe9de]/[0.08] p-4 space-y-2.5"
-                >
-                  <div>
-                    <h4 className="text-[13px] font-medium text-[#efe9de]">
-                      NPCI Desk Stand QR
-                    </h4>
-                    <p className="text-[11px] text-[#8a847a]">
-                      Printable booth QR (`mode=02` open or `mode=04` fixed INR).
-                    </p>
-                  </div>
-
-                  {authorizedVpas.length > 0 && (
-                    <select
-                      aria-label="Stand QR Payee VPA"
-                      value={standQrForm.preferredVpa || authorizedVpas[0]}
-                      onChange={(e) =>
-                        setStandQrForm((p) => ({ ...p, preferredVpa: e.target.value }))
-                      }
-                      className="input-field h-8 text-[11.5px] font-mono py-0"
-                    >
-                      {authorizedVpas.map((vpa) => (
-                        <option key={vpa} value={vpa}>
-                          {vpa}
-                        </option>
-                      ))}
-                    </select>
-                  )}
-
-                  <div className="grid grid-cols-2 gap-2">
-                    <select
-                      aria-label="NPCI Stand QR Mode"
-                      value={standQrForm.mode}
-                      onChange={(e) =>
-                        setStandQrForm((p) => ({ ...p, mode: e.target.value }))
-                      }
-                      className="input-field h-8 text-[11.5px] font-mono py-0"
-                    >
-                      <option value="02">Static (02)</option>
-                      <option value="04">Fixed Amt (04)</option>
-                    </select>
-                    <input
-                      type="number"
-                      min="1"
-                      step="1"
-                      disabled={standQrForm.mode !== '04'}
-                      placeholder={standQrForm.mode === '04' ? 'INR Amount' : 'Open amount'}
-                      value={standQrForm.amount}
-                      onChange={(e) =>
-                        setStandQrForm((p) => ({ ...p, amount: e.target.value }))
-                      }
-                      className="input-field h-8 text-[11.5px] font-mono disabled:opacity-45"
-                    />
-                  </div>
-
-                  <input
-                    type="text"
-                    placeholder="Desk note (e.g. Avenor Desk)"
-                    value={standQrForm.tn}
-                    onChange={(e) => setStandQrForm((p) => ({ ...p, tn: e.target.value }))}
-                    className="input-field h-8 text-[11.5px]"
-                  />
-
-                  <button
-                    type="submit"
-                    disabled={generatingStandQr}
-                    className="btn-secondary h-8 w-full text-[11.5px]"
-                  >
-                    {generatingStandQr ? 'Generating QR...' : 'Generate NPCI Stand QR'}
-                  </button>
-
-                  {standQrResult?.qrSvg && (
-                    <div className="pt-1 flex flex-col items-center gap-1.5">
-                      <div className="bg-white p-2 rounded-[8px]">
-                        <img
-                          src={`data:image/svg+xml;charset=utf-8,${encodeURIComponent(standQrResult.qrSvg)}`}
-                          alt="NPCI Stand QR"
-                          className="w-28 h-28 block"
+                      <label className="btn-primary h-9 px-4 text-[12px] cursor-pointer text-center">
+                        <span>{reconcilingCsv ? 'Reconciling CSV...' : 'Import Bank Statement (.csv)'}</span>
+                        <input
+                          type="file"
+                          accept=".csv,text/csv"
+                          disabled={reconcilingCsv}
+                          onChange={handleUploadStatementCsv}
+                          className="hidden"
                         />
-                      </div>
-                      <span className="text-[10px] font-mono text-[#8a847a] text-center break-all line-clamp-2">
-                        {standQrResult.upiUri}
-                      </span>
+                      </label>
                     </div>
-                  )}
-                </form>
-              </div>
-            </div>
+                  </div>
+                </>
+              )}
 
-            <div className="overflow-x-auto">
-              <table className="min-w-full divide-y divide-[#efe9de]/[0.06]">
-                <thead className="bg-[#12110f]/50">
-                  <tr>
-                    <th className="px-5 py-3 text-left text-[12px] font-medium text-[#8a847a]">Order, Method &amp; UTR</th>
-                    <th className="px-5 py-3 text-left text-[12px] font-medium text-[#8a847a]">Event</th>
-                    <th className="px-5 py-3 text-left text-[12px] font-medium text-[#8a847a]">Student</th>
-                    <th className="px-5 py-3 text-left text-[12px] font-medium text-[#8a847a]">Amount</th>
-                    <th className="px-5 py-3 text-left text-[12px] font-medium text-[#8a847a]">Status &amp; Settlement</th>
-                    <th className="px-5 py-3 text-left text-[12px] font-medium text-[#8a847a]">Actions</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-[#efe9de]/[0.06]">
-                  {youpiSessions.length === 0 ? (
-                    <tr>
-                      <td colSpan="6" className="px-5 py-10 text-center text-[14px] text-[#8a847a]">
-                        No YouPI-PG payment sessions recorded yet.
-                      </td>
-                    </tr>
-                  ) : (
-                    youpiSessions.map((ps) => {
-                      const canReconcile = [
-                        'MANUAL_REVIEW',
-                        'ACTIVE',
-                        'PROCESSING',
-                        'QUEUED',
-                        'OBSERVED_SUCCESS'
-                      ].includes(ps.status);
-                      const busy = reconcilingId === ps.paymentId;
-                      return (
-                        <tr key={ps.paymentId} className="hover:bg-[#262421]/40 transition-colors duration-150">
-                          <td className="px-5 py-3.5 whitespace-nowrap text-[12px] font-mono">
-                            <div className="text-[#efe9de] flex items-center gap-1.5">
-                              <span>{ps.orderId}</span>
-                              <span className="px-1.5 py-0.5 rounded-[4px] bg-[#262421] text-[10px] text-[#aaa398]">
-                                {ps.method || 'UPI'}
-                              </span>
+              {(youpiSection === 'all' || youpiSection === 'gateways') && (
+                <div className="space-y-4">
+                  {/* Android SMS Gateway Pairing & Live FIFO Queue Monitor */}
+                  <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+                    {/* Android SMS Gateway Pairing & Paired Devices */}
+                    <div className="rounded-[10px] bg-[#12110f] border border-[#efe9de]/[0.08] p-4 space-y-3.5">
+                      <div className="flex flex-wrap items-start justify-between gap-2">
+                        <div>
+                          <h4 className="text-[14px] font-medium text-[#efe9de]">
+                            Android SMS Gateway Pairing (HMAC)
+                          </h4>
+                          <p className="text-[12px] text-[#8a847a] mt-0.5">
+                            Pair an Android phone via QR to forward bank SMS and UPI app credit notifications
+                          </p>
+                        </div>
+                        <span className="px-2 py-0.5 rounded-[6px] text-[12px] font-mono bg-[#262421] text-[#ebb05d] border border-[#efe9de]/[0.08] tabular-nums">
+                          {youpiDevices.filter((d) => d.isActive).length} active
+                        </span>
+                      </div>
+
+                      <div className="flex flex-wrap items-center gap-2">
+                        {authorizedVpas.length > 0 && (
+                          <select
+                            aria-label="Receiving VPA for Android SMS Gateway"
+                            value={selectedDeviceVpa || authorizedVpas[0]}
+                            onChange={(e) => setSelectedDeviceVpa(e.target.value)}
+                            className="input-field h-9 text-[12px] font-mono py-0 flex-1 min-w-[180px]"
+                          >
+                            {authorizedVpas.map((vpa) => (
+                              <option key={vpa} value={vpa}>
+                                {vpa}
+                              </option>
+                            ))}
+                          </select>
+                        )}
+                        <button
+                          type="button"
+                          disabled={generatingPairQr}
+                          onClick={() => handleGeneratePairQr()}
+                          className="btn-secondary h-9 px-3 text-[12px] shrink-0"
+                        >
+                          {generatingPairQr ? 'Generating...' : 'Generate Pairing QR'}
+                        </button>
+                      </div>
+
+                      {pairQrData?.qrSvg && (
+                        <div className="rounded-[10px] bg-[#161513] border border-[#efe9de]/[0.08] p-3 flex flex-col sm:flex-row items-center gap-3">
+                          <div className="bg-white p-2 rounded-[8px] shrink-0">
+                            <img
+                              src={`data:image/svg+xml;charset=utf-8,${encodeURIComponent(pairQrData.qrSvg)}`}
+                              alt="Android SMS Gateway Pairing QR"
+                              className="w-28 h-28 block"
+                            />
+                          </div>
+                          <div className="min-w-0 space-y-1 text-[12px]">
+                            <div className="font-medium text-[#efe9de]">Scan inside YouPI Android Companion</div>
+                            <div className="font-mono text-[#ebb05d] truncate">
+                              VPA: {pairQrData.receivingAccountId}
                             </div>
-                            <div className="text-[#8a847a] mt-0.5">
-                              {ps.utr ? `UTR: ${ps.utr}` : 'Awaiting UTR'}
-                              {ps.payeeVpa ? ` · ${ps.payeeVpa}` : ''}
-                              {ps.queuePosition > 0 ? ` · Q#${ps.queuePosition}` : ''}
+                            <div className="text-[#8a847a]">
+                              Signed with SHA-256 HMAC per device · 60s replay guard
                             </div>
-                          </td>
-                          <td className="px-5 py-3.5 whitespace-nowrap text-[13px] text-[#efe9de]">
-                            {ps.eventTitle}
-                          </td>
-                          <td className="px-5 py-3.5 whitespace-nowrap text-[13px] text-[#aaa398]">
-                            <div>{ps.student?.name || ps.customerName || '—'}</div>
-                            <div className="text-[11px] font-mono text-[#8a847a]">
-                              {ps.customerRegNo || ps.student?.email || ''}
-                            </div>
-                          </td>
-                          <td className="px-5 py-3.5 whitespace-nowrap text-[13px] font-mono text-[#ebb05d] tabular-nums">
-                            {ps.currency} {ps.amountDisplay}
-                          </td>
-                          <td className="px-5 py-3.5 whitespace-nowrap">
-                            <div className="flex flex-col items-start gap-1">
-                              <span
-                                className={`inline-flex px-2 py-0.5 rounded-[6px] text-[11px] font-mono ${statusBadgeClass(
-                                  ps.status
-                                )}`}
-                              >
-                                {ps.status}
-                              </span>
-                              <span className="text-[10.5px] font-mono text-[#8a847a]">
-                                {ps.settlementState || 'PENDING'}
-                                {ps.verificationTag ? ` · ${ps.verificationTag}` : ''}
-                              </span>
-                            </div>
-                          </td>
-                          <td className="px-5 py-3.5 whitespace-nowrap text-[12px]">
-                            {canReconcile ? (
-                              <div className="flex items-center gap-2">
+                          </div>
+                        </div>
+                      )}
+
+                      {youpiDevices.length > 0 ? (
+                        <div className="space-y-2 max-h-48 overflow-y-auto pr-1">
+                          {youpiDevices.map((dev) => (
+                            <div
+                              key={dev.deviceId}
+                              className="rounded-[8px] bg-[#161513] border border-[#efe9de]/[0.06] px-3 py-2 flex items-center justify-between gap-2 text-[12px]"
+                            >
+                              <div className="min-w-0">
+                                <div className="flex items-center gap-2">
+                                  <span className="font-medium text-[#efe9de] truncate">
+                                    {dev.deviceName || dev.deviceModel || 'Android observer'}
+                                  </span>
+                                  <span
+                                    className={`px-1.5 py-0.5 rounded-[6px] font-mono text-[12px] ${statusBadgeClass(
+                                      dev.connectionStatus || (dev.isActive ? 'standby' : 'revoked')
+                                    )}`}
+                                  >
+                                    {dev.connectionStatus || (dev.isActive ? 'STANDBY' : 'REVOKED')}
+                                  </span>
+                                </div>
+                                <div className="font-mono text-[12px] text-[#8a847a] truncate mt-0.5">
+                                  {dev.receivingAccountId || 'All VPAs'} · ID: {String(dev.deviceId).slice(0, 8)}
+                                </div>
+                              </div>
+                              <div className="flex items-center gap-1.5 shrink-0">
+                                {dev.isActive && (
+                                  <button
+                                    type="button"
+                                    onClick={() => handleRevokeAndroidDevice(dev.deviceId)}
+                                    className="px-2.5 py-1 rounded-[6px] text-[12px] font-medium text-[#ebb05d] bg-[#e09132]/10 border border-[#e09132]/25 hover:bg-[#e09132]/20 transition-colors duration-150"
+                                  >
+                                    Revoke
+                                  </button>
+                                )}
                                 <button
                                   type="button"
-                                  disabled={busy}
-                                  onClick={() => handleReconcileYoupi(ps.paymentId, 'approve')}
-                                  className="h-8 px-2.5 rounded-[6px] font-medium text-[#4cc38a] bg-[#4cc38a]/10 border border-[#4cc38a]/25 hover:bg-[#4cc38a]/20 transition-colors"
+                                  onClick={() => handleDeleteAndroidDevice(dev.deviceId)}
+                                  className="px-2.5 py-1 rounded-[6px] text-[12px] font-medium text-[#e5484d] bg-[#e5484d]/10 border border-[#e5484d]/25 hover:bg-[#e5484d]/20 transition-colors duration-150"
                                 >
-                                  Approve &amp; Unlock
-                                </button>
-                                <button
-                                  type="button"
-                                  disabled={busy}
-                                  onClick={() => handleReconcileYoupi(ps.paymentId, 'reject')}
-                                  className="h-8 px-2.5 rounded-[6px] font-medium text-[#e5484d] bg-[#e5484d]/10 border border-[#e5484d]/25 hover:bg-[#e5484d]/20 transition-colors"
-                                >
-                                  Reject
+                                  Remove
                                 </button>
                               </div>
-                            ) : (
-                              <span className="text-[11px] font-mono text-[#8a847a]">
-                                {ps.settlementState}
-                              </span>
-                            )}
-                          </td>
-                        </tr>
-                      );
-                    })
-                  )}
-                </tbody>
-              </table>
-            </div>
-
-            {/* Fraud Security & Suspended Identities Panel */}
-            <div className="p-5 bg-[#161513]/50 space-y-3">
-              <div className="flex flex-wrap items-center justify-between gap-2">
-                <div>
-                  <h4 className="text-[13.5px] font-medium text-[#efe9de]">
-                    Fraud Security &amp; Auto-Suspended Identities ({suspendedUsers.length})
-                  </h4>
-                  <p className="text-[11.5px] text-[#8a847a]">
-                    Stage 5 spoofing defense automatically suspends accounts linked to spoofed bank SMS/email sender injections.
-                  </p>
-                </div>
-                <span
-                  className={`px-2.5 py-0.5 rounded-[5px] text-[11px] font-mono border ${
-                    suspendedUsers.length > 0
-                      ? 'bg-[#e5484d]/10 text-[#e5484d] border-[#e5484d]/30'
-                      : 'bg-[#4cc38a]/10 text-[#4cc38a] border-[#4cc38a]/25'
-                  }`}
-                >
-                  {suspendedUsers.length > 0 ? `${suspendedUsers.length} Suspended` : 'All Clear'}
-                </span>
-              </div>
-
-              {suspendedUsers.length > 0 && (
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-2.5">
-                  {suspendedUsers.map((su) => (
-                    <div
-                      key={su._id}
-                      className="rounded-[10px] bg-[#12110f] border border-[#e5484d]/30 p-3 flex items-center justify-between gap-3"
-                    >
-                      <div className="min-w-0">
-                        <div className="flex items-center gap-2">
-                          <span className="text-[13px] font-medium text-[#efe9de] truncate">
-                            {su.name}
-                          </span>
-                          <span className={`px-1.5 py-0.5 rounded-[4px] font-mono text-[10px] ${statusBadgeClass(su.paymentSecurityStatus)}`}>
-                            {su.paymentSecurityStatus}
-                          </span>
+                            </div>
+                          ))}
                         </div>
-                        <div className="text-[11px] font-mono text-[#8a847a] truncate">
-                          {su.email}
+                      ) : (
+                        <p className="text-[12px] text-[#8a847a]">
+                          No Android observer devices paired yet. Generate a QR to link a device
+                        </p>
+                      )}
+                    </div>
+
+                    {/* Live FIFO Single-Slot Queue Monitor */}
+                    <div className="rounded-[10px] bg-[#12110f] border border-[#efe9de]/[0.08] p-4 space-y-3.5">
+                      <div className="flex items-start justify-between gap-2">
+                        <div>
+                          <h4 className="text-[14px] font-medium text-[#efe9de]">
+                            Live FIFO Payment Slot Monitor
+                          </h4>
+                          <p className="text-[12px] text-[#8a847a] mt-0.5">
+                            1 active checkout per receiving VPA; additional payers queue in FIFO order
+                          </p>
                         </div>
-                        {su.paymentSecurityReason && (
-                          <div className="text-[11px] text-[#e5484d] truncate mt-0.5">
-                            {su.paymentSecurityReason}
+                        <button
+                          type="button"
+                          onClick={() => handleRefreshQueue()}
+                          className="btn-secondary h-8 px-3 text-[12px] shrink-0"
+                        >
+                          Refresh
+                        </button>
+                      </div>
+
+                      {authorizedVpas.length > 0 && (
+                        <select
+                          aria-label="Inspect Queue for VPA"
+                          value={youpiQueue.receivingAccountId || authorizedVpas[0]}
+                          onChange={(e) => handleRefreshQueue(e.target.value)}
+                          className="input-field h-9 text-[12px] font-mono py-0"
+                        >
+                          {authorizedVpas.map((vpa) => (
+                            <option key={vpa} value={vpa}>
+                              Slot pool: {vpa}
+                            </option>
+                          ))}
+                        </select>
+                      )}
+
+                      {youpiQueue.currentSlot ? (
+                        <div className="rounded-[8px] bg-[#161513] border border-[#4cc38a]/25 p-3 space-y-1 text-[12px]">
+                          <div className="flex items-center justify-between gap-2">
+                            <span className="font-mono text-[#4cc38a] font-medium">
+                              Active slot
+                            </span>
+                            <span className={`px-2 py-0.5 rounded-[6px] font-mono text-[12px] ${statusBadgeClass(youpiQueue.currentSlot.status)}`}>
+                              {youpiQueue.currentSlot.status}
+                            </span>
+                          </div>
+                          <div className="font-mono text-[#efe9de] tabular-nums">
+                            {youpiQueue.currentSlot.orderId} · ₹{((Number(youpiQueue.currentSlot.amountPaise) || 0) / 100).toFixed(2)}
+                          </div>
+                          <div className="text-[#8a847a] truncate">
+                            {youpiQueue.currentSlot.event?.title || 'Event checkout'} · Method: {youpiQueue.currentSlot.method || 'UPI'}
+                          </div>
+                        </div>
+                      ) : (
+                        <div className="rounded-[8px] bg-[#161513] border border-[#efe9de]/[0.06] p-3 text-[12px] text-[#8a847a]">
+                          Slot idle — next checkout acquires immediately without queuing
+                        </div>
+                      )}
+
+                      <div className="space-y-1.5">
+                        <div className="text-[12px] font-mono text-[#aaa398] tabular-nums">
+                          Waiting queue ({youpiQueue.queue?.length || 0})
+                        </div>
+                        {(youpiQueue.queue || []).length === 0 ? (
+                          <p className="text-[12px] text-[#8a847a]">No sessions waiting in queue</p>
+                        ) : (
+                          <div className="space-y-1.5 max-h-32 overflow-y-auto pr-1">
+                            {youpiQueue.queue.map((q) => (
+                              <div
+                                key={q.paymentId}
+                                className="rounded-[8px] bg-[#161513] border border-[#efe9de]/[0.06] px-3 py-2 flex items-center justify-between text-[12px] font-mono tabular-nums"
+                              >
+                                <span className="text-[#ebb05d]">#{q.queuePosition}</span>
+                                <span className="text-[#efe9de] truncate mx-2">{q.orderId}</span>
+                                <span className="text-[#aaa398]">₹{((Number(q.amountPaise) || 0) / 100).toFixed(2)}</span>
+                              </div>
+                            ))}
                           </div>
                         )}
                       </div>
-                      <button
-                        type="button"
-                        disabled={unbanningUserId === su._id}
-                        onClick={() => handleUnbanUser(su)}
-                        className="h-8 px-3 rounded-[6px] text-[11.5px] font-medium text-[#4cc38a] bg-[#4cc38a]/10 border border-[#4cc38a]/25 hover:bg-[#4cc38a]/20 shrink-0"
-                      >
-                        {unbanningUserId === su._id ? 'Unbanning...' : 'Unban / Clear Flag'}
-                      </button>
                     </div>
-                  ))}
-                </div>
-              )}
-
-              {recentFraudObs.length > 0 && (
-                <div className="rounded-[9px] bg-[#12110f] border border-[#e5484d]/20 p-3 space-y-1.5">
-                  <div className="text-[11px] font-mono text-[#e5484d] uppercase">
-                    Recent Spoof / Fraud Rejection Audit ({recentFraudObs.length})
                   </div>
-                  {recentFraudObs.slice(0, 5).map((fo) => (
-                    <div key={fo._id} className="text-[11px] font-mono text-[#aaa398] truncate">
-                      [{new Date(fo.createdAt).toLocaleString()}] {fo.source} · Sender: {fo.sender || 'unknown'} · {fo.reason || fo.rawSnippet}
+
+                  {/* NPCI Stand QR Generator (mode=02 Static / mode=04 Fixed Amount) */}
+                  <form
+                    onSubmit={handleGenerateStandQr}
+                    className="rounded-[10px] bg-[#12110f] border border-[#efe9de]/[0.08] p-4 grid grid-cols-1 lg:grid-cols-12 gap-4 items-center"
+                  >
+                    <div className="lg:col-span-8 space-y-3">
+                      <div>
+                        <h4 className="text-[14px] font-medium text-[#efe9de]">
+                          NPCI Desk Stand QR
+                        </h4>
+                        <p className="text-[12px] text-[#8a847a] mt-0.5">
+                          Printable registration booth QR (<code className="font-mono text-[#ebb05d]">mode=02</code> open or <code className="font-mono text-[#ebb05d]">mode=04</code> fixed INR)
+                        </p>
+                      </div>
+
+                      <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
+                        {authorizedVpas.length > 0 && (
+                          <select
+                            aria-label="Stand QR Payee VPA"
+                            value={standQrForm.preferredVpa || authorizedVpas[0]}
+                            onChange={(e) =>
+                              setStandQrForm((p) => ({ ...p, preferredVpa: e.target.value }))
+                            }
+                            className="input-field h-9 text-[12px] font-mono py-0"
+                          >
+                            {authorizedVpas.map((vpa) => (
+                              <option key={vpa} value={vpa}>
+                                {vpa}
+                              </option>
+                            ))}
+                          </select>
+                        )}
+                        <select
+                          aria-label="NPCI Stand QR Mode"
+                          value={standQrForm.mode}
+                          onChange={(e) =>
+                            setStandQrForm((p) => ({ ...p, mode: e.target.value }))
+                          }
+                          className="input-field h-9 text-[12px] font-mono py-0"
+                        >
+                          <option value="02">Static (02)</option>
+                          <option value="04">Fixed Amt (04)</option>
+                        </select>
+                        <input
+                          type="number"
+                          min="1"
+                          step="1"
+                          disabled={standQrForm.mode !== '04'}
+                          placeholder={standQrForm.mode === '04' ? 'INR Amount' : 'Open amount'}
+                          value={standQrForm.amount}
+                          onChange={(e) =>
+                            setStandQrForm((p) => ({ ...p, amount: e.target.value }))
+                          }
+                          className="input-field h-9 text-[12px] font-mono tabular-nums disabled:opacity-45"
+                        />
+                      </div>
+
+                      <div className="flex flex-col sm:flex-row gap-2.5">
+                        <input
+                          type="text"
+                          placeholder="Desk note (e.g. Avenor Desk)"
+                          value={standQrForm.tn}
+                          onChange={(e) => setStandQrForm((p) => ({ ...p, tn: e.target.value }))}
+                          className="input-field h-9 text-[12px] flex-1"
+                        />
+                        <button
+                          type="submit"
+                          disabled={generatingStandQr}
+                          className="btn-secondary h-9 px-4 text-[12px] shrink-0"
+                        >
+                          {generatingStandQr ? 'Generating QR...' : 'Generate NPCI Stand QR'}
+                        </button>
+                      </div>
                     </div>
-                  ))}
+
+                    <div className="lg:col-span-4 flex flex-col items-center justify-center rounded-[10px] bg-[#161513] border border-[#efe9de]/[0.06] p-3.5 min-h-[140px]">
+                      {standQrResult?.qrSvg ? (
+                        <div className="flex flex-col items-center gap-2 w-full">
+                          <div className="bg-white p-2 rounded-[8px]">
+                            <img
+                              src={`data:image/svg+xml;charset=utf-8,${encodeURIComponent(standQrResult.qrSvg)}`}
+                              alt="NPCI Stand QR"
+                              className="w-28 h-28 block"
+                            />
+                          </div>
+                          <div className="flex items-center gap-2 w-full justify-center">
+                            <span className="text-[12px] font-mono text-[#8a847a] truncate max-w-[200px]">
+                              {standQrResult.upiUri}
+                            </span>
+                            <button
+                              type="button"
+                              onClick={() => handleCopyInline('standQr', standQrResult.upiUri)}
+                              className="text-[12px] font-mono text-[#ebb05d] hover:underline shrink-0"
+                            >
+                              {copiedKey === 'standQr' ? 'Copied' : 'Copy'}
+                            </button>
+                          </div>
+                        </div>
+                      ) : (
+                        <span className="text-[12px] text-[#8a847a] text-center">
+                          Generate a desk QR to preview and print
+                        </span>
+                      )}
+                    </div>
+                  </form>
                 </div>
               )}
             </div>
 
-            {youpiObservations.length > 0 && (
-              <div className="p-5 bg-[#12110f]/40 space-y-2.5">
-                <h4 className="text-[13px] font-medium text-[#aaa398]">
-                  Recent Automated Bank Observations ({youpiObservations.length})
-                </h4>
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-2.5">
-                  {youpiObservations.slice(0, 8).map((obs) => (
-                    <div
-                      key={obs._id || obs.fingerprint}
-                      className="rounded-[9px] bg-[#161513] border border-[#efe9de]/[0.07] p-3 text-[11.5px] space-y-1"
-                    >
-                      <div className="flex items-center justify-between gap-2 font-mono">
-                        <span className="text-[#ebb05d]">
-                          {obs.source} · ₹{((Number(obs.amountPaise) || 0) / 100).toFixed(2)}
-                        </span>
-                        <span
-                          className={`px-1.5 py-0.5 rounded-[4px] border text-[10px] ${
-                            obs.attributionStatus?.startsWith('MATCHED')
-                              ? 'bg-[#4cc38a]/10 text-[#4cc38a] border-[#4cc38a]/25'
-                              : obs.attributionStatus === 'AMBIGUOUS'
-                                ? 'bg-[#e09132]/12 text-[#ebb05d] border-[#e09132]/30'
-                                : 'bg-[#e5484d]/10 text-[#e5484d] border-[#e5484d]/25'
-                          }`}
-                        >
-                          {obs.attributionStatus}
-                        </span>
-                      </div>
-                      <p className="text-[#8a847a] truncate">
-                        Sender: {obs.sender || '—'} {obs.bankRef ? `· UTR: ${obs.bankRef}` : ''}
-                      </p>
-                      <p className="text-[#aaa398] line-clamp-1">{obs.reason || obs.rawSnippet}</p>
-                    </div>
-                  ))}
-                </div>
+            {(youpiSection === 'all' || youpiSection === 'reconciliation') && (
+              <div className="overflow-x-auto">
+                <table className="min-w-full divide-y divide-[#efe9de]/[0.06]">
+                  <thead className="bg-[#12110f]/50">
+                    <tr>
+                      <th className="px-4 py-3 text-left text-[12px] font-medium text-[#8a847a]">Order, method &amp; UTR</th>
+                      <th className="px-4 py-3 text-left text-[12px] font-medium text-[#8a847a]">Event</th>
+                      <th className="px-4 py-3 text-left text-[12px] font-medium text-[#8a847a]">Student</th>
+                      <th className="px-4 py-3 text-left text-[12px] font-medium text-[#8a847a]">Amount</th>
+                      <th className="px-4 py-3 text-left text-[12px] font-medium text-[#8a847a]">Status &amp; settlement</th>
+                      <th className="px-4 py-3 text-left text-[12px] font-medium text-[#8a847a]">Actions</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-[#efe9de]/[0.06]">
+                    {youpiSessions.length === 0 ? (
+                      <tr>
+                        <td colSpan="6" className="px-5 py-10 text-center text-[14px] text-[#8a847a]">
+                          No YouPI-PG payment sessions recorded yet.
+                        </td>
+                      </tr>
+                    ) : (
+                      youpiSessions.map((ps) => {
+                        const canReconcile = [
+                          'MANUAL_REVIEW',
+                          'ACTIVE',
+                          'PROCESSING',
+                          'QUEUED',
+                          'OBSERVED_SUCCESS'
+                        ].includes(ps.status);
+                        const busy = reconcilingId === ps.paymentId;
+                        const symbol = !ps.currency || ps.currency === 'INR' ? '₹' : `${ps.currency} `;
+                        const settleText = [ps.settlementState || 'PENDING', ps.verificationTag]
+                          .filter(Boolean)
+                          .join(' · ');
+                        return (
+                          <tr key={ps.paymentId} className="hover:bg-[#262421]/40 transition-colors duration-150">
+                            <td className="px-4 py-3.5 text-[12px] font-mono">
+                              <div className="text-[#efe9de] flex items-center gap-1.5 whitespace-nowrap">
+                                <span className="tabular-nums">{ps.orderId}</span>
+                                <span className="px-1.5 py-0.5 rounded-[6px] bg-[#262421] text-[12px] text-[#aaa398]">
+                                  {ps.method || 'UPI'}
+                                </span>
+                              </div>
+                              <div
+                                className="text-[#8a847a] mt-0.5 max-w-[230px] truncate"
+                                title={`${ps.utr ? `UTR: ${ps.utr}` : 'Awaiting UTR'}${ps.payeeVpa ? ` · ${ps.payeeVpa}` : ''}`}
+                              >
+                                {ps.utr ? `UTR: ${ps.utr}` : 'Awaiting UTR'}
+                                {ps.payeeVpa ? ` · ${ps.payeeVpa}` : ''}
+                                {ps.queuePosition > 0 ? ` · Q#${ps.queuePosition}` : ''}
+                              </div>
+                            </td>
+                            <td className="px-4 py-3.5 text-[13px] text-[#efe9de] max-w-[180px] truncate" title={ps.eventTitle}>
+                              {ps.eventTitle}
+                            </td>
+                            <td className="px-4 py-3.5 whitespace-nowrap text-[13px] text-[#aaa398]">
+                              <div>{ps.student?.name || ps.customerName || '—'}</div>
+                              <div className="text-[12px] font-mono text-[#8a847a] tabular-nums">
+                                {ps.customerRegNo || ps.student?.email || ''}
+                              </div>
+                            </td>
+                            <td className="px-4 py-3.5 whitespace-nowrap text-[13px] font-mono text-[#ebb05d] tabular-nums">
+                              {symbol}
+                              {ps.amountDisplay}
+                            </td>
+                            <td className="px-4 py-3.5">
+                              <div className="flex flex-col items-start gap-1">
+                                <span
+                                  className={`inline-flex px-2 py-0.5 rounded-[6px] text-[12px] font-mono ${statusBadgeClass(
+                                    ps.status
+                                  )}`}
+                                >
+                                  {ps.status}
+                                </span>
+                                <span
+                                  className="text-[12px] font-mono text-[#8a847a] max-w-[210px] truncate block"
+                                  title={settleText}
+                                >
+                                  {settleText}
+                                </span>
+                              </div>
+                            </td>
+                            <td className="px-4 py-3.5 whitespace-nowrap text-[12px]">
+                              {canReconcile ? (
+                                <div className="flex items-center gap-2">
+                                  <button
+                                    type="button"
+                                    disabled={busy}
+                                    onClick={() => handleReconcileYoupi(ps.paymentId, 'approve')}
+                                    className="h-8 px-2.5 rounded-[6px] font-medium text-[#4cc38a] bg-[#4cc38a]/10 border border-[#4cc38a]/25 hover:bg-[#4cc38a]/20 transition-colors duration-150"
+                                  >
+                                    Approve &amp; unlock
+                                  </button>
+                                  <button
+                                    type="button"
+                                    disabled={busy}
+                                    onClick={() => handleReconcileYoupi(ps.paymentId, 'reject')}
+                                    className="h-8 px-2.5 rounded-[6px] font-medium text-[#e5484d] bg-[#e5484d]/10 border border-[#e5484d]/25 hover:bg-[#e5484d]/20 transition-colors duration-150"
+                                  >
+                                    Reject
+                                  </button>
+                                </div>
+                              ) : (
+                                <span className="text-[12px] font-mono text-[#8a847a]">
+                                  {ps.settlementState}
+                                </span>
+                              )}
+                            </td>
+                          </tr>
+                        );
+                      })
+                    )}
+                  </tbody>
+                </table>
               </div>
+            )}
+
+            {(youpiSection === 'all' || youpiSection === 'security') && (
+              <>
+                {/* Fraud Security & Suspended Identities Panel */}
+                <div className="p-5 bg-[#161513]/50 space-y-3">
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <div>
+                      <h4 className="text-[14px] font-medium text-[#efe9de]">
+                        Fraud Security &amp; Auto-Suspended Identities ({suspendedUsers.length})
+                      </h4>
+                      <p className="text-[12px] text-[#8a847a]">
+                        Spoofing defense suspends accounts linked to forged bank SMS or email sender injections
+                      </p>
+                    </div>
+                    <span
+                      className={`px-2.5 py-0.5 rounded-[6px] text-[12px] font-mono border tabular-nums ${
+                        suspendedUsers.length > 0
+                          ? 'bg-[#e5484d]/10 text-[#e5484d] border-[#e5484d]/30'
+                          : 'bg-[#4cc38a]/10 text-[#4cc38a] border-[#4cc38a]/25'
+                      }`}
+                    >
+                      {suspendedUsers.length > 0 ? `${suspendedUsers.length} suspended` : 'All clear'}
+                    </span>
+                  </div>
+
+                  {suspendedUsers.length > 0 && (
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                      {suspendedUsers.map((su) => (
+                        <div
+                          key={su._id}
+                          className="rounded-[10px] bg-[#12110f] border border-[#e5484d]/30 p-3.5 flex items-center justify-between gap-3"
+                        >
+                          <div className="min-w-0">
+                            <div className="flex items-center gap-2">
+                              <span className="text-[13px] font-medium text-[#efe9de] truncate">
+                                {su.name}
+                              </span>
+                              <span className={`px-1.5 py-0.5 rounded-[6px] font-mono text-[12px] ${statusBadgeClass(su.paymentSecurityStatus)}`}>
+                                {su.paymentSecurityStatus}
+                              </span>
+                            </div>
+                            <div className="text-[12px] font-mono text-[#8a847a] truncate">
+                              {su.email}
+                            </div>
+                            {su.paymentSecurityReason && (
+                              <div className="text-[12px] text-[#e5484d] truncate mt-0.5">
+                                {su.paymentSecurityReason}
+                              </div>
+                            )}
+                          </div>
+                          <button
+                            type="button"
+                            disabled={unbanningUserId === su._id}
+                            onClick={() => handleUnbanUser(su)}
+                            className="h-8 px-3 rounded-[6px] text-[12px] font-medium text-[#4cc38a] bg-[#4cc38a]/10 border border-[#4cc38a]/25 hover:bg-[#4cc38a]/20 transition-colors duration-150 shrink-0"
+                          >
+                            {unbanningUserId === su._id ? 'Unbanning...' : 'Unban / clear flag'}
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+
+                  {recentFraudObs.length > 0 && (
+                    <div className="rounded-[10px] bg-[#12110f] border border-[#e5484d]/20 p-3.5 space-y-1.5">
+                      <div className="text-[12px] font-mono text-[#e5484d] tabular-nums">
+                        Recent spoof &amp; fraud rejections ({recentFraudObs.length})
+                      </div>
+                      {recentFraudObs.slice(0, 5).map((fo) => (
+                        <div key={fo._id} className="text-[12px] font-mono text-[#aaa398] truncate tabular-nums">
+                          [{new Date(fo.createdAt).toLocaleString()}] {fo.source} · Sender: {fo.sender || 'unknown'} · {fo.reason || fo.rawSnippet}
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+
+                {youpiObservations.length > 0 && (
+                  <div className="p-5 bg-[#12110f]/40 space-y-3">
+                    <h4 className="text-[13px] font-medium text-[#aaa398] tabular-nums">
+                      Recent automated bank observations ({youpiObservations.length})
+                    </h4>
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                      {youpiObservations.slice(0, 8).map((obs) => (
+                        <div
+                          key={obs._id || obs.fingerprint}
+                          className="rounded-[10px] bg-[#161513] border border-[#efe9de]/[0.07] p-3 text-[12px] space-y-1"
+                        >
+                          <div className="flex items-center justify-between gap-2 font-mono tabular-nums">
+                            <span className="text-[#ebb05d]">
+                              {obs.source} · ₹{((Number(obs.amountPaise) || 0) / 100).toFixed(2)}
+                            </span>
+                            <span
+                              className={`px-2 py-0.5 rounded-[6px] border text-[12px] ${
+                                obs.attributionStatus?.startsWith('MATCHED')
+                                  ? 'bg-[#4cc38a]/10 text-[#4cc38a] border-[#4cc38a]/25'
+                                  : obs.attributionStatus === 'AMBIGUOUS'
+                                    ? 'bg-[#e09132]/12 text-[#ebb05d] border-[#e09132]/30'
+                                    : 'bg-[#e5484d]/10 text-[#e5484d] border-[#e5484d]/25'
+                              }`}
+                            >
+                              {obs.attributionStatus}
+                            </span>
+                          </div>
+                          <p className="text-[#8a847a] truncate font-mono">
+                            Sender: {obs.sender || '—'} {obs.bankRef ? `· UTR: ${obs.bankRef}` : ''}
+                          </p>
+                          <p className="text-[#aaa398] line-clamp-1">{obs.reason || obs.rawSnippet}</p>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </>
             )}
           </div>
         )}
