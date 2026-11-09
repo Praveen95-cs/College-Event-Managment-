@@ -1,8 +1,8 @@
 const path = require('path');
 require('dotenv').config({ path: path.join(__dirname, '..', '.env') });
 const mongoose = require('mongoose');
-const Competition = require('../models/Competition');
-const User = require('../models/User');
+const Competition = require('../models/competitions/Competition');
+const User = require('../models/auth/User');
 
 async function seed() {
   const localUri = process.env.MONGODB_URI_LOCAL || 'mongodb://127.0.0.1:27017/college-event-manager';

@@ -32,8 +32,11 @@ export const AuthProvider = ({ children }) => {
       }
     } catch (error) {
       console.error('Auth check error:', error);
-      localStorage.removeItem('token');
-      delete axios.defaults.headers.common['Authorization'];
+      const status = error.response?.status;
+      if (status === 401 || status === 403) {
+        localStorage.removeItem('token');
+        delete axios.defaults.headers.common['Authorization'];
+      }
     } finally {
       setLoading(false);
     }

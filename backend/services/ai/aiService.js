@@ -1,7 +1,7 @@
 const mongoose = require('mongoose');
 const GeminiProvider = require('./geminiProvider');
 const GroqProvider = require('./groqProvider');
-const QuestionCache = require('../../models/QuestionCache');
+const QuestionCache = require('../../models/competitions/QuestionCache');
 
 class AIService {
   constructor() {

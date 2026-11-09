@@ -5,7 +5,7 @@
   "main": "server.js",
   "scripts": {
     "start": "node server.js",
-    "dev": "nodemon server.js",
+    "dev": "nodemon -e js,mjs,json,env server.js",
     "test": "node tests/competitionTests.js"
   },
   "dependencies": {

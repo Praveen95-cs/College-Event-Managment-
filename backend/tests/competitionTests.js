@@ -3,16 +3,16 @@ require('dotenv').config({ path: path.join(__dirname, '..', '.env') });
 const mongoose = require('mongoose');
 const assert = require('assert');
 
-const Competition = require('../models/Competition');
-const AssessmentAssignment = require('../models/AssessmentAssignment');
-const Event = require('../models/Event');
-const Registration = require('../models/Registration');
-const QuestionCache = require('../models/QuestionCache');
-const User = require('../models/User');
-const geminiService = require('../services/geminiService');
+const Competition = require('../models/competitions/Competition');
+const AssessmentAssignment = require('../models/competitions/AssessmentAssignment');
+const Event = require('../models/events/Event');
+const Registration = require('../models/events/Registration');
+const QuestionCache = require('../models/competitions/QuestionCache');
+const User = require('../models/auth/User');
+const geminiService = require('../services/ai/geminiService');
 const aiService = require('../services/ai/aiService');
 const BaseAIProvider = require('../services/ai/baseProvider');
-const codeExecutionService = require('../services/codeExecutionService');
+const codeExecutionService = require('../services/competitions/codeExecutionService');
 
 async function runTestSuite() {
   console.log('====================================================');

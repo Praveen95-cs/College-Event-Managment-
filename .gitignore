@@ -41,10 +41,9 @@ coverage
 .Spotlight-V100
 .Trashes
 ehthumbs.db
-Thumbs.db .env.txt
+Thumbs.db
 /.env.txt
 /.env
-/.env.txt
 backend/.env
 backend/.env.*
 backend/.git-backup/
@@ -53,3 +52,4 @@ backend/node_modules/
 backend/server.js.backup
 frontend/build/
 frontend/node_modules/
+unslop-story/

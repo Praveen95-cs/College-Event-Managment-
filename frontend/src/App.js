@@ -1,24 +1,26 @@
 import React from 'react';
 import { Routes, Route, Navigate, useLocation } from 'react-router-dom';
 import { AuthProvider, useAuth } from './contexts/AuthContext';
-import Navbar from './components/Navbar';
-import Footer from './components/Footer';
-import Home from './pages/Home';
-import Login from './pages/Login';
-import Register from './pages/Register';
-import Events from './pages/Events';
-import EventDetails from './pages/EventDetails';
-import CreateEvent from './pages/CreateEvent';
-import Profile from './pages/Profile';
-import AdminDashboard from './pages/AdminDashboard';
-import CommunityMessage from './components/CommunityMessage';
-import About from './pages/About';
-import PrivacyPolicy from './pages/PrivacyPolicy';
-import Competitions from './pages/Competitions';
-import ManageCompetition from './pages/ManageCompetition';
-import QuizArena from './pages/QuizArena';
-import CodingArena from './pages/CodingArena';
-import Leaderboard from './pages/Leaderboard';
+import Navbar from './components/layout/Navbar';
+import Footer from './components/layout/Footer';
+import Home from './pages/public/Home';
+import Login from './pages/auth/Login';
+import Register from './pages/auth/Register';
+import Events from './pages/events/Events';
+import EventDetails from './pages/events/EventDetails';
+import CreateEvent from './pages/events/CreateEvent';
+import Profile from './pages/dashboard/Profile';
+import AdminDashboard from './pages/dashboard/AdminDashboard';
+import CommunityMessage from './components/community/CommunityMessage';
+import About from './pages/public/About';
+import PrivacyPolicy from './pages/public/PrivacyPolicy';
+import Competitions from './pages/competitions/Competitions';
+import ManageCompetition from './pages/competitions/ManageCompetition';
+import QuizArena from './pages/competitions/QuizArena';
+import CodingArena from './pages/competitions/CodingArena';
+import Leaderboard from './pages/competitions/Leaderboard';
+import CampusFeed from './pages/feed/CampusFeed';
+import ClubProfile from './pages/feed/ClubProfile';
 
 const ProtectedRoute = ({ children, roles }) => {
   const { user } = useAuth();
@@ -37,17 +39,28 @@ const ProtectedRoute = ({ children, roles }) => {
 function AppShell() {
   const location = useLocation();
   const isHome = location.pathname === '/';
+  const isCodingArena = location.pathname.endsWith('/code');
 
   return (
-    <div className="min-h-screen flex flex-col bg-gray-950 text-gray-100">
+    <div className="min-h-screen flex flex-col bg-[#161513] text-[#efe9de] selection:bg-[#e09132]/30 selection:text-[#efe9de]">
       <Navbar />
-      <main className={isHome ? 'flex-grow' : 'flex-grow w-full max-w-7xl mx-auto px-4 py-8'}>
+      <main
+        className={
+          isHome
+            ? 'flex-grow'
+            : isCodingArena
+              ? 'flex-grow w-full max-w-[1440px] mx-auto px-4 sm:px-6 py-4'
+              : 'flex-grow w-full max-w-[1280px] mx-auto px-4 sm:px-6 lg:px-8 py-8'
+        }
+      >
         <Routes>
           <Route path="/" element={<Home />} />
           <Route path="/login" element={<Login />} />
           <Route path="/register" element={<Register />} />
           <Route path="/events" element={<Events />} />
           <Route path="/events/:id" element={<EventDetails />} />
+          <Route path="/campus-feed" element={<CampusFeed />} />
+          <Route path="/clubs/:clubId" element={<ClubProfile />} />
           <Route path="/community" element={<CommunityMessage />} />
           <Route path="/motivation" element={<Navigate to="/" replace />} />
           <Route path="/payment" element={<Navigate to="/events" replace />} />

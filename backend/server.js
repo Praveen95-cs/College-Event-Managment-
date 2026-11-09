@@ -14,13 +14,15 @@ const isProd = process.env.NODE_ENV === 'production';
 const LOCAL_MONGO_URI = process.env.MONGODB_URI_LOCAL || 'mongodb://127.0.0.1:27017/college-event-manager';
 
 async function ensureAdmin() {
-  const User = require('./models/User');
+  const User = require('./models/auth/User');
   const email = (process.env.ADMIN_EMAIL || '').trim().toLowerCase();
-  const password = process.env.ADMIN_PASSWORD || '';
+  const password = (process.env.ADMIN_PASSWORD || '').trim();
   const name = (process.env.ADMIN_NAME || 'Administrator').trim();
   if (!email || password.length < 8) {
-    if (!(await User.findOne({ role: 'admin' }))) {
-      console.warn('No admin account exists. Set ADMIN_EMAIL and ADMIN_PASSWORD in backend/.env');
+    if (email && password.length > 0 && password.length < 8) {
+      console.warn(`ADMIN_PASSWORD in backend/.env must be at least 8 characters (got ${password.length}); skipping admin password sync.`);
+    } else if (!(await User.findOne({ role: 'admin' }))) {
+      console.warn('No admin account exists. Set ADMIN_EMAIL and ADMIN_PASSWORD (min 8 chars) in backend/.env');
     }
     return;
   }
@@ -100,31 +102,35 @@ app.use(express.urlencoded({ extended: true, limit: '1mb' }));
 app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
 app.use('/api', rateLimit({
   windowMs: 15 * 60 * 1000,
-  max: 300,
+  max: isProd ? 500 : 2000,
   standardHeaders: true,
   legacyHeaders: false
 }));
-app.use('/api/auth', rateLimit({
+const authLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
   max: 20,
   message: { message: 'Too many authentication attempts. Try again later.' },
   standardHeaders: true,
   legacyHeaders: false
-}));
+});
+app.use('/api/auth/login', authLimiter);
+app.use('/api/auth/register', authLimiter);
 
 app.get('/api/health', (req, res) => res.json({
   ok: true,
   env: process.env.NODE_ENV || 'development'
 }));
 
-app.use('/api/auth', require('./routes/auth'));
-app.use('/api/events', require('./routes/events'));
-app.use('/api/registrations', require('./routes/registrations'));
-app.use('/api/motivation', require('./routes/motivation'));
-app.use('/api/messages', require('./routes/messages'));
-app.use('/api/notifications', require('./routes/notifications'));
-app.use('/api/users', require('./routes/users'));
-app.use('/api/competitions', require('./routes/competitions'));
+app.use('/api/auth', require('./routes/auth/auth'));
+app.use('/api/events', require('./routes/events/events'));
+app.use('/api/registrations', require('./routes/events/registrations'));
+app.use('/api/motivation', require('./routes/community/motivation'));
+app.use('/api/messages', require('./routes/community/messages'));
+app.use('/api/notifications', require('./routes/community/notifications'));
+app.use('/api/users', require('./routes/auth/users'));
+app.use('/api/competitions', require('./routes/competitions/competitions'));
+app.use('/api/feed', require('./routes/feed/feed'));
+app.use('/api/clubs', require('./routes/feed/clubs'));
 
 const buildPath = path.join(__dirname, '..', 'frontend', 'build');
 if (fs.existsSync(buildPath) && fs.existsSync(path.join(buildPath, 'index.html'))) {
@@ -156,6 +162,8 @@ async function start() {
     console.warn('Still on local MongoDB. Atlas login failed or was unreachable.');
   }
   await ensureAdmin();
+  const { ensureAllPublishedEventsSynced } = require('./services/feed/feedService');
+  await ensureAllPublishedEventsSynced(true).catch(err => console.warn('Initial feed sync note:', err.message));
   app.listen(PORT, '0.0.0.0', () => console.log(`Server running on port ${PORT}`));
 }
 start().catch(err => {
