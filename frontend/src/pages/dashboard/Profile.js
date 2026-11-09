@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { Link } from 'react-router-dom';
 import { useAuth } from '../../contexts/AuthContext';
 import axios from 'axios';
 import { getBackendUrl } from '../../utils/apiConfig';
@@ -9,7 +10,9 @@ import {
   MapPinIcon,
   CheckBadgeIcon,
   EyeIcon,
-  TrophyIcon
+  TrophyIcon,
+  ChatBubbleLeftRightIcon,
+  ArrowUpRightIcon
 } from '@heroicons/react/24/outline';
 
 const Profile = () => {
@@ -376,6 +379,9 @@ const Profile = () => {
                       : 'Recent';
 
                     const isDownloading = downloadingId === `event_${event._id}`;
+                    const isPaidEvent = Boolean(event.isPaid && Number(event.registrationFee || 0) > 0);
+                    const feeSymbol = event.currency && event.currency !== 'INR' ? `${event.currency} ` : '₹';
+                    const isPaidComplete = !isPaidEvent || reg.paymentStatus === 'paid';
 
                     return (
                       <div
@@ -385,15 +391,32 @@ const Profile = () => {
                         <div>
                           <div className="flex items-center justify-between gap-2 pb-3 mb-4 border-b border-[#efe9de]/[0.06]">
                             <span className="text-[12px] font-mono text-[#aaa398]">Event pass</span>
-                            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-[6px] text-[12px] bg-[#4cc38a]/10 text-[#4cc38a] border border-[#4cc38a]/25">
+                            <span
+                              className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-[6px] text-[12px] border ${
+                                isPaidComplete
+                                  ? 'bg-[#4cc38a]/10 text-[#4cc38a] border-[#4cc38a]/25'
+                                  : 'bg-[#e09132]/12 text-[#ebb05d] border-[#e09132]/30'
+                              }`}
+                            >
                               <CheckBadgeIcon className="h-3.5 w-3.5" strokeWidth={1.5} />
-                              <span>Issued</span>
+                              <span>
+                                {isPaidEvent
+                                  ? isPaidComplete
+                                    ? `Paid ${feeSymbol}${reg.amountPaid || event.registrationFee}`
+                                    : reg.youpiStatus === 'MANUAL_REVIEW'
+                                      ? 'YouPI under review'
+                                      : 'Payment pending'
+                                  : 'Issued (Free)'}
+                              </span>
                             </span>
                           </div>
 
-                          <h4 className="text-[16px] font-medium text-[#efe9de] line-clamp-2">
+                          <Link
+                            to={event._id ? `/events/${event._id}` : '/events'}
+                            className="block text-[16px] font-medium text-[#efe9de] hover:text-[#ebb05d] transition-colors line-clamp-2"
+                          >
                             {event.title || 'Campus Event'}
-                          </h4>
+                          </Link>
 
                           <div className="mt-3 space-y-1.5 text-[13px] text-[#aaa398]">
                             {event.department && <p>{event.department}</p>}
@@ -409,31 +432,87 @@ const Profile = () => {
                             )}
                           </div>
 
-                          <div className="mt-4 pt-3 border-t border-[#efe9de]/[0.06] text-[12px] font-mono text-[#8a847a] tabular-nums">
-                            <span>Reg no: </span>
-                            <span className="text-[#efe9de]">{reg.regNo || user.email?.split('@')[0]}</span>
+                          <div className="mt-4 pt-3 border-t border-[#efe9de]/[0.06] space-y-1 text-[12px] font-mono text-[#8a847a] tabular-nums">
+                            <div className="flex items-center justify-between gap-2">
+                              <div>
+                                <span>Reg no: </span>
+                                <span className="text-[#efe9de]">{reg.regNo || user.email?.split('@')[0]}</span>
+                              </div>
+                              <span
+                                className={`px-1.5 py-0.5 rounded-[5px] text-[11px] border ${
+                                  reg.attendanceStatus === 'present'
+                                    ? 'bg-[#4cc38a]/12 text-[#4cc38a] border-[#4cc38a]/30'
+                                    : reg.attendanceStatus === 'absent'
+                                      ? 'bg-[#e5484d]/12 text-[#e5484d] border-[#e5484d]/30'
+                                      : 'bg-[#262421] text-[#8a847a] border-[#efe9de]/[0.08]'
+                                }`}
+                              >
+                                {reg.attendanceStatus === 'present'
+                                  ? 'Attended ✓'
+                                  : reg.attendanceStatus === 'absent'
+                                    ? 'Absent'
+                                    : 'Attendance pending'}
+                              </span>
+                            </div>
+                            {isPaidEvent && reg.transactionId && (
+                              <div className="truncate">
+                                <span>{reg.paymentMethod === 'youpi' ? 'YouPI UTR: ' : 'TXN: '}</span>
+                                <span className="text-[#aaa398]">{reg.transactionId}</span>
+                              </div>
+                            )}
+                            {isPaidEvent && reg.youpiOrderId && (
+                              <div className="truncate">
+                                <span>Order: </span>
+                                <span className="text-[#aaa398]">{reg.youpiOrderId}</span>
+                              </div>
+                            )}
+                            {isPaidComplete && event.whatsappGroupLink && (
+                              <div className="pt-2 font-sans">
+                                <a
+                                  href={event.whatsappGroupLink}
+                                  target="_blank"
+                                  rel="noopener noreferrer"
+                                  className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-[6px] text-[12px] font-medium bg-[#4cc38a]/12 text-[#4cc38a] border border-[#4cc38a]/30 hover:bg-[#4cc38a]/20 transition-colors"
+                                >
+                                  <ChatBubbleLeftRightIcon className="h-3.5 w-3.5" strokeWidth={1.75} />
+                                  <span>Join WhatsApp Group</span>
+                                  <ArrowUpRightIcon className="h-3 w-3" strokeWidth={2} />
+                                </a>
+                              </div>
+                            )}
                           </div>
                         </div>
 
                         <div className="mt-5 pt-4 border-t border-[#efe9de]/[0.06] flex items-center gap-2">
-                          <button
-                            onClick={() => handleDownloadEventCertificate(event._id, event.title, true)}
-                            disabled={!event._id || isDownloading}
-                            className="btn-secondary flex-1 h-9 text-[13px]"
-                            title="Preview certificate in new tab"
-                          >
-                            <EyeIcon className="h-4 w-4 text-[#8a847a]" strokeWidth={1.5} />
-                            <span>Preview</span>
-                          </button>
+                          {isPaidComplete ? (
+                            <>
+                              <button
+                                onClick={() => handleDownloadEventCertificate(event._id, event.title, true)}
+                                disabled={!event._id || isDownloading}
+                                className="btn-secondary flex-1 h-9 text-[13px]"
+                                title="Preview certificate in new tab"
+                              >
+                                <EyeIcon className="h-4 w-4 text-[#8a847a]" strokeWidth={1.5} />
+                                <span>Preview</span>
+                              </button>
 
-                          <button
-                            onClick={() => handleDownloadEventCertificate(event._id, event.title, false)}
-                            disabled={!event._id || isDownloading}
-                            className="btn-primary flex-1 h-9 text-[13px]"
-                          >
-                            <ArrowDownTrayIcon className="h-4 w-4" strokeWidth={1.5} />
-                            <span>{isDownloading ? 'Exporting...' : 'PDF'}</span>
-                          </button>
+                              <button
+                                onClick={() => handleDownloadEventCertificate(event._id, event.title, false)}
+                                disabled={!event._id || isDownloading}
+                                className="btn-primary flex-1 h-9 text-[13px]"
+                              >
+                                <ArrowDownTrayIcon className="h-4 w-4" strokeWidth={1.5} />
+                                <span>{isDownloading ? 'Exporting...' : 'PDF'}</span>
+                              </button>
+                            </>
+                          ) : (
+                            <Link
+                              to={event._id ? `/events/${event._id}` : '/events'}
+                              className="btn-primary flex-1 h-9 text-[13px]"
+                            >
+                              Complete {feeSymbol}{event.registrationFee} payment
+                            </Link>
+                          )}
                         </div>
                       </div>
                     );

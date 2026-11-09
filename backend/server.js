@@ -33,13 +33,19 @@ async function ensureAdmin() {
       email,
       password,
       role: 'admin',
-      department: 'Administration'
+      department: 'Administration',
+      emailVerified: true,
+      emailVerifiedAt: new Date()
     });
     console.log(`Admin account provisioned from environment: ${email}`);
     return;
   }
   user.role = 'admin';
   user.password = password;
+  if (!user.emailVerified) {
+    user.emailVerified = true;
+    user.emailVerifiedAt = new Date();
+  }
   await user.save();
   console.log(`Admin account synced from environment: ${email}`);
 }
@@ -90,6 +96,8 @@ app.use(helmet({
   contentSecurityPolicy: false
 }));
 app.use(compression());
+const youpiRouter = require('./routes/payments/youpi');
+
 app.use(cors({
   origin(origin, cb) {
     if (!origin || isProd || allowedOrigins.includes(origin) || origin.endsWith('.onrender.com')) return cb(null, true);
@@ -97,9 +105,16 @@ app.use(cors({
   },
   credentials: true
 }));
-app.use(express.json({ limit: '1mb' }));
-app.use(express.urlencoded({ extended: true, limit: '1mb' }));
+// Mount YouPI-PG webhook on unparsed raw bytes BEFORE express.json() for HMAC-SHA256 verification
+app.post(
+  '/api/payments/youpi/webhook',
+  express.raw({ type: 'application/json', limit: '1mb' }),
+  youpiRouter.handleYoupiWebhook
+);
+app.use(express.json({ limit: '4mb' }));
+app.use(express.urlencoded({ extended: true, limit: '4mb' }));
 app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
+app.use('/uploads', (req, res) => res.status(404).json({ message: 'Media asset not found' }));
 app.use('/api', rateLimit({
   windowMs: 15 * 60 * 1000,
   max: isProd ? 500 : 2000,
@@ -108,13 +123,23 @@ app.use('/api', rateLimit({
 }));
 const authLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
-  max: 20,
+  max: isProd ? 25 : 200,
   message: { message: 'Too many authentication attempts. Try again later.' },
+  standardHeaders: true,
+  legacyHeaders: false
+});
+const otpLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: isProd ? 30 : 200,
+  message: { message: 'Too many OTP verification attempts. Try again shortly.' },
   standardHeaders: true,
   legacyHeaders: false
 });
 app.use('/api/auth/login', authLimiter);
 app.use('/api/auth/register', authLimiter);
+app.use('/api/auth/reset-password', authLimiter);
+app.use('/api/auth/send-otp', otpLimiter);
+app.use('/api/auth/verify-otp', otpLimiter);
 
 app.get('/api/health', (req, res) => res.json({
   ok: true,
@@ -122,6 +147,7 @@ app.get('/api/health', (req, res) => res.json({
 }));
 
 app.use('/api/auth', require('./routes/auth/auth'));
+app.use('/api/departments', require('./routes/system/departments'));
 app.use('/api/events', require('./routes/events/events'));
 app.use('/api/registrations', require('./routes/events/registrations'));
 app.use('/api/motivation', require('./routes/community/motivation'));
@@ -131,6 +157,7 @@ app.use('/api/users', require('./routes/auth/users'));
 app.use('/api/competitions', require('./routes/competitions/competitions'));
 app.use('/api/feed', require('./routes/feed/feed'));
 app.use('/api/clubs', require('./routes/feed/clubs'));
+app.use('/api/payments/youpi', youpiRouter);
 
 const buildPath = path.join(__dirname, '..', 'frontend', 'build');
 if (fs.existsSync(buildPath) && fs.existsSync(path.join(buildPath, 'index.html'))) {
@@ -144,6 +171,9 @@ if (fs.existsSync(buildPath) && fs.existsSync(path.join(buildPath, 'index.html')
 app.use((req, res) => res.status(404).json({ message: 'Route not found' }));
 app.use((err, req, res, next) => {
   console.error(err);
+  if (err.code === 'LIMIT_FILE_SIZE') {
+    return res.status(400).json({ message: 'Uploaded image must be 2 MB or smaller.' });
+  }
   const status = err.status || 500;
   res.status(status).json({
     message: isProd && status === 500 ? 'Something went wrong' : (err.message || 'Something went wrong')
@@ -151,6 +181,53 @@ app.use((err, req, res, next) => {
 });
 
 const PORT = process.env.PORT || 5000;
+const MIME_BY_EXT = {
+  '.jpg': 'image/jpeg',
+  '.jpeg': 'image/jpeg',
+  '.png': 'image/png',
+  '.gif': 'image/gif',
+  '.webp': 'image/webp'
+};
+
+async function migrateLocalUploadsToDataUri() {
+  const Club = require('./models/feed/Club');
+  const Event = require('./models/events/Event');
+  const FeedPost = require('./models/feed/FeedPost');
+  const uploadsRoot = path.join(__dirname, 'uploads');
+
+  const toInline = (relPath) => {
+    if (!relPath || !relPath.startsWith('/uploads/')) return null;
+    const filename = path.basename(relPath);
+    const full = path.join(uploadsRoot, filename);
+    if (!fs.existsSync(full)) return null;
+    const ext = path.extname(filename).toLowerCase();
+    const mime = MIME_BY_EXT[ext];
+    if (!mime) return null;
+    const stat = fs.statSync(full);
+    if (stat.size <= 0 || stat.size > 2 * 1024 * 1024) return null;
+    return `data:${mime};base64,${fs.readFileSync(full).toString('base64')}`;
+  };
+
+  for (const club of await Club.find({ logo: { $regex: '^/uploads/' } }).select('logo')) {
+    const uri = toInline(club.logo);
+    if (uri) {
+      await Club.updateOne({ _id: club._id }, { $set: { logo: uri } });
+    }
+  }
+  for (const ev of await Event.find({ photo: { $regex: '^/uploads/' } }).select('photo')) {
+    const uri = toInline(ev.photo);
+    if (uri) {
+      await Event.updateOne({ _id: ev._id }, { $set: { photo: uri } });
+    }
+  }
+  for (const post of await FeedPost.find({ mediaUrl: { $regex: '^/uploads/' } }).select('mediaUrl')) {
+    const uri = toInline(post.mediaUrl);
+    if (uri) {
+      await FeedPost.updateOne({ _id: post._id }, { $set: { mediaUrl: uri } });
+    }
+  }
+}
+
 async function start() {
   if (!process.env.JWT_SECRET) {
     process.env.JWT_SECRET = 'college_event_manager_production_jwt_secret_2026';
@@ -162,8 +239,13 @@ async function start() {
     console.warn('Still on local MongoDB. Atlas login failed or was unreachable.');
   }
   await ensureAdmin();
+  const { ensureDefaultDepartments } = require('./services/system/departmentService');
+  await ensureDefaultDepartments().catch(err => console.warn('Department seed note:', err.message));
+  await migrateLocalUploadsToDataUri().catch(err => console.warn('Upload migration note:', err.message));
   const { ensureAllPublishedEventsSynced } = require('./services/feed/feedService');
   await ensureAllPublishedEventsSynced(true).catch(err => console.warn('Initial feed sync note:', err.message));
+  const { startExpiredEventScheduler } = require('./services/events/eventCleanupService');
+  startExpiredEventScheduler();
   app.listen(PORT, '0.0.0.0', () => console.log(`Server running on port ${PORT}`));
 }
 start().catch(err => {

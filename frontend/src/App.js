@@ -6,6 +6,7 @@ import Footer from './components/layout/Footer';
 import Home from './pages/public/Home';
 import Login from './pages/auth/Login';
 import Register from './pages/auth/Register';
+import ForgotPassword from './pages/auth/ForgotPassword';
 import Events from './pages/events/Events';
 import EventDetails from './pages/events/EventDetails';
 import CreateEvent from './pages/events/CreateEvent';
@@ -57,6 +58,7 @@ function AppShell() {
           <Route path="/" element={<Home />} />
           <Route path="/login" element={<Login />} />
           <Route path="/register" element={<Register />} />
+          <Route path="/forgot-password" element={<ForgotPassword />} />
           <Route path="/events" element={<Events />} />
           <Route path="/events/:id" element={<EventDetails />} />
           <Route path="/campus-feed" element={<CampusFeed />} />
@@ -102,6 +104,14 @@ function AppShell() {
           <Route path="/competitions/:id/leaderboard" element={<Leaderboard />} />
           <Route
             path="/create-event"
+            element={
+              <ProtectedRoute roles={['admin', 'organizer']}>
+                <CreateEvent />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/events/:id/edit"
             element={
               <ProtectedRoute roles={['admin', 'organizer']}>
                 <CreateEvent />

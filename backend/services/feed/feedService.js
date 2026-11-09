@@ -260,7 +260,7 @@ async function syncEventToFeed(eventDoc, { notifyFollowers = false } = {}) {
   } else {
     post.club = clubId || post.club;
     post.category = derivedCategory;
-    if (Array.isArray(eventDoc.tags) && eventDoc.tags.length > 0) {
+    if (Array.isArray(eventDoc.tags)) {
       post.tags = sanitizeTags(eventDoc.tags);
     }
     post.status = isPublished ? 'published' : 'hidden';
@@ -370,7 +370,7 @@ async function hydrateFeedPosts(posts, currentUser = null) {
             event: { $in: eventIds },
             status: { $in: ['approved', 'pending'] }
           })
-            .select('event status regNo')
+            .select('event status regNo paymentStatus amountPaid youpiStatus youpiOrderId')
             .lean()
         : Promise.resolve([])
     ]);
@@ -402,8 +402,10 @@ async function hydrateFeedPosts(posts, currentUser = null) {
         uid && Array.isArray(eventObj.attendees)
           ? eventObj.attendees.some(a => (a._id ? a._id.toString() : a.toString()) === uid)
           : false;
-      const hasReg = activeRegMap.has(eventObj._id.toString());
-      isRegistered = Boolean(inAttendees || hasReg);
+      const regDoc = activeRegMap.get(eventObj._id.toString()) || null;
+      isRegistered = Boolean(inAttendees || regDoc);
+      const isPaidEvent = Boolean(eventObj.isPaid && Number(eventObj.registrationFee || 0) > 0);
+      const isPaidRegistration = !isPaidEvent || Boolean(regDoc && regDoc.paymentStatus === 'paid');
 
       registrationButtonState = isRegistered ? 'REGISTERED ✓' : lifecycle.registrationState;
       isExpired = lifecycle.isExpired;
@@ -428,6 +430,18 @@ async function hydrateFeedPosts(posts, currentUser = null) {
         eligibility: eventObj.eligibility || 'Open to all enrolled students',
         registrationDeadline: eventObj.registrationDeadline || null,
         registrationOpen: eventObj.registrationOpen !== false,
+        isPaid: isPaidEvent,
+        registrationFee: Number(eventObj.registrationFee || 0),
+        currency: eventObj.currency || 'INR',
+        paymentUpiId: eventObj.paymentUpiId || '',
+        paymentInstructions: eventObj.paymentInstructions || '',
+        hasWhatsappGroup: Boolean(eventObj.whatsappGroupLink),
+        whatsappGroupLink:
+          isRegistered && isPaidRegistration && eventObj.whatsappGroupLink
+            ? eventObj.whatsappGroupLink
+            : '',
+        isPaidRegistration,
+        youpiStatus: regDoc?.youpiStatus || '',
         noveltyFeatures: eventObj.noveltyFeatures || {},
         organizer: eventObj.organizer || post.author,
         startsAt: lifecycle.startsAt,

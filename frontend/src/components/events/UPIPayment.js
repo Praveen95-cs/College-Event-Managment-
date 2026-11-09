@@ -1,9 +1,11 @@
 import React from 'react';
 import { motion } from 'framer-motion';
 
-const UPIPayment = ({ amount = 99, upiId = 'praveensumathi12@okicici', businessName = 'College Events' }) => {
-  const upiLink = `upi://pay?pa=${upiId}&pn=${businessName}&am=${amount}&cu=INR`;
-  const qrCodeUrl = `https://api.qrserver.com/v1/create-qr-code/?data=${encodeURIComponent(upiLink)}&size=200x200`;
+const UPIPayment = ({ amount = 99, upiId = '', businessName = 'Avenor Campus Events' }) => {
+  const upiLink = upiId ? `upi://pay?pa=${upiId}&pn=${businessName}&am=${amount}&cu=INR` : '';
+  const qrCodeUrl = upiLink
+    ? `https://api.qrserver.com/v1/create-qr-code/?data=${encodeURIComponent(upiLink)}&size=200x200`
+    : '';
 
   const handlePayment = () => {
     window.location.href = upiLink;

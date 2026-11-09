@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { useParams, useNavigate } from 'react-router-dom';
+import { useParams, useNavigate, Link } from 'react-router-dom';
 import axios from 'axios';
 import {
   ClockIcon,
@@ -8,9 +8,11 @@ import {
   ChevronLeftIcon,
   ChevronRightIcon,
   ExclamationTriangleIcon,
-  AcademicCapIcon
+  AcademicCapIcon,
+  LockClosedIcon
 } from '@heroicons/react/24/outline';
 import { getBackendUrl } from '../../utils/apiConfig';
+import EventRegistration from '../../components/events/EventRegistration';
 
 const QuizArena = () => {
   const { id } = useParams();
@@ -19,6 +21,9 @@ const QuizArena = () => {
 
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
+  const [blockInfo, setBlockInfo] = useState(null);
+  const [unlockEvent, setUnlockEvent] = useState(null);
+  const [loadingEvent, setLoadingEvent] = useState(false);
   const [competition, setCompetition] = useState(null);
   const [questions, setQuestions] = useState([]);
   const [currentIndex, setCurrentIndex] = useState(0);
@@ -40,6 +45,7 @@ const QuizArena = () => {
     try {
       setLoading(true);
       setError('');
+      setBlockInfo(null);
       const token = localStorage.getItem('token');
       if (!token) {
         navigate('/login');
@@ -96,9 +102,33 @@ const QuizArena = () => {
       }, 1000);
     } catch (err) {
       console.error('Start assessment error:', err);
-      setError(err.response?.data?.message || 'Failed to enter quiz arena.');
+      const data = err.response?.data;
+      if (
+        err.response?.status === 403 &&
+        data?.eventId &&
+        ['EVENT_REGISTRATION_REQUIRED', 'EVENT_PAYMENT_REQUIRED'].includes(data?.code)
+      ) {
+        setBlockInfo(data);
+      }
+      setError(data?.message || 'Failed to enter quiz arena.');
     } finally {
       setLoading(false);
+    }
+  };
+
+  const handleOpenUnlockModal = async () => {
+    if (!blockInfo?.eventId) return;
+    try {
+      setLoadingEvent(true);
+      const token = localStorage.getItem('token');
+      const res = await axios.get(`${backendUrl}/api/events/${blockInfo.eventId}`, {
+        headers: token ? { Authorization: `Bearer ${token}` } : {}
+      });
+      setUnlockEvent(res.data);
+    } catch {
+      navigate(`/events/${blockInfo.eventId}`);
+    } finally {
+      setLoadingEvent(false);
     }
   };
 
@@ -220,14 +250,71 @@ const QuizArena = () => {
   }
 
   if (error) {
+    const feeCurrency = blockInfo?.currency && blockInfo.currency !== 'INR' ? `${blockInfo.currency} ` : '₹';
     return (
-      <div className="max-w-md mx-auto my-12 p-6 rounded-[14px] bg-[#1c1a18] border border-[#e5484d]/40 text-center space-y-4">
-        <ExclamationTriangleIcon className="mx-auto h-8 w-8 text-[#e5484d]" strokeWidth={1.5} />
-        <h3 className="text-[17px] font-medium text-[#efe9de]">Unable to enter quiz arena</h3>
-        <p className="text-[13px] text-[#aaa398]">{error}</p>
-        <button onClick={() => navigate('/competitions')} className="btn-primary h-9 px-4 text-[13px]">
-          Back to competitions
-        </button>
+      <div className="max-w-lg mx-auto my-12 p-6 sm:p-7 rounded-[14px] bg-[#1c1a18] border border-[#e09132]/35 text-center space-y-4">
+        {blockInfo ? (
+          <LockClosedIcon className="mx-auto h-9 w-9 text-[#ebb05d]" strokeWidth={1.5} />
+        ) : (
+          <ExclamationTriangleIcon className="mx-auto h-8 w-8 text-[#e5484d]" strokeWidth={1.5} />
+        )}
+        <h3 className="text-[18px] font-medium text-[#efe9de]">
+          {blockInfo ? 'Event registration & payment required' : 'Unable to enter quiz arena'}
+        </h3>
+        <p className="text-[13px] text-[#aaa398] leading-relaxed">{error}</p>
+
+        {blockInfo && (
+          <div className="p-3.5 rounded-[10px] bg-[#161513] border border-[#efe9de]/[0.08] text-left space-y-1 text-[12px]">
+            <div className="flex items-center justify-between gap-2">
+              <span className="text-[#8a847a]">Linked event</span>
+              <span className="font-medium text-[#efe9de] truncate">{blockInfo.eventTitle}</span>
+            </div>
+            <div className="flex items-center justify-between gap-2">
+              <span className="text-[#8a847a]">Entry requirement</span>
+              <span className="font-mono text-[#ebb05d]">
+                {blockInfo.isPaid
+                  ? `${feeCurrency}${blockInfo.registrationFee} payment + registration`
+                  : 'Free event registration'}
+              </span>
+            </div>
+          </div>
+        )}
+
+        <div className="flex flex-wrap items-center justify-center gap-2.5 pt-1">
+          {blockInfo?.eventId && (
+            <>
+              <button
+                type="button"
+                onClick={handleOpenUnlockModal}
+                disabled={loadingEvent}
+                className="btn-primary h-9 px-4 text-[13px]"
+              >
+                {loadingEvent
+                  ? 'Opening checkout...'
+                  : blockInfo.isPaid
+                    ? `Pay ${feeCurrency}${blockInfo.registrationFee} & register`
+                    : 'Register for event'}
+              </button>
+              <Link to={`/events/${blockInfo.eventId}`} className="btn-secondary h-9 px-4 text-[13px]">
+                View event page
+              </Link>
+            </>
+          )}
+          <button onClick={() => navigate('/competitions')} className="btn-secondary h-9 px-4 text-[13px]">
+            Back to competitions
+          </button>
+        </div>
+
+        {unlockEvent && (
+          <EventRegistration
+            event={unlockEvent}
+            onClose={() => setUnlockEvent(null)}
+            onRegistered={() => {
+              setUnlockEvent(null);
+              startOrResumeAssessment();
+            }}
+          />
+        )}
       </div>
     );
   }

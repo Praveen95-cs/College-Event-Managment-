@@ -13,7 +13,13 @@ const PostLike = require('../../models/feed/PostLike');
 const PostSave = require('../../models/feed/PostSave');
 const Comment = require('../../models/feed/Comment');
 const ClubFollow = require('../../models/feed/ClubFollow');
-const { sanitizePlainText, sanitizeTags } = require('../../utils/sanitize');
+const {
+  sanitizePlainText,
+  sanitizeTags,
+  ALLOWED_IMAGE_MIME_TYPES,
+  fileToDataUri,
+  sanitizeMediaUrl
+} = require('../../utils/sanitize');
 const {
   PUBLISHED_EVENT_STATUSES,
   resolveClubForOrganizer,
@@ -23,18 +29,11 @@ const {
   hydrateFeedPosts
 } = require('../../services/feed/feedService');
 
-const uploadsDir = path.join(__dirname, '..', '..', 'uploads');
-fs.mkdirSync(uploadsDir, { recursive: true });
-
 const upload = multer({
-  storage: multer.diskStorage({
-    destination: (_, __, cb) => cb(null, uploadsDir),
-    filename: (_, file, cb) =>
-      cb(null, `feed-${Date.now()}-${Math.round(Math.random() * 1e9)}${path.extname(file.originalname)}`)
-  }),
-  limits: { fileSize: 5 * 1024 * 1024 },
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 2 * 1024 * 1024 },
   fileFilter: (_, file, cb) =>
-    ['image/jpeg', 'image/png', 'image/gif', 'image/webp'].includes(file.mimetype)
+    ALLOWED_IMAGE_MIME_TYPES.has(String(file.mimetype || '').toLowerCase())
       ? cb(null, true)
       : cb(new Error('Only JPEG, PNG, GIF, and WebP images are allowed'))
 });
@@ -314,7 +313,7 @@ router.get('/highlights', optionalAuth, async (req, res) => {
 
     const [eventPosts, clubs, deptList] = await Promise.all([
       FeedPost.find({ status: 'published', type: 'event' })
-        .populate({ path: 'event', select: 'title date time location department type capacity attendees status photo registrationDeadline registrationOpen' })
+        .populate({ path: 'event', select: 'title date time location department type capacity attendees status photo registrationDeadline registrationOpen isPaid registrationFee currency paymentUpiId paymentInstructions' })
         .populate('club', 'name slug logo department followersCount verified admins')
         .sort({ publishedAt: -1 })
         .limit(40),
@@ -397,6 +396,7 @@ router.get('/event/:eventId', optionalAuth, async (req, res) => {
       isLiked: hydrated.isLiked,
       isSaved: hydrated.isSaved,
       isRegistered: hydrated.isRegistered,
+      isPaidRegistration: hydrated.event?.isPaidRegistration ?? true,
       registrationState: hydrated.registrationState,
       club: hydrated.club,
       availableSeats: hydrated.event?.availableSeats ?? 0
@@ -461,7 +461,7 @@ router.post(
         content,
         category,
         tags: sanitizeTags(req.body.tags),
-        mediaUrl: req.file ? `/uploads/${req.file.filename}` : '',
+        mediaUrl: req.file ? fileToDataUri(req.file) : sanitizeMediaUrl(req.body.mediaUrl) || '',
         relatedEvent: relatedEventId,
         status: 'published',
         publishedAt: new Date()

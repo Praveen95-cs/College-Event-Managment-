@@ -22,7 +22,18 @@ const schema = new mongoose.Schema({
     tags: [{ type: String, trim: true }],
     eligibility: { type: String, default: 'Open to all enrolled students', trim: true },
     registrationDeadline: { type: Date, default: null },
-    registrationOpen: { type: Boolean, default: true }
+    registrationOpen: { type: Boolean, default: true },
+    isPaid: { type: Boolean, default: false },
+    registrationFee: { type: Number, default: 0, min: 0 },
+    currency: { type: String, default: 'INR', trim: true },
+    paymentUpiId: { type: String, default: '', trim: true },
+    paymentInstructions: { type: String, default: '', trim: true },
+    whatsappGroupLink: { type: String, default: '', trim: true },
+    autoDeleteWhenExpired: {
+        type: String,
+        enum: ['inherit', 'always', 'never'],
+        default: 'inherit'
+    }
 }, { timestamps: true });
 schema.virtual('isFull').get(function () { return this.attendees.length >= this.capacity; });
 schema.methods.addAttendee = async function (userId) {

@@ -11,6 +11,123 @@ const geminiService = require('../../services/ai/geminiService');
 const codeExecutionService = require('../../services/competitions/codeExecutionService');
 const { generateCompetitionCertificateStream } = require('../../services/events/certificateService');
 
+async function evaluateCompetitionAccess(comp, user, preloadedRegMap = null) {
+  if (!comp?.event || comp.requireEventRegistration === false) {
+    return { allowed: true, code: 'OPEN', message: null };
+  }
+
+  const eventDoc = comp.event?.title
+    ? comp.event
+    : await Event.findById(comp.event).select(
+        'title status isPaid registrationFee currency paymentUpiId paymentInstructions attendees capacity'
+      );
+
+  if (!eventDoc) {
+    return { allowed: true, code: 'OPEN', message: null };
+  }
+
+  const fee = eventDoc.isPaid ? Number(eventDoc.registrationFee || 0) : 0;
+  const isPaidEvent = Boolean(eventDoc.isPaid && fee > 0);
+  const currency = eventDoc.currency || 'INR';
+
+  if (user && ['admin', 'organizer'].includes(user.role)) {
+    return {
+      allowed: true,
+      code: 'PRIVILEGED',
+      eventId: eventDoc._id,
+      eventTitle: eventDoc.title,
+      isPaid: isPaidEvent,
+      registrationFee: fee,
+      currency,
+      isEventRegistered: true,
+      isEventPaid: true,
+      message: null
+    };
+  }
+
+  if (!user) {
+    return {
+      allowed: false,
+      code: 'AUTH_REQUIRED',
+      eventId: eventDoc._id,
+      eventTitle: eventDoc.title,
+      isPaid: isPaidEvent,
+      registrationFee: fee,
+      currency,
+      isEventRegistered: false,
+      isEventPaid: false,
+      message: isPaidEvent
+        ? `Sign in, register for "${eventDoc.title}", and pay ${currency} ${fee} to unlock this competition.`
+        : `Sign in and register for "${eventDoc.title}" to unlock this competition.`
+    };
+  }
+
+  const reg = preloadedRegMap
+    ? preloadedRegMap.get(eventDoc._id.toString()) || null
+    : await Registration.findOne({
+        event: eventDoc._id,
+        user: user._id,
+        status: { $nin: ['cancelled', 'rejected'] }
+      }).lean();
+
+  const inAttendees = Array.isArray(eventDoc.attendees)
+    ? eventDoc.attendees.some(a => (a._id ? a._id.toString() : a.toString()) === user._id.toString())
+    : false;
+
+  const isEventRegistered = Boolean(reg || inAttendees);
+  if (!isEventRegistered) {
+    return {
+      allowed: false,
+      code: 'EVENT_REGISTRATION_REQUIRED',
+      eventId: eventDoc._id,
+      eventTitle: eventDoc.title,
+      isPaid: isPaidEvent,
+      registrationFee: fee,
+      currency,
+      isEventRegistered: false,
+      isEventPaid: false,
+      message: isPaidEvent
+        ? `Register and pay ${currency} ${fee} for "${eventDoc.title}" to unlock this competition.`
+        : `Register for "${eventDoc.title}" to unlock this competition.`
+    };
+  }
+
+  if (isPaidEvent) {
+    const paidOk = Boolean(
+      reg &&
+      reg.paymentStatus === 'paid' &&
+      Number(reg.amountPaid || 0) >= fee
+    );
+    if (!paidOk) {
+      return {
+        allowed: false,
+        code: 'EVENT_PAYMENT_REQUIRED',
+        eventId: eventDoc._id,
+        eventTitle: eventDoc.title,
+        isPaid: true,
+        registrationFee: fee,
+        currency,
+        isEventRegistered: true,
+        isEventPaid: false,
+        message: `Complete the ${currency} ${fee} event payment for "${eventDoc.title}" to attend this competition.`
+      };
+    }
+  }
+
+  return {
+    allowed: true,
+    code: 'ALLOWED',
+    eventId: eventDoc._id,
+    eventTitle: eventDoc.title,
+    isPaid: isPaidEvent,
+    registrationFee: fee,
+    currency,
+    isEventRegistered: true,
+    isEventPaid: true,
+    message: null
+  };
+}
+
 /**
 /**
  * Health and status check for AI provider integration
@@ -44,36 +161,60 @@ router.get('/', optionalAuth, async (req, res) => {
 
     const competitions = await Competition.find(filter)
       .populate('organizer', 'name email department')
-      .populate('event', 'title date location department')
+      .populate('event', 'title date location department status isPaid registrationFee currency paymentUpiId paymentInstructions attendees capacity')
       .sort({ startTime: 1 });
 
     let userAssignments = {};
+    let userRegMap = new Map();
     if (req.user) {
-      const assignments = await AssessmentAssignment.find({
-        user: req.user._id,
-        competition: { $in: competitions.map(c => c._id) }
-      }).select('competition status score totalPossibleScore submitTime');
+      const linkedEventIds = competitions.map(c => c.event?._id).filter(Boolean);
+      const [assignments, regs] = await Promise.all([
+        AssessmentAssignment.find({
+          user: req.user._id,
+          competition: { $in: competitions.map(c => c._id) }
+        }).select('competition status score totalPossibleScore submitTime'),
+        linkedEventIds.length > 0
+          ? Registration.find({
+              user: req.user._id,
+              event: { $in: linkedEventIds },
+              status: { $nin: ['cancelled', 'rejected'] }
+            }).lean()
+          : Promise.resolve([])
+      ]);
 
       assignments.forEach(a => {
         userAssignments[a.competition.toString()] = a;
       });
+      regs.forEach(r => {
+        userRegMap.set(r.event.toString(), r);
+      });
     }
 
-    const result = competitions.map(comp => {
-      const cObj = comp.toObject();
-      delete cObj.questionPool; // Never expose question pool in public listings
-      const assignment = userAssignments[comp._id.toString()] || null;
-      return {
-        ...cObj,
-        questionCount: comp.questionPool?.length || 0,
-        myAssignment: assignment ? {
-          status: assignment.status,
-          score: assignment.score,
-          totalPossibleScore: assignment.totalPossibleScore,
-          submitTime: assignment.submitTime
-        } : null
-      };
-    });
+    const result = await Promise.all(
+      competitions.map(async comp => {
+        const cObj = comp.toObject();
+        delete cObj.questionPool; // Never expose question pool in public listings
+        if (cObj.event && Array.isArray(cObj.event.attendees)) {
+          cObj.event.attendeesCount = cObj.event.attendees.length;
+          delete cObj.event.attendees;
+        }
+        const assignment = userAssignments[comp._id.toString()] || null;
+        const accessStatus = await evaluateCompetitionAccess(comp, req.user, userRegMap);
+        return {
+          ...cObj,
+          questionCount: comp.questionPool?.length || 0,
+          accessStatus,
+          myAssignment: assignment
+            ? {
+                status: assignment.status,
+                score: assignment.score,
+                totalPossibleScore: assignment.totalPossibleScore,
+                submitTime: assignment.submitTime
+              }
+            : null
+        };
+      })
+    );
 
     res.json(result);
   } catch (err) {
@@ -142,7 +283,7 @@ router.get('/my-certificates', auth, async (req, res) => {
           timeTakenSeconds: a.timeTakenSeconds,
           submitTime: a.submitTime || a.updatedAt,
           organizerName: comp.organizer?.name || 'Faculty Technical Chair',
-          department: comp.department || comp.event?.department || 'Computer Technology',
+          department: comp.department || comp.event?.department || 'Academic Department',
           certificateId: `CERT-COMP-${new Date(comp.startTime || a.createdAt).getFullYear()}-${comp._id.toString().slice(-4).toUpperCase()}-${a._id.toString().slice(-4).toUpperCase()}`
         };
       });
@@ -161,7 +302,7 @@ router.get('/:id', optionalAuth, async (req, res) => {
   try {
     const comp = await Competition.findById(req.params.id)
       .populate('organizer', 'name email department')
-      .populate('event', 'title date location department');
+      .populate('event', 'title date location department status isPaid registrationFee currency paymentUpiId paymentInstructions attendees capacity');
 
     if (!comp) {
       return res.status(404).json({ message: 'Competition not found' });
@@ -175,12 +316,18 @@ router.get('/:id', optionalAuth, async (req, res) => {
       });
     }
 
+    const accessStatus = await evaluateCompetitionAccess(comp, req.user);
     const cObj = comp.toObject();
     delete cObj.questionPool; // Hidden from general view
+    if (cObj.event && Array.isArray(cObj.event.attendees)) {
+      cObj.event.attendeesCount = cObj.event.attendees.length;
+      delete cObj.event.attendees;
+    }
 
     res.json({
       ...cObj,
       questionCount: comp.questionPool?.length || 0,
+      accessStatus,
       myAssignment: myAssignment ? {
         _id: myAssignment._id,
         status: myAssignment.status,
@@ -265,6 +412,7 @@ router.post('/', auth, authorize('admin', 'organizer'), [
       participantLimit,
       permittedLanguages,
       questionsPerParticipant,
+      requireEventRegistration,
       settings
     } = req.body;
 
@@ -272,6 +420,7 @@ router.post('/', auth, authorize('admin', 'organizer'), [
       title,
       description,
       event: event || null,
+      requireEventRegistration: requireEventRegistration !== undefined ? Boolean(requireEventRegistration) : true,
       organizer: req.user._id,
       type,
       prompt: prompt || '',
@@ -323,12 +472,16 @@ router.put('/:id', auth, authorize('admin', 'organizer'), async (req, res) => {
       'title', 'description', 'event', 'type', 'prompt', 'topics',
       'difficulty', 'durationMinutes', 'totalMarks', 'negativeMarking',
       'startTime', 'endTime', 'participantLimit', 'permittedLanguages',
-      'questionsPerParticipant', 'settings', 'status'
+      'questionsPerParticipant', 'requireEventRegistration', 'settings', 'status'
     ];
 
     updatable.forEach(field => {
       if (req.body[field] !== undefined) {
-        comp[field] = req.body[field];
+        if (field === 'event' && !req.body.event) {
+          comp.event = null;
+        } else {
+          comp[field] = req.body[field];
+        }
       }
     });
 
@@ -623,33 +776,15 @@ router.post('/:id/start', auth, async (req, res) => {
       return res.status(400).json({ message: `Competition has already ended at ${comp.endTime.toLocaleString()}` });
     }
 
-    // If competition is attached to an Event, verify event registration if required
-    if (comp.event) {
-      const reg = await Registration.findOne({ event: comp.event, user: req.user._id });
-      if (!reg && req.user.role === 'student') {
-        // Automatically link attendee if event is open or has capacity
-        const eventDoc = await Event.findById(comp.event);
-        if (eventDoc && !eventDoc.attendees.includes(req.user._id)) {
-          if (!eventDoc.isFull) {
-            await eventDoc.addAttendee(req.user._id);
-            await Registration.create({
-              event: eventDoc._id,
-              user: req.user._id,
-              name: req.user.name,
-              regNo: req.user._id.toString().slice(-8),
-              status: 'approved'
-            });
-          } else {
-            return res.status(403).json({ message: 'Event is full. Cannot enter competition.' });
-          }
-        }
-      }
+    const accessStatus = await evaluateCompetitionAccess(comp, req.user);
+    if (!accessStatus.allowed) {
+      return res.status(403).json(accessStatus);
     }
 
-/**
- * Unbiased Fisher-Yates shuffle algorithm to guarantee uniform random permutations
- */
-function fisherYatesShuffle(array) {
+    /**
+     * Unbiased Fisher-Yates shuffle algorithm to guarantee uniform random permutations
+     */
+    function fisherYatesShuffle(array) {
   const arr = [...array];
   for (let i = arr.length - 1; i > 0; i--) {
     const j = Math.floor(Math.random() * (i + 1));
@@ -685,6 +820,7 @@ function fisherYatesShuffle(array) {
       const sanitizedQuestions = comp.getSanitizedQuestions(assignment.assignedQuestionIds);
       return res.json({
         assignmentId: assignment._id,
+        title: comp.title,
         status: assignment.status,
         startTime: assignment.startTime,
         expiresAt: assignment.expiresAt,
@@ -752,6 +888,7 @@ function fisherYatesShuffle(array) {
           const sanitizedQuestions = comp.getSanitizedQuestions(assignment.assignedQuestionIds);
           return res.json({
             assignmentId: assignment._id,
+            title: comp.title,
             status: assignment.status,
             startTime: assignment.startTime,
             expiresAt: assignment.expiresAt,
@@ -773,6 +910,7 @@ function fisherYatesShuffle(array) {
 
     res.json({
       assignmentId: assignment._id,
+      title: comp.title,
       status: assignment.status,
       startTime: assignment.startTime,
       expiresAt: assignment.expiresAt,
@@ -801,13 +939,21 @@ router.post('/:id/save-answer', auth, async (req, res) => {
       return res.status(400).json({ message: 'questionId is required' });
     }
 
-    const assignment = await AssessmentAssignment.findOne({
-      competition: req.params.id,
-      user: req.user._id
-    });
+    const [comp, assignment] = await Promise.all([
+      Competition.findById(req.params.id),
+      AssessmentAssignment.findOne({
+        competition: req.params.id,
+        user: req.user._id
+      })
+    ]);
 
-    if (!assignment) {
+    if (!comp || !assignment) {
       return res.status(404).json({ message: 'Assignment not found. Please start the competition first.' });
+    }
+
+    const accessStatus = await evaluateCompetitionAccess(comp, req.user);
+    if (!accessStatus.allowed) {
+      return res.status(403).json(accessStatus);
     }
 
     if (assignment.status !== 'in_progress') {
@@ -858,6 +1004,11 @@ router.post('/:id/run-code', auth, async (req, res) => {
       return res.status(404).json({ message: 'Competition not found' });
     }
 
+    const accessStatus = await evaluateCompetitionAccess(comp, req.user);
+    if (!accessStatus.allowed) {
+      return res.status(403).json(accessStatus);
+    }
+
     const problem = comp.questionPool.find(q => (q.problemId === problemId || q.questionId === problemId));
     if (!problem || problem.type !== 'coding') {
       return res.status(404).json({ message: 'Coding problem not found' });
@@ -888,6 +1039,11 @@ router.post('/:id/submit-code', auth, async (req, res) => {
 
     if (!comp || !assignment) {
       return res.status(404).json({ message: 'Competition or assignment not found' });
+    }
+
+    const accessStatus = await evaluateCompetitionAccess(comp, req.user);
+    if (!accessStatus.allowed) {
+      return res.status(403).json(accessStatus);
     }
 
     if (assignment.status !== 'in_progress') {
@@ -982,6 +1138,11 @@ router.post('/:id/submit', auth, async (req, res) => {
 
     if (!comp || !assignment) {
       return res.status(404).json({ message: 'Competition or assignment not found' });
+    }
+
+    const accessStatus = await evaluateCompetitionAccess(comp, req.user);
+    if (!accessStatus.allowed) {
+      return res.status(403).json(accessStatus);
     }
 
     if (assignment.status === 'submitted') {
@@ -1416,4 +1577,5 @@ router.get('/:id/export', auth, authorize('admin', 'organizer'), async (req, res
   }
 });
 
+router.evaluateCompetitionAccess = evaluateCompetitionAccess;
 module.exports = router;

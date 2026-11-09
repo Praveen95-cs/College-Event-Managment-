@@ -10,10 +10,12 @@ import {
   PlusIcon,
   CalendarDaysIcon,
   ArrowRightIcon,
-  TrashIcon
+  TrashIcon,
+  LockClosedIcon
 } from '@heroicons/react/24/outline';
 
 import { getBackendUrl } from '../../utils/apiConfig';
+import EventRegistration from '../../components/events/EventRegistration';
 
 const Competitions = () => {
   const { user } = useAuth();
@@ -23,6 +25,7 @@ const Competitions = () => {
   const [error, setError] = useState('');
   const [activeTab, setActiveTab] = useState('all'); // 'all', 'quiz', 'coding', 'hybrid'
   const [geminiStatus, setGeminiStatus] = useState(null);
+  const [unlockEvent, setUnlockEvent] = useState(null);
 
   const backendUrl = getBackendUrl();
 
@@ -223,6 +226,10 @@ const Competitions = () => {
             const isFinished = now > end || comp.status === 'completed';
             const hasSubmitted = comp.myAssignment && ['submitted', 'timed_out'].includes(comp.myAssignment.status);
             const inProgress = comp.myAssignment && comp.myAssignment.status === 'in_progress';
+            const isLocked = Boolean(comp.accessStatus && !comp.accessStatus.allowed && !hasSubmitted);
+            const evFee = Number(comp.event?.registrationFee || 0);
+            const evIsPaid = Boolean(comp.event?.isPaid && evFee > 0);
+            const evCurrency = comp.event?.currency && comp.event.currency !== 'INR' ? `${comp.event.currency} ` : '₹';
 
             const enterPath =
               comp.type === 'coding' ? `/competitions/${comp._id}/code` : `/competitions/${comp._id}/quiz`;
@@ -249,6 +256,39 @@ const Competitions = () => {
                   <p className="mt-1.5 text-[13px] text-[#aaa398] line-clamp-2 leading-relaxed">
                     {comp.description}
                   </p>
+
+                  {comp.event && (
+                    <div className="mt-3 p-2.5 rounded-[8px] bg-[#161513] border border-[#efe9de]/[0.08] flex items-center justify-between gap-2 text-[12px]">
+                      <Link
+                        to={`/events/${comp.event._id}`}
+                        className="font-medium text-[#efe9de] hover:text-[#ebb05d] truncate transition-colors"
+                      >
+                        Event: {comp.event.title}
+                      </Link>
+                      <span
+                        className={`px-1.5 py-0.5 rounded-[5px] text-[10px] font-mono shrink-0 border ${
+                          evIsPaid
+                            ? 'bg-[#e09132]/12 text-[#ebb05d] border-[#e09132]/25'
+                            : 'bg-[#4cc38a]/10 text-[#4cc38a] border-[#4cc38a]/25'
+                        }`}
+                      >
+                        {evIsPaid ? `${evCurrency}${evFee}` : 'Free'}
+                      </span>
+                    </div>
+                  )}
+
+                  {isLocked && (
+                    <div className="mt-2.5 inline-flex items-center gap-1.5 px-2.5 py-1 rounded-[6px] text-[11px] bg-[#e09132]/10 text-[#ebb05d] border border-[#e09132]/25">
+                      <LockClosedIcon className="h-3.5 w-3.5 shrink-0" strokeWidth={1.75} />
+                      <span>
+                        {comp.accessStatus.code === 'EVENT_PAYMENT_REQUIRED'
+                          ? `Complete ${evCurrency}${evFee} event payment to attend`
+                          : evIsPaid
+                            ? `Requires event registration & ${evCurrency}${evFee} fee`
+                            : 'Requires event registration to attend'}
+                      </span>
+                    </div>
+                  )}
 
                   {comp.topics?.length > 0 && (
                     <div className="mt-4 flex flex-wrap gap-1.5">
@@ -322,6 +362,23 @@ const Competitions = () => {
                       >
                         {comp.myAssignment.score}/{comp.myAssignment.totalPossibleScore}
                       </Link>
+                    ) : isLocked && (isLive || inProgress) ? (
+                      !user ? (
+                        <Link to="/login" className="btn-primary h-8 px-3 text-[12px]">
+                          Sign in to unlock
+                        </Link>
+                      ) : (
+                        <button
+                          type="button"
+                          onClick={() => setUnlockEvent(comp.event)}
+                          className="btn-primary h-8 px-3 text-[12px]"
+                        >
+                          <LockClosedIcon className="h-3.5 w-3.5" strokeWidth={1.75} />
+                          <span>
+                            {evIsPaid ? `Pay ${evCurrency}${evFee} & unlock` : 'Register to unlock'}
+                          </span>
+                        </button>
+                      )
                     ) : inProgress ? (
                       <button
                         onClick={() => navigate(enterPath)}
@@ -345,6 +402,14 @@ const Competitions = () => {
                       >
                         Results
                       </Link>
+                    ) : isLocked && user && comp.event ? (
+                      <button
+                        type="button"
+                        onClick={() => setUnlockEvent(comp.event)}
+                        className="btn-secondary h-8 px-3 text-[12px]"
+                      >
+                        {evIsPaid ? `Pay ${evCurrency}${evFee} early` : 'Pre-register'}
+                      </button>
                     ) : (
                       <span className="h-8 inline-flex items-center px-2.5 rounded-[8px] text-[12px] text-[#8a847a] bg-[#262421] border border-[#efe9de]/[0.06]">
                         Opens soon
@@ -356,6 +421,14 @@ const Competitions = () => {
             );
           })}
         </div>
+      )}
+
+      {unlockEvent && (
+        <EventRegistration
+          event={unlockEvent}
+          onClose={() => setUnlockEvent(null)}
+          onRegistered={() => fetchCompetitions()}
+        />
       )}
     </div>
   );

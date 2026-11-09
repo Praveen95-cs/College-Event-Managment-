@@ -9,7 +9,7 @@ const About = () => {
             About Avenor
           </h1>
           <p className="mt-2 text-[15px] text-[#aaa398] leading-relaxed">
-            Campus event operations, seat registration, and timed technical arenas in one place.
+            Campus event operations, YouPI-PG V2 ticket reconciliation, verified student onboarding, Campus Feed communities, and timed AI/sandboxed arenas in one platform.
           </p>
         </div>
 
@@ -17,40 +17,39 @@ const About = () => {
           <section className="space-y-2">
             <h2 className="text-[17px] font-medium text-[#ebb05d]">Purpose</h2>
             <p>
-              Avenor connects students, department organizers, and campus administrators around one shared schedule for workshops, symposiums, quizzes, and coding competitions.
+              Avenor unifies students, verified campus clubs, department organizers, and administrators around one trustworthy system for workshops, technical symposiums, paid summits, WhatsApp attendee coordination, and coding or quiz competitions.
             </p>
           </section>
 
           <section className="space-y-3">
             <h2 className="text-[17px] font-medium text-[#ebb05d]">Core capabilities</h2>
             <ul className="space-y-2 list-disc list-inside text-[#efe9de]/90">
-              <li>Event publishing, approval queues, and attendance tracking for organizers</li>
-              <li>Seat reservations and event schedules for students</li>
-              <li>Real-time campus announcements and event updates</li>
-              <li>Payment recording for paid workshops and sessions</li>
-              <li>Attendance reporting and Excel/PDF exports</li>
-              <li>Timed quiz and isolated coding arenas with merit certificates</li>
+              <li>Email OTP-verified student registration and self-service password recovery</li>
+              <li>Post-publish event management, seat reservations, and automated student email confirmations</li>
+              <li>YouPI-PG V2 zero-fee UPI QR &amp; UTR reconciliation unlocking competition passes and official WhatsApp group links</li>
+              <li>Campus Feed with verified department clubs, followable chapters, announcements, likes, bookmarks, and comments</li>
+              <li>Venue attendance check-in ledger (present/absent/unmarked) with Excel roster exports and A4 PDF certificates</li>
+              <li>AI-cached timed MCQ quizzes and sandboxed C++, Python, Java, and JavaScript coding arenas with live leaderboards</li>
+              <li>Admin governance over academic departments, organizer &amp; student accounts, and automatic cloud cleanup of expired events</li>
             </ul>
           </section>
 
           <section className="space-y-2">
             <h2 className="text-[17px] font-medium text-[#ebb05d]">Maintainers</h2>
             <p>
-              Built by a student engineering team focused on reliable, straightforward tooling for academic event coordination.
+              Built by an Anna University / MIT student engineering team focused on transparent, reliable, production-grade tooling for academic event coordination.
             </p>
           </section>
 
           <section className="space-y-2">
             <h2 className="text-[17px] font-medium text-[#ebb05d]">Contact</h2>
             <p>
-              Questions or feedback can be sent to the campus team:
+              Questions, department requests, or platform feedback can be sent to the campus team:
             </p>
             <div className="pt-1 space-y-1 font-mono text-[13px] text-[#efe9de]">
               <p>2023503013@student.annauniv.edu</p>
               <p>2023503503@student.annauniv.edu</p>
               <p>2023503015@student.annauniv.edu</p>
-              <p>2023503302@student.annauniv.edu</p>
-              <p>2023503525@student.annauniv.edu</p>
             </div>
           </section>
         </div>

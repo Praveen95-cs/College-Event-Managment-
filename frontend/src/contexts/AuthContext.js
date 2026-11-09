@@ -62,13 +62,52 @@ export const AuthProvider = ({ children }) => {
     }
   };
 
+  const sendSignupOtp = async ({ email, name = '', purpose = 'register' }) => {
+    try {
+      const response = await axios.post('/api/auth/send-otp', { email, name, purpose });
+      return response.data;
+    } catch (error) {
+      const errorMessage = error.response?.data?.message || 'Failed to send verification OTP.';
+      const err = new Error(errorMessage);
+      err.retryAfterSeconds = error.response?.data?.retryAfterSeconds;
+      throw err;
+    }
+  };
+
+  const verifySignupOtp = async ({ email, otp, purpose = 'register' }) => {
+    try {
+      const response = await axios.post('/api/auth/verify-otp', { email, otp, purpose });
+      return response.data;
+    } catch (error) {
+      const errorMessage = error.response?.data?.message || 'Invalid verification OTP.';
+      throw new Error(errorMessage);
+    }
+  };
+
+  const resetPassword = async ({ email, newPassword, verificationToken = '', otp = '' }) => {
+    try {
+      const response = await axios.post('/api/auth/reset-password', {
+        email,
+        newPassword,
+        ...(verificationToken ? { verificationToken } : {}),
+        ...(otp ? { otp } : {})
+      });
+      return response.data;
+    } catch (error) {
+      const errorMessage = error.response?.data?.message || 'Failed to reset password.';
+      throw new Error(errorMessage);
+    }
+  };
+
   const register = async (userData) => {
     try {
       const studentData = {
         name: userData.name,
         email: userData.email,
         password: userData.password,
-        department: userData.department
+        department: userData.department,
+        ...(userData.verificationToken ? { verificationToken: userData.verificationToken } : {}),
+        ...(userData.otp ? { otp: userData.otp } : {})
       };
       const response = await axios.post('/api/auth/register', studentData);
       const { token, user } = response.data;
@@ -99,6 +138,9 @@ export const AuthProvider = ({ children }) => {
     loading,
     login,
     register,
+    sendSignupOtp,
+    verifySignupOtp,
+    resetPassword,
     logout,
     isAuthenticated: !!user
   };

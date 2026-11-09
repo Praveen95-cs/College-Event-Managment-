@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { useParams, useNavigate } from 'react-router-dom';
+import { useParams, useNavigate, useSearchParams } from 'react-router-dom';
 import axios from 'axios';
 import {
   TrashIcon,
@@ -14,6 +14,8 @@ import { getBackendUrl } from '../../utils/apiConfig';
 const ManageCompetition = () => {
   const { id } = useParams();
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
+  const presetEventId = searchParams.get('eventId') || '';
   const backendUrl = getBackendUrl();
 
   const [activeTab, setActiveTab] = useState(id ? 'questions' : 'setup');
@@ -27,7 +29,8 @@ const ManageCompetition = () => {
   const [formData, setFormData] = useState({
     title: '',
     description: '',
-    event: '',
+    event: presetEventId,
+    requireEventRegistration: true,
     type: 'quiz',
     prompt: '',
     topics: '',
@@ -125,6 +128,7 @@ const ManageCompetition = () => {
         title: comp.title || '',
         description: comp.description || '',
         event: comp.event?._id || comp.event || '',
+        requireEventRegistration: comp.requireEventRegistration !== false,
         type: comp.type || 'quiz',
         prompt: comp.prompt || '',
         topics: Array.isArray(comp.topics) ? comp.topics.join(', ') : '',
@@ -146,8 +150,11 @@ const ManageCompetition = () => {
   };
 
   const handleInputChange = (e) => {
-    const { name, value } = e.target;
-    setFormData(prev => ({ ...prev, [name]: value }));
+    const { name, value, type, checked } = e.target;
+    setFormData(prev => ({
+      ...prev,
+      [name]: type === 'checkbox' ? checked : value
+    }));
   };
 
   const handleLanguageToggle = (lang) => {
@@ -571,10 +578,41 @@ const ManageCompetition = () => {
                 <option value="">Standalone competition</option>
                 {events.map(ev => (
                   <option key={ev._id} value={ev._id}>
-                    {ev.title} ({ev.department})
+                    {ev.title} ({ev.department}
+                    {ev.isPaid && Number(ev.registrationFee || 0) > 0
+                      ? ` · ₹${ev.registrationFee}`
+                      : ' · Free'}
+                    )
                   </option>
                 ))}
               </select>
+              {formData.event && (() => {
+                const selectedEv = events.find(ev => ev._id === formData.event);
+                const evPaid = Boolean(selectedEv?.isPaid && Number(selectedEv?.registrationFee || 0) > 0);
+                return (
+                  <div className="mt-2.5 space-y-2">
+                    {selectedEv && (
+                      <span className="inline-flex items-center px-2 py-0.5 rounded-[6px] text-[11px] font-mono bg-[#161513] text-[#ebb05d] border border-[#efe9de]/[0.08]">
+                        {evPaid
+                          ? `Paid event · ₹${selectedEv.registrationFee} payment required`
+                          : 'Free event · Registration gating'}
+                      </span>
+                    )}
+                    <label className="flex items-start gap-2 cursor-pointer text-[12px] text-[#aaa398]">
+                      <input
+                        type="checkbox"
+                        name="requireEventRegistration"
+                        checked={formData.requireEventRegistration}
+                        onChange={handleInputChange}
+                        className="mt-0.5 rounded border-[#efe9de]/20 bg-[#262421] text-[#e09132] focus:ring-[#e09132] h-4 w-4"
+                      />
+                      <span>
+                        Require student to register{evPaid ? ' & complete payment' : ''} for this event before entering arena
+                      </span>
+                    </label>
+                  </div>
+                );
+              })()}
             </div>
 
             <div>

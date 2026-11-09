@@ -13,7 +13,8 @@ import {
   MegaphoneIcon,
   CheckBadgeIcon,
   TrashIcon,
-  CheckIcon
+  CheckIcon,
+  CurrencyRupeeIcon
 } from '@heroicons/react/24/outline';
 import {
   HeartIcon as HeartSolidIcon,
@@ -26,6 +27,7 @@ import {
   formatCount,
   getEventLifecycle
 } from '../../utils/eventLifecycle';
+import ClubLogo from './ClubLogo';
 
 const EventFeedCard = ({
   item,
@@ -64,11 +66,17 @@ const EventFeedCard = ({
         : '/campus-feed';
 
   const mediaSrc = resolveMediaUrl(item.mediaUrl);
-  const clubLogoSrc = resolveMediaUrl(club?.logo);
 
   const lifecycle = isEvent
     ? getEventLifecycle(event, item.isRegistered)
     : null;
+  const isPaidEvent = Boolean(isEvent && event?.isPaid && Number(event?.registrationFee || 0) > 0);
+  const feeLabel = isPaidEvent
+    ? `${event.currency && event.currency !== 'INR' ? `${event.currency} ` : '₹'}${Number(event.registrationFee)}`
+    : 'Free';
+  const needsPaymentCompletion = Boolean(
+    isEvent && item.isRegistered && isPaidEvent && event.isPaidRegistration === false
+  );
 
   const handleShare = async () => {
     const sharePath = isEvent ? `/events/${event._id}` : `/clubs/${club?._id || ''}`;
@@ -101,6 +109,18 @@ const EventFeedCard = ({
   const renderRegisterButton = () => {
     if (!isEvent || !lifecycle) return null;
 
+    if (needsPaymentCompletion) {
+      return (
+        <button
+          type="button"
+          onClick={() => onRegisterClick?.(event, item)}
+          className="btn-primary h-9 px-3.5 text-[12px] shrink-0"
+        >
+          Pay {feeLabel} &amp; confirm
+        </button>
+      );
+    }
+
     if (lifecycle.state === 'REGISTERED ✓') {
       return (
         <span className="inline-flex items-center gap-1.5 h-9 px-3.5 rounded-[8px] text-[13px] font-medium bg-[#4cc38a]/12 text-[#4cc38a] border border-[#4cc38a]/30 select-none shrink-0">
@@ -125,7 +145,7 @@ const EventFeedCard = ({
     if (!currentUser) {
       return (
         <Link to="/login" className="btn-primary h-9 px-4 text-[13px] shrink-0">
-          Register now
+          {isPaidEvent ? `Pay ${feeLabel} & register` : 'Register now'}
         </Link>
       );
     }
@@ -136,7 +156,7 @@ const EventFeedCard = ({
         onClick={() => onRegisterClick?.(event, item)}
         className="btn-primary h-9 px-4 text-[13px] shrink-0"
       >
-        Register now
+        {isPaidEvent ? `Pay ${feeLabel} & register` : 'Register now'}
       </button>
     );
   };
@@ -155,18 +175,12 @@ const EventFeedCard = ({
           {club ? (
             <Link
               to={`/clubs/${club._id}`}
-              className="h-10 w-10 rounded-[10px] bg-[#262421] border border-[#efe9de]/[0.1] flex items-center justify-center text-[#ebb05d] font-medium text-[15px] shrink-0 overflow-hidden hover:border-[#e09132]/50 transition-colors duration-150"
+              className="rounded-[10px] hover:opacity-90 transition-opacity duration-150 shrink-0"
             >
-              {clubLogoSrc ? (
-                <img src={clubLogoSrc} alt={club.name} className="w-full h-full object-cover" />
-              ) : (
-                <span aria-hidden="true">{club.name.charAt(0).toUpperCase()}</span>
-              )}
+              <ClubLogo club={club} size="md" className="hover:border-[#e09132]/50 transition-colors" />
             </Link>
           ) : (
-            <div className="h-10 w-10 rounded-[10px] bg-[#262421] border border-[#efe9de]/[0.1] flex items-center justify-center text-[#ebb05d] font-medium text-[15px] shrink-0">
-              <span aria-hidden="true">{(item.author?.name || 'A').charAt(0).toUpperCase()}</span>
-            </div>
+            <ClubLogo fallbackName={item.author?.name || 'A'} size="md" />
           )}
 
           <div className="min-w-0">
@@ -216,6 +230,18 @@ const EventFeedCard = ({
         </div>
 
         <div className="flex items-center gap-2 shrink-0" ref={menuRef}>
+          {isEvent && (
+            <span
+              className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-[6px] text-[11px] font-mono ${
+                isPaidEvent
+                  ? 'bg-[#e09132]/12 text-[#ebb05d] border border-[#e09132]/25'
+                  : 'bg-[#4cc38a]/10 text-[#4cc38a] border border-[#4cc38a]/25'
+              }`}
+            >
+              {isPaidEvent && <CurrencyRupeeIcon className="h-3.5 w-3.5" strokeWidth={1.5} />}
+              <span>{feeLabel}</span>
+            </span>
+          )}
           {!isEvent && (
             <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-[6px] text-[11px] font-mono bg-[#e09132]/12 text-[#ebb05d] border border-[#e09132]/25">
               <MegaphoneIcon className="h-3.5 w-3.5" strokeWidth={1.5} />

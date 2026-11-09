@@ -10,7 +10,14 @@ const Club = require('../../models/feed/Club');
 const ClubFollow = require('../../models/feed/ClubFollow');
 const FeedPost = require('../../models/feed/FeedPost');
 const Event = require('../../models/events/Event');
-const { sanitizePlainText, sanitizeTags, escapeRegex } = require('../../utils/sanitize');
+const {
+  sanitizePlainText,
+  sanitizeTags,
+  escapeRegex,
+  ALLOWED_IMAGE_MIME_TYPES,
+  fileToDataUri,
+  sanitizeMediaUrl
+} = require('../../utils/sanitize');
 const {
   PUBLISHED_EVENT_STATUSES,
   createUniqueSlug,
@@ -22,14 +29,10 @@ const uploadsDir = path.join(__dirname, '..', '..', 'uploads');
 fs.mkdirSync(uploadsDir, { recursive: true });
 
 const upload = multer({
-  storage: multer.diskStorage({
-    destination: (_, __, cb) => cb(null, uploadsDir),
-    filename: (_, file, cb) =>
-      cb(null, `club-${Date.now()}-${Math.round(Math.random() * 1e9)}${path.extname(file.originalname)}`)
-  }),
-  limits: { fileSize: 5 * 1024 * 1024 },
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 2 * 1024 * 1024 },
   fileFilter: (_, file, cb) =>
-    ['image/jpeg', 'image/png', 'image/gif', 'image/webp'].includes(file.mimetype)
+    ALLOWED_IMAGE_MIME_TYPES.has(String(file.mimetype || '').toLowerCase())
       ? cb(null, true)
       : cb(new Error('Only JPEG, PNG, GIF, and WebP images are allowed'))
 });
@@ -138,13 +141,14 @@ router.post(
       }
 
       const slug = await createUniqueSlug(name);
+      const logo = req.file ? fileToDataUri(req.file) : sanitizeMediaUrl(req.body.logoUrl);
       const club = await Club.create({
         name,
         slug,
         description: sanitizePlainText(req.body.description, 1000),
         department: sanitizePlainText(req.body.department, 100) || req.user.department || 'General',
         tags: sanitizeTags(req.body.tags),
-        logo: req.file ? `/uploads/${req.file.filename}` : '',
+        logo: logo || '',
         admins: [req.user._id],
         createdBy: req.user._id,
         followersCount: 0,
@@ -237,7 +241,7 @@ router.get('/:clubId', optionalAuth, async (req, res) => {
 });
 
 // Update club details
-router.patch('/:clubId', auth, authorize('organizer', 'admin'), async (req, res) => {
+router.patch('/:clubId', auth, authorize('organizer', 'admin'), upload.single('logo'), async (req, res) => {
   try {
     const club = await findClubByParam(req.params.clubId);
     if (!club) return res.status(404).json({ message: 'Club not found' });
@@ -263,8 +267,25 @@ router.patch('/:clubId', auth, authorize('organizer', 'admin'), async (req, res)
       club.tags = sanitizeTags(req.body.tags);
     }
 
+    if (req.file) {
+      club.logo = fileToDataUri(req.file);
+    } else if (req.body.removeLogo === 'true' || req.body.removeLogo === true) {
+      club.logo = '';
+    } else if (req.body.logoUrl !== undefined && String(req.body.logoUrl).trim() !== '') {
+      const sanitizedUrl = sanitizeMediaUrl(req.body.logoUrl);
+      if (!sanitizedUrl) {
+        return res.status(400).json({ message: 'Please provide a valid HTTP(S) or image data URL for the club logo.' });
+      }
+      club.logo = sanitizedUrl;
+    }
+
     await club.save();
-    res.json(club);
+    const isFollowing = Boolean(await ClubFollow.exists({ user: req.user._id, club: club._id }));
+    res.json({
+      ...club.toObject(),
+      isFollowing,
+      canManage: true
+    });
   } catch (err) {
     console.error('Error updating club:', err);
     res.status(500).json({ message: 'Failed to update club' });

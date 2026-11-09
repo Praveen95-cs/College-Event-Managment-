@@ -19,8 +19,9 @@ import EventFeedCard from '../../components/feed/EventFeedCard';
 import CommentsModal from '../../components/feed/CommentsModal';
 import AnnouncementModal from '../../components/feed/AnnouncementModal';
 import CreateClubModal from '../../components/feed/CreateClubModal';
+import ClubLogo from '../../components/feed/ClubLogo';
 import EventRegistration from '../../components/events/EventRegistration';
-import { resolveMediaUrl, formatEventDate, formatCount } from '../../utils/eventLifecycle';
+import { formatEventDate, formatCount } from '../../utils/eventLifecycle';
 
 const CATEGORIES = [
   'All',
@@ -412,7 +413,7 @@ const CampusFeed = () => {
     setItems(prev =>
       prev.map(p => {
         if (p.type === 'event' && p.event?._id === eventObj._id) {
-          const nextCount = (p.event.attendeesCount || 0) + 1;
+          const nextCount = p.isRegistered ? (p.event.attendeesCount || 0) : (p.event.attendeesCount || 0) + 1;
           return {
             ...p,
             isRegistered: true,
@@ -422,6 +423,7 @@ const CampusFeed = () => {
               attendeesCount: nextCount,
               availableSeats: Math.max(0, (p.event.capacity || 0) - nextCount),
               isRegistered: true,
+              isPaidRegistration: true,
               registrationState: 'REGISTERED ✓'
             }
           };
@@ -936,9 +938,7 @@ const CampusFeed = () => {
               </p>
             ) : (
               <div className="space-y-2.5">
-                {clubs.slice(0, 6).map((club) => {
-                  const logoSrc = resolveMediaUrl(club.logo);
-                  return (
+                {clubs.slice(0, 6).map((club) => (
                     <div
                       key={club._id}
                       className="flex items-center justify-between gap-2.5 p-2 rounded-[10px] bg-[#161513] border border-[#efe9de]/[0.06]"
@@ -947,13 +947,7 @@ const CampusFeed = () => {
                         to={`/clubs/${club._id}`}
                         className="flex items-center gap-2.5 min-w-0 group"
                       >
-                        <div className="h-8 w-8 rounded-[8px] bg-[#262421] border border-[#efe9de]/[0.08] flex items-center justify-center text-[12px] font-medium text-[#ebb05d] shrink-0 overflow-hidden">
-                          {logoSrc ? (
-                            <img src={logoSrc} alt={club.name} className="w-full h-full object-cover" />
-                          ) : (
-                            <span aria-hidden="true">{club.name.charAt(0).toUpperCase()}</span>
-                          )}
-                        </div>
+                        <ClubLogo club={club} size="sm" />
                         <div className="min-w-0">
                           <div className="flex items-center gap-1">
                             <span className="text-[13px] font-medium text-[#efe9de] group-hover:text-[#ebb05d] truncate transition-colors">
@@ -980,8 +974,7 @@ const CampusFeed = () => {
                         {club.isFollowing ? 'Following ✓' : '+ Follow'}
                       </button>
                     </div>
-                  );
-                })}
+                  ))}
               </div>
             )}
           </div>

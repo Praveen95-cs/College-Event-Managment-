@@ -1,5 +1,9 @@
 const path = require('path');
 require('dotenv').config({ path: path.join(__dirname, '..', '.env') });
+// Never dispatch live emails to disposable @example.com test addresses during automated test runs
+process.env.SMTP_HOST = '';
+process.env.SMTP_USER = '';
+process.env.SMTP_PASS = '';
 const mongoose = require('mongoose');
 const assert = require('assert');
 
@@ -13,6 +17,44 @@ const geminiService = require('../services/ai/geminiService');
 const aiService = require('../services/ai/aiService');
 const BaseAIProvider = require('../services/ai/baseProvider');
 const codeExecutionService = require('../services/competitions/codeExecutionService');
+const {
+  sanitizeMediaUrl,
+  fileToDataUri,
+  sanitizeWhatsAppUrl,
+  sanitizeEmailAddress
+} = require('../utils/sanitize');
+const { generateQrSvg } = require('../utils/qrGenerator');
+const crypto = require('crypto');
+const Notification = require('../models/community/Notification');
+const EmailOtp = require('../models/auth/EmailOtp');
+const SystemSetting = require('../models/system/SystemSetting');
+const Department = require('../models/system/Department');
+const Club = require('../models/feed/Club');
+const FeedPost = require('../models/feed/FeedPost');
+const PostLike = require('../models/feed/PostLike');
+const { cascadeDeleteEvent, evaluateExpiredEvents } = require('../services/events/eventCleanupService');
+const {
+  createDepartment,
+  updateDepartment,
+  deleteDepartment,
+  resolveActiveDepartmentName
+} = require('../services/system/departmentService');
+const { cascadeDeleteUser } = require('../services/auth/userDeletionService');
+const {
+  toPaise,
+  toRupeesString,
+  buildUpiUri,
+  getYoupiConfig,
+  signWebhookPayload,
+  verifyYoupiWebhook,
+  createYoupiPaymentSession,
+  submitUtrAndProcessSession,
+  reconcileSessionByAdmin,
+  processIncomingWebhook
+} = require('../services/payments/youpiGatewayService');
+const YoupiPaymentSession = require('../models/payments/YoupiPaymentSession');
+const YoupiWebhookReceipt = require('../models/payments/YoupiWebhookReceipt');
+const competitionsRouter = require('../routes/competitions/competitions');
 
 async function runTestSuite() {
   console.log('====================================================');
@@ -510,6 +552,786 @@ if input_data:
     assert.strictEqual(await Competition.findById(compDoc._id), null, 'Linked competition should be deleted');
     assert.strictEqual(await Registration.findById(regDoc._id), null, 'Registration should be deleted');
     assert.strictEqual(await AssessmentAssignment.findById(assignment._id), null, 'Assessment should be deleted');
+  });
+
+  // TEST 16: Persistent Image Data-URI & Media URL Sanitization
+  await test('Media Sanitization - Persist uploaded logos/photos as safe data URIs and block unsafe URIs', async () => {
+    const sampleBuf = Buffer.from('89504e470d0a1a0a0000000d49484452', 'hex');
+    const dataUri = fileToDataUri({ buffer: sampleBuf, mimetype: 'image/png' });
+    assert(dataUri.startsWith('data:image/png;base64,'), 'Should convert uploaded buffer to PNG data URI');
+    assert.strictEqual(sanitizeMediaUrl(dataUri), dataUri, 'Valid PNG data URI should pass sanitization');
+    assert.strictEqual(
+      sanitizeMediaUrl('https://cdn.example.edu/logo.webp'),
+      'https://cdn.example.edu/logo.webp',
+      'Valid HTTPS image URL should pass sanitization'
+    );
+    assert.strictEqual(
+      sanitizeMediaUrl('/uploads/club-logo.png'),
+      '/uploads/club-logo.png',
+      'Legacy /uploads path should be preserved for sanitization'
+    );
+    assert.strictEqual(sanitizeMediaUrl('javascript:alert(1)'), '', 'JavaScript URL must be rejected');
+    assert.strictEqual(
+      sanitizeMediaUrl('data:image/svg+xml;base64,PHN2Zz4='),
+      '',
+      'Inline SVG data URI must be rejected'
+    );
+  });
+
+  // TEST 17: Paid Event + Linked Competition Access Gating
+  await test('Competition Access Gating - Require both event registration AND payment when linked to paid event', async () => {
+    const orgId = new mongoose.Types.ObjectId();
+    const studentUser = { _id: new mongoose.Types.ObjectId(), role: 'student' };
+
+    const paidEvent = await Event.create({
+      title: 'Paid AI Summit 2026',
+      description: 'Annual summit with paid pass and competition round',
+      date: new Date(Date.now() + 86400000),
+      time: '10:00 AM',
+      location: 'Main Auditorium',
+      department: 'Computer Science',
+      type: 'tech',
+      status: 'approved',
+      capacity: 100,
+      isPaid: true,
+      registrationFee: 299,
+      currency: 'INR',
+      paymentUpiId: 'clubtreasury@okhdfcbank',
+      organizer: orgId
+    });
+
+    const linkedComp = await Competition.create({
+      title: 'Summit Hackathon Challenge',
+      description: 'Unlocked after event registration and checkout',
+      event: paidEvent._id,
+      requireEventRegistration: true,
+      organizer: orgId,
+      status: 'published',
+      startTime: new Date(Date.now() - 60000),
+      endTime: new Date(Date.now() + 3600000)
+    });
+
+    try {
+      // 1. Unregistered student must be blocked
+      const unregisteredAccess = await competitionsRouter.evaluateCompetitionAccess(linkedComp, studentUser);
+      assert.strictEqual(unregisteredAccess.allowed, false, 'Unregistered student must be blocked');
+      assert.strictEqual(unregisteredAccess.code, 'EVENT_REGISTRATION_REQUIRED');
+      assert.strictEqual(unregisteredAccess.isPaid, true);
+      assert.strictEqual(unregisteredAccess.registrationFee, 299);
+
+      // 2. Registered student WITHOUT completed payment must still be blocked
+      await Registration.create({
+        event: paidEvent._id,
+        user: studentUser._id,
+        name: 'Aarav',
+        regNo: '22CS101',
+        status: 'approved',
+        paymentStatus: 'pending',
+        amountPaid: 0
+      });
+
+      const unpaidAccess = await competitionsRouter.evaluateCompetitionAccess(linkedComp, studentUser);
+      assert.strictEqual(unpaidAccess.allowed, false, 'Unpaid student must be blocked from linked competition');
+      assert.strictEqual(unpaidAccess.code, 'EVENT_PAYMENT_REQUIRED');
+
+      // 3. Registered student WITH completed payment must be allowed
+      await Registration.findOneAndUpdate(
+        { event: paidEvent._id, user: studentUser._id },
+        {
+          paymentStatus: 'paid',
+          amountPaid: 299,
+          paymentMethod: 'upi',
+          transactionId: 'UPI99887766',
+          paidAt: new Date()
+        }
+      );
+
+      const paidAccess = await competitionsRouter.evaluateCompetitionAccess(linkedComp, studentUser);
+      assert.strictEqual(paidAccess.allowed, true, 'Student with registration & paid fee must be unlocked');
+      assert.strictEqual(paidAccess.code, 'ALLOWED');
+    } finally {
+      await Registration.deleteMany({ event: paidEvent._id });
+      await Competition.deleteOne({ _id: linkedComp._id });
+      await Event.deleteOne({ _id: paidEvent._id });
+    }
+  });
+
+  // TEST 18: Post-Publish Event Edit Persistence
+  await test('Post-Publish Event Editing - Persist pricing, tags, status, and image after publishing', async () => {
+    const orgId = new mongoose.Types.ObjectId();
+    const publishedEvent = await Event.create({
+      title: 'Editable Robotics Expo',
+      description: 'Initial published description',
+      date: new Date(Date.now() + 172800000),
+      time: '09:30 AM',
+      location: 'Innovation Lab',
+      department: 'Electronics',
+      type: 'workshop',
+      status: 'approved',
+      capacity: 40,
+      isPaid: false,
+      registrationFee: 0,
+      tags: ['robotics'],
+      organizer: orgId
+    });
+
+    try {
+      publishedEvent.title = 'Editable Robotics Expo v2';
+      publishedEvent.isPaid = true;
+      publishedEvent.registrationFee = 149;
+      publishedEvent.tags = ['robotics', 'iot'];
+      publishedEvent.status = 'upcoming';
+      await publishedEvent.save();
+
+      const reloaded = await Event.findById(publishedEvent._id);
+      assert.strictEqual(reloaded.title, 'Editable Robotics Expo v2');
+      assert.strictEqual(reloaded.isPaid, true);
+      assert.strictEqual(reloaded.registrationFee, 149);
+      assert.strictEqual(reloaded.status, 'upcoming');
+      assert.deepStrictEqual(reloaded.tags, ['robotics', 'iot']);
+    } finally {
+      await Event.deleteOne({ _id: publishedEvent._id });
+    }
+  });
+
+  // TEST 19: YouPI-PG V2 Money Precision, UPI URI, ISO QR SVG & HMAC-SHA256 Webhook Verification
+  await test('YouPI-PG V2 - Paise precision, Vector SVG QR, HMAC-SHA256 signature & replay protection', async () => {
+    const amountPaise = toPaise('199.00');
+    assert.strictEqual(amountPaise, 19900, 'Integer paise must equal 19900');
+    assert.strictEqual(toRupeesString(amountPaise), '199.00', 'Rupees string formatting mismatch');
+
+    const upiUri = buildUpiUri({
+      payeeVpa: 'clubtreasury@okhdfcbank',
+      payeeName: 'Avenor Campus',
+      amountPaise,
+      transactionRef: 'AVN-TEST-101',
+      currency: 'INR'
+    });
+    assert(upiUri.startsWith('upi://pay?'), 'Must start with upi://pay?');
+    assert(upiUri.includes('am=199.00'), 'UPI URI must embed server-side paise-derived amount');
+
+    const svg = await generateQrSvg(upiUri);
+    assert(svg.includes('<svg') && svg.includes('viewBox='), 'QR utility must generate valid SVG XML');
+
+    const secret = 'test_youpi_secret_2026';
+    const signed = signWebhookPayload(
+      { event: 'PAYMENT.RECONCILED', paymentId: 'pay-1', orderId: 'AVN-TEST-101', status: 'RECONCILED' },
+      secret
+    );
+    const verified = verifyYoupiWebhook({
+      rawBody: signed.rawBody,
+      signatureHeader: signed.signatureHeader,
+      timestampHeader: signed.timestamp,
+      deliveryIdHeader: signed.deliveryId,
+      secret
+    });
+    assert.strictEqual(verified.status, 'RECONCILED');
+
+    assert.throws(() => {
+      verifyYoupiWebhook({
+        rawBody: signed.rawBody,
+        signatureHeader: 'sha256=0000000000000000000000000000000000000000000000000000000000000000',
+        timestampHeader: signed.timestamp,
+        secret
+      });
+    }, /signature verification failed/i);
+  });
+
+  // TEST 20: Strict Production YouPI-PG Checkout -> Missing VPA Guard -> MANUAL_REVIEW -> Admin Reconcile -> Unlock & Amount Guard
+  await test('YouPI-PG E2E Service - Strict VPA check, manual reconciliation, amount guard & competition unlock', async () => {
+    const orgId = new mongoose.Types.ObjectId();
+    const adminActor = { _id: orgId, role: 'admin', email: 'admin@collegeevents.com' };
+    const cfg = getYoupiConfig();
+    assert.strictEqual(cfg.verificationMode, 'manual', 'Default verificationMode must be strict manual');
+    assert.strictEqual(cfg.fulfillOnObserved, false, 'fulfillOnObserved must default to false');
+    assert.strictEqual(cfg.allowDemoUtr, false, 'allowDemoUtr must default to false');
+
+    const studentA = await User.create({
+      name: 'YouPI Tester A',
+      email: `youpitest_${Date.now()}@avenor.edu`,
+      password: 'Password123!',
+      role: 'student',
+      department: 'CS'
+    });
+    const studentB = await User.create({
+      name: 'YouPI Tester B',
+      email: `youpitest_b_${Date.now()}@avenor.edu`,
+      password: 'Password123!',
+      role: 'student',
+      department: 'CS'
+    });
+
+    const missingVpaEvent = await Event.create({
+      title: 'Paid Event Without VPA',
+      description: 'Must reject embedded checkout if neither event VPA nor YOUPI_PAYEE_VPA is configured',
+      date: new Date(Date.now() + 86400000),
+      time: '11:00 AM',
+      location: 'Block C',
+      department: 'CS',
+      type: 'tech',
+      status: 'approved',
+      capacity: 20,
+      isPaid: true,
+      registrationFee: 150,
+      currency: 'INR',
+      paymentUpiId: '',
+      organizer: orgId
+    });
+
+    const paidEvent = await Event.create({
+      title: 'YouPI Hackathon Qualifier',
+      description: 'Paid qualifier unlocked via YouPI-PG',
+      date: new Date(Date.now() + 86400000),
+      time: '10:00 AM - 5:00 PM',
+      location: 'Main Block',
+      department: 'CS',
+      type: 'tech',
+      status: 'approved',
+      capacity: 50,
+      isPaid: true,
+      registrationFee: 249,
+      currency: 'INR',
+      paymentUpiId: 'clubtreasury@okhdfcbank',
+      organizer: orgId
+    });
+
+    const comp = await Competition.create({
+      title: 'YouPI Gated Contest',
+      description: 'Gated behind YouPI payment',
+      event: paidEvent._id,
+      requireEventRegistration: true,
+      organizer: orgId,
+      status: 'published',
+      startTime: new Date(Date.now() - 60000),
+      endTime: new Date(Date.now() + 3600000)
+    });
+
+    let createdOrderIdA = null;
+    let createdOrderIdB = null;
+    try {
+      // 1. Verify missing VPA rejects with 503 YOUPI_VPA_NOT_CONFIGURED in embedded mode when YOUPI_PAYEE_VPA unset
+      const prevEnvVpa = process.env.YOUPI_PAYEE_VPA;
+      try {
+        process.env.YOUPI_PAYEE_VPA = '';
+        let missingVpaRejected = false;
+        try {
+          await createYoupiPaymentSession({
+            eventId: missingVpaEvent._id.toString(),
+            user: studentA,
+            body: { name: studentA.name, regNo: '26CS101' }
+          });
+        } catch (err) {
+          missingVpaRejected = err.status === 503 && err.code === 'YOUPI_VPA_NOT_CONFIGURED';
+        }
+        assert.strictEqual(missingVpaRejected, true, 'Missing VPA in embedded mode must reject with 503 YOUPI_VPA_NOT_CONFIGURED');
+      } finally {
+        if (prevEnvVpa !== undefined) process.env.YOUPI_PAYEE_VPA = prevEnvVpa;
+        else delete process.env.YOUPI_PAYEE_VPA;
+      }
+
+      const blocked = await competitionsRouter.evaluateCompetitionAccess(comp, studentA);
+      assert.strictEqual(blocked.allowed, false, 'Student A must be blocked before paying');
+
+      // 2. Create session with real club VPA
+      const created = await createYoupiPaymentSession({
+        eventId: paidEvent._id.toString(),
+        user: studentA,
+        body: { name: studentA.name, regNo: '26CS101' }
+      });
+      createdOrderIdA = created.session.orderId;
+      assert.strictEqual(created.isPaidEvent, true);
+      assert.strictEqual(created.session.amountPaise, '24900');
+      assert.strictEqual(created.session.allowDemoUtr, false);
+      assert(created.session.qrSvg.includes('<svg'), 'Session must return QR SVG');
+
+      // 3. Submit UTR -> strictly enters MANUAL_REVIEW and does NOT unlock competition yet
+      const uniqueUtr = `4128${Date.now().toString().slice(-8)}`;
+      const submitted = await submitUtrAndProcessSession({
+        paymentId: created.session.paymentId,
+        user: studentA,
+        body: { utr: uniqueUtr }
+      });
+      assert.strictEqual(submitted.session.status, 'MANUAL_REVIEW');
+      assert.strictEqual(submitted.session.settled, false);
+      assert.strictEqual(submitted.registration.paymentStatus, 'pending');
+
+      const stillLocked = await competitionsRouter.evaluateCompetitionAccess(comp, studentA);
+      assert.strictEqual(stillLocked.allowed, false, 'Competition must stay locked while payment is in MANUAL_REVIEW');
+
+      // 4. Admin approves reconciliation -> RECONCILED -> competition unlocks
+      const reconciled = await reconcileSessionByAdmin({
+        paymentId: created.session.paymentId,
+        action: 'approve',
+        adminUser: adminActor,
+        note: 'Verified in bank statement'
+      });
+      assert.strictEqual(reconciled.session.status, 'RECONCILED');
+      assert.strictEqual(reconciled.session.settled, true);
+      assert.strictEqual(reconciled.registration.paymentMethod, 'youpi');
+      assert.strictEqual(reconciled.registration.paymentStatus, 'paid');
+
+      const unlocked = await competitionsRouter.evaluateCompetitionAccess(comp, studentA);
+      assert.strictEqual(unlocked.allowed, true, 'Student A must unlock linked competition after YouPI reconciliation');
+
+      // 5. Ensure Student B cannot reuse Student A's UTR
+      const sessionB = await createYoupiPaymentSession({
+        eventId: paidEvent._id.toString(),
+        user: studentB,
+        body: { name: studentB.name, regNo: '26CS102' }
+      });
+      createdOrderIdB = sessionB.session.orderId;
+      let dupBlocked = false;
+      try {
+        await submitUtrAndProcessSession({
+          paymentId: sessionB.session.paymentId,
+          user: studentB,
+          body: { utr: uniqueUtr }
+        });
+      } catch (err) {
+        dupBlocked = err.status === 409 && err.code === 'DUPLICATE_UTR';
+      }
+      assert.strictEqual(dupBlocked, true, 'Reusing an already-settled UTR across students must fail with 409 DUPLICATE_UTR');
+
+      // 6. Webhook amountPaise mismatch must fail with 409 AMOUNT_MISMATCH
+      const secret = process.env.YOUPI_WEBHOOK_SECRET || process.env.JWT_SECRET;
+      const badAmountPayload = signWebhookPayload(
+        {
+          event: 'PAYMENT.RECONCILED',
+          status: 'RECONCILED',
+          paymentId: sessionB.session.paymentId,
+          orderId: sessionB.session.orderId,
+          amountPaise: '100'
+        },
+        secret
+      );
+      let amountBlocked = false;
+      try {
+        await processIncomingWebhook({
+          rawBody: badAmountPayload.rawBody,
+          signatureHeader: badAmountPayload.signatureHeader,
+          timestampHeader: badAmountPayload.timestamp,
+          deliveryIdHeader: badAmountPayload.deliveryId
+        });
+      } catch (err) {
+        amountBlocked = err.status === 409 && err.code === 'AMOUNT_MISMATCH';
+      }
+      assert.strictEqual(amountBlocked, true, 'Webhook with mismatched amountPaise must fail with 409 AMOUNT_MISMATCH');
+
+      // 7. Test replay idempotency via processIncomingWebhook
+      const dbSessionA = await YoupiPaymentSession.findOne({ paymentId: created.session.paymentId });
+      assert(dbSessionA && dbSessionA.lastDeliveryId, 'Settled session must persist lastDeliveryId');
+
+      const signedReplay = signWebhookPayload(
+        {
+          event: 'PAYMENT.RECONCILED',
+          status: 'RECONCILED',
+          paymentId: created.session.paymentId,
+          orderId: created.session.orderId,
+          utr: uniqueUtr,
+          deliveryId: dbSessionA.lastDeliveryId
+        },
+        secret
+      );
+      const replayCheck = await processIncomingWebhook({
+        rawBody: signedReplay.rawBody,
+        signatureHeader: signedReplay.signatureHeader,
+        timestampHeader: signedReplay.timestamp,
+        deliveryIdHeader: signedReplay.deliveryId
+      });
+      assert.strictEqual(replayCheck.duplicate, true, 'Duplicate webhook deliveryId must be deduplicated cleanly');
+    } finally {
+      const cleanupOrders = [createdOrderIdA, createdOrderIdB].filter(Boolean);
+      if (cleanupOrders.length > 0) {
+        await YoupiWebhookReceipt.deleteMany({ orderId: { $in: cleanupOrders } });
+      }
+      await YoupiPaymentSession.deleteMany({ event: { $in: [paidEvent._id, missingVpaEvent._id] } });
+      await Registration.deleteMany({ event: { $in: [paidEvent._id, missingVpaEvent._id] } });
+      await Competition.deleteOne({ _id: comp._id });
+      await Event.deleteMany({ _id: { $in: [paidEvent._id, missingVpaEvent._id] } });
+      await User.deleteMany({ _id: { $in: [studentA._id, studentB._id] } });
+    }
+  });
+
+  // TEST 21: WhatsApp Link Sanitization & Email Address Normalization
+  await test('Security - WhatsApp invite URL sanitization and email normalization', async () => {
+    assert.strictEqual(sanitizeWhatsAppUrl(''), '');
+    assert.strictEqual(sanitizeWhatsAppUrl('chat.whatsapp.com/AbCdEf123'), 'https://chat.whatsapp.com/AbCdEf123');
+    assert.strictEqual(sanitizeWhatsAppUrl('https://wa.me/919876543210'), 'https://wa.me/919876543210');
+    assert.strictEqual(sanitizeWhatsAppUrl('javascript:alert(1)'), null);
+    assert.strictEqual(sanitizeWhatsAppUrl('https://evil.example.com/phish'), null);
+    assert.strictEqual(sanitizeWhatsAppUrl('https://chat.whatsapp.com/'), null);
+    assert.strictEqual(sanitizeEmailAddress('  Student.Test@College.EDU '), 'student.test@college.edu');
+    assert.strictEqual(sanitizeEmailAddress('invalid-email'), '');
+  });
+
+  // TEST 22: Paid Event WhatsApp Link Gating, Email Tracking & Cloud Auto-Cleanup Cascade
+  await test('Features - Conditional WhatsApp link reveal, email tracking, and cloud cascade cleanup', async () => {
+    const uniqueSuffix = Date.now();
+    const adminActor = (await User.findOne({ role: 'admin' })) || (await User.findOne({}));
+    const student = await User.create({
+      name: `WA Test Student ${uniqueSuffix}`,
+      email: `wa_student_${uniqueSuffix}@example.com`,
+      password: 'Password123!',
+      role: 'student',
+      department: 'Computer Technology',
+      emailVerified: true,
+      emailVerifiedAt: new Date()
+    });
+
+    const pastDate = new Date(Date.now() - 4 * 24 * 60 * 60 * 1000);
+    const expiredPaidEvent = await Event.create({
+      title: `Expired Paid Event ${uniqueSuffix}`,
+      description: 'Testing WhatsApp gating and expired cloud deletion',
+      date: pastDate,
+      time: '10:00 AM',
+      location: 'Cloud Auditorium',
+      department: 'Computer Technology',
+      type: 'workshop',
+      capacity: 40,
+      organizer: adminActor._id,
+      status: 'approved',
+      isPaid: true,
+      registrationFee: 199,
+      currency: 'INR',
+      paymentUpiId: 'praveensumathi12-1@okaxis',
+      whatsappGroupLink: 'https://chat.whatsapp.com/AvenorTestGroupLink99',
+      autoDeleteWhenExpired: 'always'
+    });
+
+    const linkedComp = await Competition.create({
+      title: `Expired Comp ${uniqueSuffix}`,
+      description: 'Comp attached to expired event',
+      type: 'quiz',
+      organizer: adminActor._id,
+      event: expiredPaidEvent._id,
+      requireEventRegistration: true,
+      status: 'published',
+      durationMinutes: 15,
+      totalMarks: 10,
+      startTime: new Date(),
+      endTime: new Date(Date.now() + 86400000)
+    });
+
+    let createdOrderId = '';
+    try {
+      const customEmail = `receipt_${uniqueSuffix}@example.com`;
+      const created = await createYoupiPaymentSession({
+        eventId: expiredPaidEvent._id.toString(),
+        user: student,
+        body: { name: student.name, regNo: '26WA01', email: customEmail }
+      });
+      // Future deadline wasn't tested here because createYoupiPaymentSession blocks EVENT COMPLETED; let's test expired evaluation + cascade below if future -> past
+      assert.fail('Should not allow creating session for completed event');
+    } catch (err) {
+      // Expected for already-expired events; move date forward temporarily for YouPI test then expire it!
+      assert.strictEqual(err.code, 'EVENT_COMPLETED');
+    }
+
+    expiredPaidEvent.date = new Date(Date.now() + 2 * 24 * 60 * 60 * 1000);
+    await expiredPaidEvent.save();
+
+    try {
+      const customEmail = `receipt_${uniqueSuffix}@example.com`;
+      const created = await createYoupiPaymentSession({
+        eventId: expiredPaidEvent._id.toString(),
+        user: student,
+        body: { name: student.name, regNo: '26WA01', email: customEmail }
+      });
+      createdOrderId = created.session.orderId;
+      assert.strictEqual(created.session.hasWhatsappGroup, true);
+      assert.strictEqual(created.session.whatsappGroupLink, '', 'WhatsApp link must stay hidden before payment');
+
+      const uniqueUtr = `5128${Date.now().toString().slice(-8)}`;
+      const manual = await submitUtrAndProcessSession({
+        paymentId: created.session.paymentId,
+        user: student,
+        body: { utr: uniqueUtr, email: customEmail }
+      });
+      assert.strictEqual(manual.session.whatsappGroupLink, '', 'WhatsApp link must stay hidden during MANUAL_REVIEW');
+
+      const reconciled = await reconcileSessionByAdmin({
+        paymentId: created.session.paymentId,
+        action: 'approve',
+        adminUser: adminActor
+      });
+      assert.strictEqual(
+        reconciled.session.whatsappGroupLink,
+        'https://chat.whatsapp.com/AvenorTestGroupLink99',
+        'WhatsApp link must unlock once payment is reconciled'
+      );
+      assert.strictEqual(
+        reconciled.registration.email,
+        student.email,
+        'Student confirmation email must stay bound to verified account email even if custom email is supplied'
+      );
+      assert.strictEqual(reconciled.registration.confirmationEmailTo, student.email);
+
+      // Verify attendance update fields persist properly
+      await Registration.updateOne(
+        { _id: reconciled.registration._id },
+        { $set: { attendanceStatus: 'present', attendedAt: new Date(), attendanceMarkedBy: adminActor._id } }
+      );
+      const updatedReg = await Registration.findById(reconciled.registration._id);
+      assert.strictEqual(updatedReg.attendanceStatus, 'present');
+
+      // Now mark event expired in the past and verify cloud cleanup evaluation + cascade delete
+      await Event.updateOne(
+        { _id: expiredPaidEvent._id },
+        { $set: { date: new Date(Date.now() - 4 * 24 * 60 * 60 * 1000) } }
+      );
+
+      const evalRes = await evaluateExpiredEvents({ graceHours: 0 });
+      assert(
+        evalRes.expiredEvents.some(e => e._id.toString() === expiredPaidEvent._id.toString()),
+        'Expired event must be detected by cloud cleanup evaluator'
+      );
+      assert(
+        evalRes.eligibleEvents.some(e => e._id.toString() === expiredPaidEvent._id.toString()),
+        'autoDeleteWhenExpired=always event must be eligible for auto-deletion'
+      );
+
+      const cascadeRes = await cascadeDeleteEvent(expiredPaidEvent._id);
+      assert.strictEqual(cascadeRes.deleted, true);
+      assert.strictEqual(cascadeRes.deletedCompetitionsCount, 1);
+
+      const [evGone, compGone, regGone, sessGone, receiptGone, notifGone] = await Promise.all([
+        Event.findById(expiredPaidEvent._id),
+        Competition.findById(linkedComp._id),
+        Registration.findOne({ event: expiredPaidEvent._id }),
+        YoupiPaymentSession.findOne({ event: expiredPaidEvent._id }),
+        createdOrderId ? YoupiWebhookReceipt.findOne({ orderId: createdOrderId }) : Promise.resolve(null),
+        Notification.findOne({ relatedEvent: expiredPaidEvent._id })
+      ]);
+      assert.strictEqual(evGone, null, 'Event must be removed from MongoDB cloud');
+      assert.strictEqual(compGone, null, 'Linked competition must be removed');
+      assert.strictEqual(regGone, null, 'Registrations must be removed');
+      assert.strictEqual(sessGone, null, 'YouPI sessions must be removed');
+      assert.strictEqual(receiptGone, null, 'YouPI webhook receipts must be removed');
+      assert.strictEqual(notifGone, null, 'Event notifications must be removed');
+    } finally {
+      if (createdOrderId) {
+        await YoupiWebhookReceipt.deleteMany({ orderId: createdOrderId });
+      }
+      await YoupiPaymentSession.deleteMany({ event: expiredPaidEvent._id });
+      await Registration.deleteMany({ event: expiredPaidEvent._id });
+      await Competition.deleteMany({ event: expiredPaidEvent._id });
+      await Notification.deleteMany({ relatedEvent: expiredPaidEvent._id });
+      await Event.deleteMany({ _id: expiredPaidEvent._id });
+      await User.deleteMany({ _id: student._id });
+    }
+  });
+
+  // TEST 23: Forgot Password Email OTP purpose & secure password hash update
+  await test('23. Forgot Password OTP purpose, hash match & bcrypt password update', async () => {
+    const suffix = Date.now();
+    const user = await User.create({
+      name: 'Reset Student',
+      email: `reset_student_${suffix}@example.com`,
+      password: 'OldPassword123!',
+      role: 'student',
+      department: 'Computer Science',
+      emailVerified: true
+    });
+
+    try {
+      const secret = process.env.JWT_SECRET || 'college_event_manager_production_jwt_secret_2026';
+      const otpCode = '654321';
+      const otpHash = crypto
+        .createHmac('sha256', secret)
+        .update(`${user.email}:reset_password:${otpCode}`)
+        .digest('hex');
+
+      const otpDoc = await EmailOtp.create({
+        email: user.email,
+        purpose: 'reset_password',
+        otpHash,
+        expiresAt: new Date(Date.now() + 10 * 60 * 1000)
+      });
+      assert.strictEqual(otpDoc.purpose, 'reset_password');
+      assert.strictEqual(otpDoc.otpHash, otpHash);
+
+      user.password = 'NewPassword999!';
+      await user.save();
+
+      const reloaded = await User.findById(user._id).select('+password');
+      assert.strictEqual(await reloaded.comparePassword('OldPassword123!'), false);
+      assert.strictEqual(await reloaded.comparePassword('NewPassword999!'), true);
+    } finally {
+      await EmailOtp.deleteMany({ email: user.email });
+      await User.deleteMany({ _id: user._id });
+    }
+  });
+
+  // TEST 24: Admin-only Department Governance & Rename Cascade
+  await test('24. Admin department create, reject non-admin dept, rename cascade & delete', async () => {
+    const suffix = Date.now();
+    const origName = `Robotics_${suffix}`;
+    const renamedName = `Mechatronics_${suffix}`;
+    let createdDept = null;
+    let testUser = null;
+    let testEvent = null;
+    let testClub = null;
+
+    try {
+      createdDept = await createDepartment({ name: origName, code: 'RBT', isActive: true });
+      assert.strictEqual(createdDept.name, origName);
+
+      assert.strictEqual(await resolveActiveDepartmentName(origName.toLowerCase()), origName);
+      assert.strictEqual(await resolveActiveDepartmentName(`NonExistentDept_${suffix}`), null);
+
+      testUser = await User.create({
+        name: 'Dept Student',
+        email: `dept_student_${suffix}@example.com`,
+        password: 'Password123!',
+        role: 'student',
+        department: origName
+      });
+      const adminActor = (await User.findOne({ role: 'admin' })) || testUser;
+
+      testClub = await Club.create({
+        name: `Robotics Club ${suffix}`,
+        slug: `robotics-club-${suffix}`,
+        department: origName,
+        createdBy: adminActor._id
+      });
+
+      testEvent = await Event.create({
+        title: `Dept Event ${suffix}`,
+        description: 'Department cascade test event',
+        date: new Date(Date.now() + 3 * 86400000),
+        time: '10:00 AM',
+        location: 'Hall A',
+        type: 'tech',
+        department: origName,
+        organizer: adminActor._id,
+        capacity: 50,
+        status: 'approved'
+      });
+
+      const updated = await updateDepartment(createdDept._id, {
+        name: renamedName,
+        code: 'MCTR',
+        isActive: false
+      });
+      assert.strictEqual(updated.renamed, true);
+      assert.strictEqual(updated.cascadeCounts.usersUpdated, 1);
+      assert.strictEqual(updated.cascadeCounts.eventsUpdated, 1);
+      assert.strictEqual(updated.cascadeCounts.clubsUpdated, 1);
+
+      const [reloadedUser, reloadedEvent, reloadedClub] = await Promise.all([
+        User.findById(testUser._id),
+        Event.findById(testEvent._id),
+        Club.findById(testClub._id)
+      ]);
+      assert.strictEqual(reloadedUser.department, renamedName);
+      assert.strictEqual(reloadedEvent.department, renamedName);
+      assert.strictEqual(reloadedClub.department, renamedName);
+
+      // Inactive departments must not be resolved as valid student registration choices
+      assert.strictEqual(await resolveActiveDepartmentName(renamedName), null);
+
+      const del = await deleteDepartment(createdDept._id);
+      assert.strictEqual(del.deleted, true);
+      assert.strictEqual(await Department.findById(createdDept._id), null);
+      createdDept = null;
+    } finally {
+      if (testEvent) await Event.deleteMany({ _id: testEvent._id });
+      if (testClub) await Club.deleteMany({ _id: testClub._id });
+      if (testUser) await User.deleteMany({ _id: testUser._id });
+      if (createdDept) await Department.deleteMany({ _id: createdDept._id });
+    }
+  });
+
+  // TEST 25: Admin User Cascade Deletion & Protection Rules
+  await test('25. Admin user cascade deletion removes dependencies & protects admins', async () => {
+    const suffix = Date.now();
+    let adminActor = await User.findOne({ role: 'admin' });
+    let createdTempAdmin = false;
+    if (!adminActor) {
+      adminActor = await User.create({
+        name: 'Temp Admin',
+        email: `temp_admin_${suffix}@example.com`,
+        password: 'Password123!',
+        role: 'admin',
+        department: 'Computer Science'
+      });
+      createdTempAdmin = true;
+    }
+
+    const victim = await User.create({
+      name: 'Delete Target Student',
+      email: `delete_victim_${suffix}@example.com`,
+      password: 'Password123!',
+      role: 'student',
+      department: 'Computer Science',
+      emailVerified: true
+    });
+
+    const sampleEvent = await Event.create({
+      title: `Victim Event ${suffix}`,
+      description: 'Event to verify attendee pull',
+      date: new Date(Date.now() + 2 * 86400000),
+      time: '11:00 AM',
+      location: 'Hall B',
+      type: 'tech',
+      department: 'Computer Science',
+      organizer: adminActor._id,
+      attendees: [victim._id],
+      capacity: 40,
+      status: 'approved'
+    });
+
+    const sampleReg = await Registration.create({
+      event: sampleEvent._id,
+      user: victim._id,
+      name: victim.name,
+      regNo: `DEL${suffix}`,
+      email: victim.email,
+      status: 'approved'
+    });
+
+    const samplePost = await FeedPost.create({
+      type: 'announcement',
+      title: `Post ${suffix}`,
+      content: 'Testing like count recalculation',
+      author: adminActor._id,
+      likesCount: 1
+    });
+    await PostLike.create({ post: samplePost._id, user: victim._id });
+
+    try {
+      // Self/admin delete must be forbidden with 403
+      let adminBlocked = false;
+      try {
+        await cascadeDeleteUser(adminActor._id.toString(), adminActor._id.toString());
+      } catch (err) {
+        adminBlocked = err.status === 403;
+      }
+      assert.strictEqual(adminBlocked, true, 'Admin/self deletion must be blocked with HTTP 403');
+
+      const result = await cascadeDeleteUser(victim._id.toString(), adminActor._id.toString());
+      assert.strictEqual(result.deleted, true);
+      assert.strictEqual(result.cleanupStats.registrationsDeleted, 1);
+      assert.strictEqual(result.cleanupStats.eventsAttendeeCleared, 1);
+
+      const [victimGone, regGone, eventAfter, postAfter] = await Promise.all([
+        User.findById(victim._id),
+        Registration.findById(sampleReg._id),
+        Event.findById(sampleEvent._id),
+        FeedPost.findById(samplePost._id)
+      ]);
+      assert.strictEqual(victimGone, null);
+      assert.strictEqual(regGone, null);
+      assert.strictEqual(eventAfter.attendees.some(id => id.toString() === victim._id.toString()), false);
+      assert.strictEqual(postAfter.likesCount, 0);
+    } finally {
+      await PostLike.deleteMany({ post: samplePost._id });
+      await FeedPost.deleteMany({ _id: samplePost._id });
+      await Registration.deleteMany({ event: sampleEvent._id });
+      await Event.deleteMany({ _id: sampleEvent._id });
+      await User.deleteMany({ _id: victim._id });
+      if (createdTempAdmin) await User.deleteMany({ _id: adminActor._id });
+    }
   });
 
   console.log('\n====================================================');

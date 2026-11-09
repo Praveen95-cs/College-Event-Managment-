@@ -7,13 +7,16 @@ import {
   CheckBadgeIcon,
   MegaphoneIcon,
   CalendarIcon,
-  ClockIcon
+  ClockIcon,
+  PencilIcon
 } from '@heroicons/react/24/outline';
 import EventFeedCard from '../../components/feed/EventFeedCard';
 import CommentsModal from '../../components/feed/CommentsModal';
 import AnnouncementModal from '../../components/feed/AnnouncementModal';
+import CreateClubModal from '../../components/feed/CreateClubModal';
+import ClubLogo from '../../components/feed/ClubLogo';
 import EventRegistration from '../../components/events/EventRegistration';
-import { resolveMediaUrl, formatCount } from '../../utils/eventLifecycle';
+import { formatCount } from '../../utils/eventLifecycle';
 
 const ClubProfile = () => {
   const { clubId } = useParams();
@@ -32,10 +35,11 @@ const ClubProfile = () => {
   const [commentsTarget, setCommentsTarget] = useState(null);
   const [registerTarget, setRegisterTarget] = useState(null);
   const [announcementOpen, setAnnouncementOpen] = useState(false);
+  const [editClubOpen, setEditClubOpen] = useState(false);
 
-  const fetchClubProfile = useCallback(async () => {
+  const fetchClubProfile = useCallback(async (silent = false) => {
     try {
-      setLoading(true);
+      if (!silent) setLoading(true);
       setError('');
       const token = localStorage.getItem('token');
       const res = await axios.get(`/api/clubs/${clubId}`, {
@@ -46,14 +50,14 @@ const ClubProfile = () => {
       setPastEvents(res.data.pastEvents || []);
       setAnnouncements(res.data.announcements || []);
     } catch (err) {
-      setError(err.response?.data?.message || 'Failed to load club profile');
+      if (!silent) setError(err.response?.data?.message || 'Failed to load club profile');
     } finally {
-      setLoading(false);
+      if (!silent) setLoading(false);
     }
   }, [clubId]);
 
   useEffect(() => {
-    fetchClubProfile();
+    fetchClubProfile(false);
   }, [fetchClubProfile]);
 
   const updateListItem = (postId, updater) => {
@@ -179,7 +183,6 @@ const ClubProfile = () => {
     );
   }
 
-  const logoSrc = resolveMediaUrl(club.logo);
   const currentList =
     activeTab === 'upcoming'
       ? upcomingEvents
@@ -202,13 +205,7 @@ const ClubProfile = () => {
       <div className="rounded-[16px] bg-[#1c1a18] border border-[#efe9de]/[0.08] p-6 sm:p-8 space-y-5">
         <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-5">
           <div className="flex items-start gap-4">
-            <div className="h-16 w-16 rounded-[14px] bg-[#262421] border border-[#efe9de]/[0.12] flex items-center justify-center text-[#ebb05d] text-[24px] font-medium shrink-0 overflow-hidden">
-              {logoSrc ? (
-                <img src={logoSrc} alt={club.name} className="w-full h-full object-cover" />
-              ) : (
-                <span aria-hidden="true">{club.name.charAt(0).toUpperCase()}</span>
-              )}
-            </div>
+            <ClubLogo club={club} size="lg" />
             <div className="min-w-0">
               <div className="flex flex-wrap items-center gap-2">
                 <h1 className="text-[24px] sm:text-[28px] font-medium text-[#efe9de] tracking-[-0.02em] leading-tight">
@@ -245,14 +242,24 @@ const ClubProfile = () => {
             </button>
 
             {club.canManage && (
-              <button
-                type="button"
-                onClick={() => setAnnouncementOpen(true)}
-                className="btn-secondary h-9 px-3.5 text-[13px]"
-              >
-                <MegaphoneIcon className="h-4 w-4 text-[#ebb05d]" strokeWidth={1.5} />
-                <span>Post announcement</span>
-              </button>
+              <>
+                <button
+                  type="button"
+                  onClick={() => setEditClubOpen(true)}
+                  className="btn-secondary h-9 px-3.5 text-[13px]"
+                >
+                  <PencilIcon className="h-4 w-4 text-[#8a847a]" strokeWidth={1.5} />
+                  <span>Edit club &amp; logo</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setAnnouncementOpen(true)}
+                  className="btn-secondary h-9 px-3.5 text-[13px]"
+                >
+                  <MegaphoneIcon className="h-4 w-4 text-[#ebb05d]" strokeWidth={1.5} />
+                  <span>Post announcement</span>
+                </button>
+              </>
             )}
           </div>
         </div>
@@ -361,10 +368,10 @@ const ClubProfile = () => {
       {registerTarget && (
         <EventRegistration
           event={registerTarget}
-          onRegistered={() => fetchClubProfile()}
+          onRegistered={() => fetchClubProfile(true)}
           onClose={() => {
             setRegisterTarget(null);
-            fetchClubProfile();
+            fetchClubProfile(true);
           }}
         />
       )}
@@ -379,6 +386,15 @@ const ClubProfile = () => {
             setAnnouncements(prev => [newPost, ...prev]);
             setActiveTab('announcements');
           }
+        }}
+      />
+
+      <CreateClubModal
+        isOpen={editClubOpen}
+        onClose={() => setEditClubOpen(false)}
+        clubToEdit={club}
+        onUpdated={() => {
+          fetchClubProfile(true);
         }}
       />
     </div>

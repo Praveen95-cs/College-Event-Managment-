@@ -9,10 +9,14 @@ import {
   UserGroupIcon,
   FunnelIcon,
   TrashIcon,
+  PencilIcon,
   MagnifyingGlassIcon,
-  TagIcon
+  TagIcon,
+  CurrencyRupeeIcon
 } from '@heroicons/react/24/outline';
 import EventRegistration from '../../components/events/EventRegistration';
+import ClubLogo from '../../components/feed/ClubLogo';
+import { resolveMediaUrl } from '../../utils/eventLifecycle';
 
 const EVENT_TYPES = ['tech', 'non-tech', 'special', 'workshop'];
 
@@ -202,114 +206,172 @@ const Events = () => {
         </div>
       ) : (
         <div className="grid gap-5 sm:grid-cols-2 lg:grid-cols-3">
-          {events.map((event) => (
-            <div
-              key={event._id}
-              className="rounded-[14px] bg-[#1c1a18] border border-[#efe9de]/[0.08] hover:border-[#efe9de]/[0.16] transition-colors duration-150 overflow-hidden flex flex-col justify-between"
-            >
-              <div>
-                {event.photo && (
-                  <div className="aspect-[16/9] bg-[#12110f] overflow-hidden border-b border-[#efe9de]/[0.06]">
-                    <img
-                      src={`${backendUrl}${event.photo}`}
-                      alt={event.title}
-                      className="w-full h-full object-cover"
-                      onError={(e) => {
-                        e.target.onerror = null;
-                        e.target.style.display = 'none';
-                      }}
-                    />
-                  </div>
-                )}
+          {events.map((event) => {
+            const fee = Number(event.registrationFee || 0);
+            const isPaidEvent = Boolean(event.isPaid && fee > 0);
+            const currencySymbol = event.currency && event.currency !== 'INR' ? `${event.currency} ` : '₹';
+            const feeLabel = isPaidEvent ? `${currencySymbol}${fee}` : 'Free';
+            const canEditOrDelete =
+              user?.role === 'admin' ||
+              (user?.role === 'organizer' &&
+                (!event.organizer || (event.organizer?._id || event.organizer) === user?._id));
+            const isRegistered =
+              Boolean(user?._id) &&
+              Array.isArray(event.attendees) &&
+              event.attendees.some((a) => (a._id || a) === user._id);
+            const photoSrc = resolveMediaUrl(event.photo);
 
-                <div className="p-6">
-                  <div className="flex justify-between items-start gap-3">
-                    <Link
-                      to={`/events/${event._id}`}
-                      className="text-[17px] font-medium text-[#efe9de] hover:text-[#ebb05d] transition-colors duration-150 leading-snug"
-                    >
-                      {event.title}
-                    </Link>
-                    {(user?.role === 'admin' || user?.role === 'organizer') && (
-                      <button
-                        onClick={() => handleDeleteEvent(event._id)}
-                        className="p-1.5 rounded-[6px] text-[#8a847a] hover:text-[#e5484d] hover:bg-[#e5484d]/10 transition-colors duration-150 shrink-0"
-                        title="Delete event"
-                      >
-                        <TrashIcon className="h-4 w-4" strokeWidth={1.5} />
-                      </button>
-                    )}
-                  </div>
-
-                  <p className="mt-2 text-[13px] text-[#aaa398] line-clamp-2 leading-relaxed">
-                    {event.description}
-                  </p>
-
-                  <div className="mt-4 space-y-2 text-[13px] text-[#aaa398]">
-                    <div className="flex items-center gap-2 font-mono text-[12px] tabular-nums">
-                      <CalendarIcon className="h-4 w-4 text-[#8a847a] shrink-0" strokeWidth={1.5} />
-                      <span>
-                        {event.date ? `${format(new Date(event.date), 'MMM d, yyyy')} · ${event.time}` : event.time}
-                      </span>
-                    </div>
-                    <div className="flex items-center gap-2">
-                      <MapPinIcon className="h-4 w-4 text-[#8a847a] shrink-0" strokeWidth={1.5} />
-                      <span className="truncate">{event.location}</span>
-                    </div>
-                    <div className="flex items-center gap-2 font-mono text-[12px] tabular-nums">
-                      <UserGroupIcon className="h-4 w-4 text-[#8a847a] shrink-0" strokeWidth={1.5} />
-                      <span>
-                        {event.attendees?.length || 0} / {event.capacity} seats filled
-                      </span>
-                    </div>
-                    <div className="flex items-center gap-2">
-                      <TagIcon className="h-4 w-4 text-[#8a847a] shrink-0" strokeWidth={1.5} />
-                      <span>{event.type ? event.type.charAt(0).toUpperCase() + event.type.slice(1) : 'Event'}</span>
-                    </div>
-                  </div>
-
-                  {(event.noveltyFeatures?.certificateEnabled || event.noveltyFeatures?.highlights?.length > 0) && (
-                    <div className="mt-4 pt-3 border-t border-[#efe9de]/[0.06] flex flex-wrap items-center gap-2">
-                      {event.noveltyFeatures?.certificateEnabled && (
-                        <span className="inline-flex items-center px-2 py-0.5 rounded-[6px] text-[12px] bg-[#262421] text-[#ebb05d] border border-[#efe9de]/[0.08]">
-                          Certificate included
-                        </span>
-                      )}
-                      {event.noveltyFeatures?.highlights?.length > 0 && (
-                        <span className="text-[12px] text-[#8a847a] truncate">
-                          {event.noveltyFeatures.highlights[0]}
-                        </span>
-                      )}
+            return (
+              <div
+                key={event._id}
+                className="rounded-[14px] bg-[#1c1a18] border border-[#efe9de]/[0.08] hover:border-[#efe9de]/[0.16] transition-colors duration-150 overflow-hidden flex flex-col justify-between"
+              >
+                <div>
+                  {photoSrc && (
+                    <div className="aspect-[16/9] bg-[#12110f] overflow-hidden border-b border-[#efe9de]/[0.06]">
+                      <img
+                        src={photoSrc}
+                        alt={event.title}
+                        className="w-full h-full object-cover"
+                        onError={(e) => {
+                          e.target.onerror = null;
+                          e.target.style.display = 'none';
+                        }}
+                      />
                     </div>
                   )}
+
+                  <div className="p-6">
+                    <div className="flex flex-wrap items-center justify-between gap-2 mb-3">
+                      {event.club ? (
+                        <Link
+                          to={`/clubs/${event.club._id}`}
+                          className="inline-flex items-center gap-2 text-[12px] font-medium text-[#aaa398] hover:text-[#efe9de] transition-colors min-w-0"
+                        >
+                          <ClubLogo club={event.club} size="sm" />
+                          <span className="truncate">{event.club.name}</span>
+                        </Link>
+                      ) : (
+                        <span className="text-[12px] font-mono text-[#8a847a]">{event.department}</span>
+                      )}
+
+                      <span
+                        className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-[6px] text-[11px] font-mono border shrink-0 ${
+                          isPaidEvent
+                            ? 'bg-[#e09132]/12 text-[#ebb05d] border-[#e09132]/25'
+                            : 'bg-[#4cc38a]/10 text-[#4cc38a] border-[#4cc38a]/25'
+                        }`}
+                      >
+                        {isPaidEvent && <CurrencyRupeeIcon className="h-3 w-3" strokeWidth={1.75} />}
+                        <span>{feeLabel}</span>
+                      </span>
+                    </div>
+
+                    <div className="flex justify-between items-start gap-3">
+                      <Link
+                        to={`/events/${event._id}`}
+                        className="text-[17px] font-medium text-[#efe9de] hover:text-[#ebb05d] transition-colors duration-150 leading-snug"
+                      >
+                        {event.title}
+                      </Link>
+                      {canEditOrDelete && (
+                        <div className="flex items-center gap-1 shrink-0">
+                          <Link
+                            to={`/events/${event._id}/edit`}
+                            className="p-1.5 rounded-[6px] text-[#8a847a] hover:text-[#ebb05d] hover:bg-[#e09132]/10 transition-colors duration-150"
+                            title="Edit event"
+                          >
+                            <PencilIcon className="h-4 w-4" strokeWidth={1.5} />
+                          </Link>
+                          <button
+                            onClick={() => handleDeleteEvent(event._id)}
+                            className="p-1.5 rounded-[6px] text-[#8a847a] hover:text-[#e5484d] hover:bg-[#e5484d]/10 transition-colors duration-150"
+                            title="Delete event"
+                          >
+                            <TrashIcon className="h-4 w-4" strokeWidth={1.5} />
+                          </button>
+                        </div>
+                      )}
+                    </div>
+
+                    <p className="mt-2 text-[13px] text-[#aaa398] line-clamp-2 leading-relaxed">
+                      {event.description}
+                    </p>
+
+                    <div className="mt-4 space-y-2 text-[13px] text-[#aaa398]">
+                      <div className="flex items-center gap-2 font-mono text-[12px] tabular-nums">
+                        <CalendarIcon className="h-4 w-4 text-[#8a847a] shrink-0" strokeWidth={1.5} />
+                        <span>
+                          {event.date ? `${format(new Date(event.date), 'MMM d, yyyy')} · ${event.time}` : event.time}
+                        </span>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <MapPinIcon className="h-4 w-4 text-[#8a847a] shrink-0" strokeWidth={1.5} />
+                        <span className="truncate">{event.location}</span>
+                      </div>
+                      <div className="flex items-center gap-2 font-mono text-[12px] tabular-nums">
+                        <UserGroupIcon className="h-4 w-4 text-[#8a847a] shrink-0" strokeWidth={1.5} />
+                        <span>
+                          {event.attendees?.length || 0} / {event.capacity} seats filled
+                        </span>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <TagIcon className="h-4 w-4 text-[#8a847a] shrink-0" strokeWidth={1.5} />
+                        <span>{event.type ? event.type.charAt(0).toUpperCase() + event.type.slice(1) : 'Event'}</span>
+                      </div>
+                    </div>
+
+                    {(event.noveltyFeatures?.certificateEnabled || event.noveltyFeatures?.highlights?.length > 0) && (
+                      <div className="mt-4 pt-3 border-t border-[#efe9de]/[0.06] flex flex-wrap items-center gap-2">
+                        {event.noveltyFeatures?.certificateEnabled && (
+                          <span className="inline-flex items-center px-2 py-0.5 rounded-[6px] text-[12px] bg-[#262421] text-[#ebb05d] border border-[#efe9de]/[0.08]">
+                            Certificate included
+                          </span>
+                        )}
+                        {event.noveltyFeatures?.highlights?.length > 0 && (
+                          <span className="text-[12px] text-[#8a847a] truncate">
+                            {event.noveltyFeatures.highlights[0]}
+                          </span>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                </div>
+
+                <div className="px-6 pb-6 pt-0 flex items-center gap-2">
+                  {user?.role === 'student' &&
+                    (isRegistered ? (
+                      <Link
+                        to={`/events/${event._id}`}
+                        className="flex-1 h-9 inline-flex items-center justify-center rounded-[8px] text-[12px] font-medium bg-[#4cc38a]/12 text-[#4cc38a] border border-[#4cc38a]/30 hover:bg-[#4cc38a]/20 transition-colors"
+                      >
+                        View pass / status
+                      </Link>
+                    ) : (
+                      <button
+                        onClick={() => handleBookEvent(event)}
+                        className="btn-primary flex-1 h-9 text-[13px]"
+                      >
+                        {isPaidEvent ? `Pay ${feeLabel} & reserve` : 'Reserve seat'}
+                      </button>
+                    ))}
+                  {!isAuthenticated && (
+                    <Link to="/login" className="btn-primary flex-1 h-9 text-[13px]">
+                      Sign in to register
+                    </Link>
+                  )}
+                  <Link
+                    to={`/events/${event._id}`}
+                    className={`btn-secondary h-9 text-[13px] ${
+                      user?.role === 'student' || !isAuthenticated ? 'px-3.5' : 'flex-1'
+                    }`}
+                  >
+                    Details
+                  </Link>
                 </div>
               </div>
-
-              <div className="px-6 pb-6 pt-0 flex items-center gap-2">
-                {user?.role === 'student' && (
-                  <button
-                    onClick={() => handleBookEvent(event)}
-                    className="btn-primary flex-1 h-9 text-[13px]"
-                  >
-                    Reserve seat
-                  </button>
-                )}
-                {!isAuthenticated && (
-                  <Link to="/login" className="btn-primary flex-1 h-9 text-[13px]">
-                    Sign in to register
-                  </Link>
-                )}
-                <Link
-                  to={`/events/${event._id}`}
-                  className={`btn-secondary h-9 text-[13px] ${
-                    user?.role === 'student' || !isAuthenticated ? 'px-3.5' : 'flex-1'
-                  }`}
-                >
-                  Details
-                </Link>
-              </div>
-            </div>
-          ))}
+            );
+          })}
         </div>
       )}
 

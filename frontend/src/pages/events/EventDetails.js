@@ -16,7 +16,12 @@ import {
   BookmarkIcon,
   ArrowUpRightIcon,
   CheckBadgeIcon,
-  ChatBubbleLeftIcon
+  ChatBubbleLeftIcon,
+  CurrencyRupeeIcon,
+  LockClosedIcon,
+  ChatBubbleLeftRightIcon,
+  ClipboardDocumentCheckIcon,
+  MagnifyingGlassIcon
 } from '@heroicons/react/24/outline';
 import {
   HeartIcon as HeartSolidIcon,
@@ -24,7 +29,9 @@ import {
 } from '@heroicons/react/24/solid';
 import { getBackendUrl } from '../../utils/apiConfig';
 import CommentsSection from '../../components/feed/CommentsSection';
-import { getEventLifecycle, formatCount } from '../../utils/eventLifecycle';
+import ClubLogo from '../../components/feed/ClubLogo';
+import EventRegistration from '../../components/events/EventRegistration';
+import { getEventLifecycle, formatCount, resolveMediaUrl } from '../../utils/eventLifecycle';
 
 const EventDetails = () => {
   const { id } = useParams();
@@ -33,10 +40,26 @@ const EventDetails = () => {
   const [event, setEvent] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
+  const [actionError, setActionError] = useState('');
   const [eventCompetitions, setEventCompetitions] = useState([]);
   const [feedMeta, setFeedMeta] = useState(null);
   const [copiedShare, setCopiedShare] = useState(false);
   const [bookingBusy, setBookingBusy] = useState(false);
+  const [showRegisterModal, setShowRegisterModal] = useState(false);
+  const [roster, setRoster] = useState([]);
+  const [attendanceSummary, setAttendanceSummary] = useState({
+    total: 0,
+    confirmed: 0,
+    present: 0,
+    absent: 0,
+    unmarked: 0,
+    attendanceRate: 0
+  });
+  const [rosterLoading, setRosterLoading] = useState(false);
+  const [attendanceFilter, setAttendanceFilter] = useState('all');
+  const [attendanceSearch, setAttendanceSearch] = useState('');
+  const [markingRegId, setMarkingRegId] = useState('');
+  const [bulkMarking, setBulkMarking] = useState(false);
   const backendUrl = getBackendUrl();
 
   const fetchFeedMeta = useCallback(async () => {
@@ -51,53 +74,143 @@ const EventDetails = () => {
     }
   }, [backendUrl, id]);
 
-  useEffect(() => {
-    fetchEventDetails();
-    fetchEventCompetitions();
-    fetchFeedMeta();
-  }, [id, fetchFeedMeta]);
-
-  const fetchEventCompetitions = async () => {
+  const fetchEventCompetitions = useCallback(async () => {
     try {
-      const res = await axios.get(`${backendUrl}/api/competitions?eventId=${id}`);
-      setEventCompetitions(res.data);
+      const token = localStorage.getItem('token');
+      const res = await axios.get(`${backendUrl}/api/competitions?eventId=${id}`, {
+        headers: token ? { Authorization: `Bearer ${token}` } : {}
+      });
+      setEventCompetitions(res.data || []);
     } catch (err) {
       // Non-critical
     }
-  };
+  }, [backendUrl, id]);
 
-  const fetchEventDetails = async () => {
+  const fetchEventDetails = useCallback(async (silent = false) => {
     try {
-      setLoading(true);
-      const response = await axios.get(`/api/events/${id}`);
+      if (!silent) setLoading(true);
+      const token = localStorage.getItem('token');
+      const response = await axios.get(`${backendUrl}/api/events/${id}`, {
+        headers: token ? { Authorization: `Bearer ${token}` } : {}
+      });
       setEvent(response.data);
+      if (Array.isArray(response.data?.linkedCompetitions)) {
+        setEventCompetitions(prev => (prev.length > 0 ? prev : response.data.linkedCompetitions));
+      }
     } catch (error) {
-      setError('Error fetching event details');
+      if (!silent) setError('Error fetching event details');
       console.error('Error:', error);
     } finally {
-      setLoading(false);
+      if (!silent) setLoading(false);
+    }
+  }, [backendUrl, id]);
+
+  const fetchAttendanceRoster = useCallback(async (silent = false) => {
+    const token = localStorage.getItem('token');
+    if (!token || !user || !['admin', 'organizer'].includes(user.role)) return;
+    try {
+      if (!silent) setRosterLoading(true);
+      const res = await axios.get(`${backendUrl}/api/registrations/event/${id}`, {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      setRoster(res.data?.registrations || []);
+      if (res.data?.summary) {
+        setAttendanceSummary(res.data.summary);
+      }
+    } catch {
+      // Non-owner organizers return 403 silently
+    } finally {
+      if (!silent) setRosterLoading(false);
+    }
+  }, [backendUrl, id, user]);
+
+  useEffect(() => {
+    fetchEventDetails(false);
+    fetchEventCompetitions();
+    fetchFeedMeta();
+  }, [fetchEventDetails, fetchEventCompetitions, fetchFeedMeta]);
+
+  const canManageEvent = Boolean(
+    event &&
+      user &&
+      (user.role === 'admin' || event.organizer?._id === user._id || event.organizer === user._id)
+  );
+
+  useEffect(() => {
+    if (canManageEvent) {
+      fetchAttendanceRoster(false);
+    }
+  }, [canManageEvent, fetchAttendanceRoster]);
+
+  const handleMarkAttendance = async (registrationId, attendanceStatus) => {
+    try {
+      setActionError('');
+      setMarkingRegId(registrationId);
+      const token = localStorage.getItem('token');
+      const res = await axios.patch(
+        `${backendUrl}/api/registrations/${registrationId}/attendance`,
+        { attendanceStatus },
+        { headers: { Authorization: `Bearer ${token}` } }
+      );
+      if (res.data?.registration) {
+        setRoster(prev => prev.map(r => (r._id === registrationId ? res.data.registration : r)));
+      }
+      if (res.data?.summary) {
+        setAttendanceSummary(res.data.summary);
+      }
+    } catch (err) {
+      setActionError(err.response?.data?.message || 'Failed to update attendance status.');
+    } finally {
+      setMarkingRegId('');
     }
   };
 
-  const handleBookEvent = async () => {
+  const handleBulkAttendance = async (attendanceStatus) => {
     try {
-      setBookingBusy(true);
-      await axios.post(`/api/events/${id}/book`);
-      await Promise.all([fetchEventDetails(), fetchFeedMeta()]);
-    } catch (error) {
-      console.error('Error booking event:', error);
+      setActionError('');
+      setBulkMarking(true);
+      const token = localStorage.getItem('token');
+      const res = await axios.post(
+        `${backendUrl}/api/registrations/event/${id}/attendance/bulk`,
+        { attendanceStatus },
+        { headers: { Authorization: `Bearer ${token}` } }
+      );
+      if (res.data?.registrations) {
+        setRoster(res.data.registrations);
+      }
+      if (res.data?.summary) {
+        setAttendanceSummary(res.data.summary);
+      }
+    } catch (err) {
+      setActionError(err.response?.data?.message || 'Failed to run bulk attendance update.');
     } finally {
-      setBookingBusy(false);
+      setBulkMarking(false);
     }
+  };
+
+  const handleOpenRegistrationModal = () => {
+    if (!isAuthenticated) {
+      navigate('/login');
+      return;
+    }
+    setActionError('');
+    setShowRegisterModal(true);
   };
 
   const handleCancelBooking = async () => {
     try {
       setBookingBusy(true);
-      await axios.post(`/api/events/${id}/cancel`);
-      await Promise.all([fetchEventDetails(), fetchFeedMeta()]);
+      setActionError('');
+      const token = localStorage.getItem('token');
+      await axios.post(
+        `${backendUrl}/api/events/${id}/cancel`,
+        {},
+        { headers: token ? { Authorization: `Bearer ${token}` } : {} }
+      );
+      await Promise.all([fetchEventDetails(true), fetchEventCompetitions(), fetchFeedMeta()]);
     } catch (error) {
       console.error('Error cancelling booking:', error);
+      setActionError(error.response?.data?.message || 'Failed to cancel booking.');
     } finally {
       setBookingBusy(false);
     }
@@ -247,6 +360,7 @@ const EventDetails = () => {
 
   const handleDownloadCertificate = async () => {
     try {
+      setActionError('');
       const token = localStorage.getItem('token');
       const response = await axios.get(`${backendUrl}/api/registrations/event/${id}/certificate`, {
         headers: { Authorization: `Bearer ${token}` },
@@ -266,6 +380,7 @@ const EventDetails = () => {
       window.URL.revokeObjectURL(downloadUrl);
     } catch (error) {
       console.error('Error downloading certificate:', error);
+      setActionError('Complete event payment and registration before downloading your certificate.');
     }
   };
 
@@ -290,14 +405,31 @@ const EventDetails = () => {
   }
 
   const attendees = event.attendees || [];
-  const isAttending = attendees.some(a => (a._id || a) === user?._id) || Boolean(feedMeta?.isRegistered);
+  const isAttending =
+    attendees.some(a => (a._id || a) === user?._id) ||
+    Boolean(feedMeta?.isRegistered) ||
+    Boolean(event.myRegistration && event.myRegistration.status !== 'cancelled');
   const isOrganizer = event.organizer?._id === user?._id || event.organizer === user?._id;
   const isAdmin = user?.role === 'admin';
   const clubInfo = feedMeta?.club || event.club;
   const lifecycle = getEventLifecycle(event, isAttending);
   const availableSeats = Math.max(0, Number(event.capacity || 0) - attendees.length);
+  const fee = Number(event.registrationFee || 0);
+  const isPaidEvent = Boolean(event.isPaid && fee > 0);
+  const currencySymbol = event.currency && event.currency !== 'INR' ? `${event.currency} ` : '₹';
+  const feeLabel = isPaidEvent ? `${currencySymbol}${fee}` : 'Free';
+  const isPaidRegistration = Boolean(
+    event.myRegistration?.paymentStatus === 'paid' || feedMeta?.isPaidRegistration
+  );
+  const isManualReview = Boolean(
+    isPaidEvent &&
+    !isPaidRegistration &&
+    (event.myRegistration?.youpiStatus === 'MANUAL_REVIEW' || feedMeta?.event?.youpiStatus === 'MANUAL_REVIEW')
+  );
+  const needsPaymentCompletion = Boolean(isAttending && isPaidEvent && !isPaidRegistration);
+  const isStudent = user?.role === 'student' || !isAuthenticated;
 
-  const photoSrc = event.photo ? (event.photo.startsWith('http') ? event.photo : `${backendUrl}${event.photo}`) : '';
+  const photoSrc = resolveMediaUrl(event.photo);
 
   return (
     <div className="max-w-5xl mx-auto space-y-6">
@@ -343,17 +475,28 @@ const EventDetails = () => {
                   {event.category}
                 </span>
               )}
+              <span
+                className={`inline-flex items-center gap-1 px-2.5 py-0.5 rounded-[6px] text-[12px] font-mono border ${
+                  isPaidEvent
+                    ? 'bg-[#e09132]/12 text-[#ebb05d] border-[#e09132]/30'
+                    : 'bg-[#4cc38a]/10 text-[#4cc38a] border-[#4cc38a]/25'
+                }`}
+              >
+                {isPaidEvent && <CurrencyRupeeIcon className="h-3.5 w-3.5" strokeWidth={1.75} />}
+                <span>{feeLabel}</span>
+              </span>
             </div>
             <h1 className="text-[24px] sm:text-[28px] font-medium text-[#efe9de] tracking-[-0.015em] leading-[1.2]">
               {event.title}
             </h1>
-            <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1.5 text-[13px] text-[#aaa398]">
+            <div className="mt-2.5 flex flex-wrap items-center gap-x-4 gap-y-2 text-[13px] text-[#aaa398]">
               {clubInfo && (
                 <span className="inline-flex items-center gap-2">
                   <Link
                     to={`/clubs/${clubInfo._id}`}
-                    className="inline-flex items-center gap-1 font-medium text-[#efe9de] hover:text-[#ebb05d] transition-colors"
+                    className="inline-flex items-center gap-2 font-medium text-[#efe9de] hover:text-[#ebb05d] transition-colors"
                   >
+                    <ClubLogo club={clubInfo} size="sm" />
                     <span>{clubInfo.name}</span>
                     {clubInfo.verified !== false && (
                       <CheckBadgeIcon className="h-4 w-4 text-[#ebb05d]" strokeWidth={1.75} />
@@ -447,6 +590,86 @@ const EventDetails = () => {
 
         {/* Metadata */}
         <div className="p-6 sm:p-8 border-b border-[#efe9de]/[0.08]">
+          {actionError && (
+            <div className="mb-5 px-4 py-3 rounded-[8px] bg-[#e5484d]/10 border border-[#e5484d]/30 text-[#e5484d] text-[13px]">
+              {actionError}
+            </div>
+          )}
+
+          {isAttending && !needsPaymentCompletion && (
+            <div className="mb-5 px-4 py-3.5 rounded-[12px] bg-[#4cc38a]/10 border border-[#4cc38a]/30 text-[#4cc38a] text-[13px] flex flex-wrap items-center justify-between gap-3">
+              <div className="space-y-1">
+                <div className="flex flex-wrap items-center gap-2">
+                  <span className="font-medium">
+                    {isPaidEvent
+                      ? `Registration & ${feeLabel} YouPI-PG payment verified ✓`
+                      : 'Event registration confirmed ✓'}
+                  </span>
+                  {event.myRegistration?.attendanceStatus && (
+                    <span
+                      className={`px-2 py-0.5 rounded-[5px] text-[11px] font-mono border ${
+                        event.myRegistration.attendanceStatus === 'present'
+                          ? 'bg-[#4cc38a]/15 text-[#4cc38a] border-[#4cc38a]/35'
+                          : event.myRegistration.attendanceStatus === 'absent'
+                            ? 'bg-[#e5484d]/15 text-[#e5484d] border-[#e5484d]/35'
+                            : 'bg-[#161513] text-[#aaa398] border-[#efe9de]/[0.1]'
+                      }`}
+                    >
+                      Attendance:{' '}
+                      {event.myRegistration.attendanceStatus === 'present'
+                        ? 'Present ✓'
+                        : event.myRegistration.attendanceStatus === 'absent'
+                          ? 'Absent'
+                          : 'Pending Check-in'}
+                    </span>
+                  )}
+                </div>
+                {(event.myRegistration?.transactionId || event.myRegistration?.youpiOrderId) && (
+                  <div className="font-mono text-[12px] text-[#4cc38a]/90">
+                    {event.myRegistration?.youpiOrderId ? `${event.myRegistration.youpiOrderId} · ` : ''}
+                    UTR/TXN: {event.myRegistration.transactionId}
+                  </div>
+                )}
+              </div>
+
+              {event.whatsappGroupLink && (
+                <a
+                  href={event.whatsappGroupLink}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="inline-flex items-center gap-1.5 h-9 px-3.5 rounded-[8px] text-[12px] font-medium bg-[#4cc38a] text-[#12110f] hover:bg-[#5cd199] transition-colors shrink-0"
+                >
+                  <ChatBubbleLeftRightIcon className="h-4 w-4" strokeWidth={1.75} />
+                  <span>Join WhatsApp Group</span>
+                  <ArrowUpRightIcon className="h-3.5 w-3.5" strokeWidth={2} />
+                </a>
+              )}
+            </div>
+          )}
+
+          {needsPaymentCompletion && (
+            <div className="mb-5 px-4 py-3 rounded-[10px] bg-[#e09132]/12 border border-[#e09132]/30 text-[#ebb05d] text-[13px] flex flex-wrap items-center justify-between gap-3">
+              <span>
+                {isManualReview ? (
+                  <>
+                    Your YouPI payment (<span className="font-mono">{event.myRegistration?.transactionId || 'UTR submitted'}</span>) is under manual bank review. Check status or retry checkout.
+                  </>
+                ) : (
+                  <>
+                    Your seat reservation requires YouPI-PG payment of <strong className="font-mono">{feeLabel}</strong> to confirm attendance{event.hasWhatsappGroup ? ', unlock the attendee WhatsApp group,' : ''} and unlock linked competitions.
+                  </>
+                )}
+              </span>
+              <button
+                type="button"
+                onClick={handleOpenRegistrationModal}
+                className="btn-primary h-8 px-3 text-[12px]"
+              >
+                {isManualReview ? 'Check YouPI status' : `Pay ${feeLabel} via YouPI`}
+              </button>
+            </div>
+          )}
+
           <dl className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-6">
             <div>
               <dt className="text-[12px] text-[#8a847a]">Date and time</dt>
@@ -470,8 +693,10 @@ const EventDetails = () => {
               </dd>
             </div>
             <div>
-              <dt className="text-[12px] text-[#8a847a]">Department</dt>
-              <dd className="mt-1.5 text-[14px] text-[#efe9de]">{event.department}</dd>
+              <dt className="text-[12px] text-[#8a847a]">Entry fee</dt>
+              <dd className="mt-1.5 text-[14px] font-mono tabular-nums text-[#ebb05d]">
+                {feeLabel}
+              </dd>
             </div>
             <div>
               <dt className="text-[12px] text-[#8a847a]">Eligibility</dt>
@@ -540,7 +765,7 @@ const EventDetails = () => {
             </div>
             {(isOrganizer || isAdmin) && (
               <button
-                onClick={() => navigate('/competitions/create')}
+                onClick={() => navigate(`/competitions/create?eventId=${id}`)}
                 className="btn-secondary h-8 px-3 text-[12px]"
               >
                 Add competition
@@ -550,43 +775,86 @@ const EventDetails = () => {
 
           {eventCompetitions.length > 0 ? (
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              {eventCompetitions.map(comp => (
-                <div
-                  key={comp._id}
-                  className="p-4 rounded-[10px] bg-[#262421] border border-[#efe9de]/[0.08] flex flex-col justify-between"
-                >
-                  <div>
-                    <div className="flex items-center justify-between gap-2 text-[12px]">
-                      <span className="px-2 py-0.5 rounded-[6px] font-mono bg-[#1c1a18] text-[#ebb05d] border border-[#efe9de]/[0.08] capitalize">
-                        {comp.type}
-                      </span>
-                      <span className="text-[#8a847a] font-mono tabular-nums">
-                        {comp.durationMinutes} min · {comp.totalMarks} marks
-                      </span>
+              {eventCompetitions.map(comp => {
+                const requiresGate = comp.requireEventRegistration !== false;
+                const accessAllowed = comp.accessStatus
+                  ? comp.accessStatus.allowed
+                  : !requiresGate || !isStudent || (isAttending && (!isPaidEvent || isPaidRegistration));
+                const gated = isStudent && requiresGate && !accessAllowed;
+
+                return (
+                  <div
+                    key={comp._id}
+                    className="p-4 rounded-[10px] bg-[#262421] border border-[#efe9de]/[0.08] flex flex-col justify-between"
+                  >
+                    <div>
+                      <div className="flex items-center justify-between gap-2 text-[12px]">
+                        <span className="px-2 py-0.5 rounded-[6px] font-mono bg-[#1c1a18] text-[#ebb05d] border border-[#efe9de]/[0.08] capitalize">
+                          {comp.type}
+                        </span>
+                        <span className="text-[#8a847a] font-mono tabular-nums">
+                          {comp.durationMinutes} min · {comp.totalMarks} marks
+                        </span>
+                      </div>
+                      <h3 className="text-[15px] font-medium text-[#efe9de] mt-2.5">{comp.title}</h3>
+                      <p className="text-[13px] text-[#aaa398] line-clamp-2 mt-1">{comp.description}</p>
+
+                      {requiresGate && (
+                        <div className="mt-3">
+                          {accessAllowed ? (
+                            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-[6px] text-[11px] bg-[#4cc38a]/10 text-[#4cc38a] border border-[#4cc38a]/25">
+                              Unlocked ✓
+                            </span>
+                          ) : (
+                            <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-[6px] text-[11px] bg-[#e09132]/10 text-[#ebb05d] border border-[#e09132]/25">
+                              <LockClosedIcon className="h-3.5 w-3.5 shrink-0" strokeWidth={1.75} />
+                              <span>
+                                {isPaidEvent
+                                  ? `Locked · Register & pay ${feeLabel} for event to attend`
+                                  : 'Locked · Register for this event to attend'}
+                              </span>
+                            </span>
+                          )}
+                        </div>
+                      )}
                     </div>
-                    <h3 className="text-[15px] font-medium text-[#efe9de] mt-2.5">{comp.title}</h3>
-                    <p className="text-[13px] text-[#aaa398] line-clamp-2 mt-1">{comp.description}</p>
-                  </div>
-                  <div className="mt-4 pt-3 border-t border-[#efe9de]/[0.06] flex items-center justify-between">
-                    <button
-                      onClick={() => navigate(`/competitions/${comp._id}/leaderboard`)}
-                      className="text-[13px] font-medium text-[#aaa398] hover:text-[#efe9de] transition-colors duration-150"
-                    >
-                      Leaderboard
-                    </button>
-                    <button
-                      onClick={() =>
-                        navigate(
-                          comp.type === 'coding' ? `/competitions/${comp._id}/code` : `/competitions/${comp._id}/quiz`
+                    <div className="mt-4 pt-3 border-t border-[#efe9de]/[0.06] flex items-center justify-between gap-2">
+                      <button
+                        onClick={() => navigate(`/competitions/${comp._id}/leaderboard`)}
+                        className="text-[13px] font-medium text-[#aaa398] hover:text-[#efe9de] transition-colors duration-150"
+                      >
+                        Leaderboard
+                      </button>
+                      {gated ? (
+                        !isAuthenticated ? (
+                          <Link to="/login" className="btn-primary h-8 px-3 text-[12px]">
+                            Sign in to unlock
+                          </Link>
+                        ) : (
+                          <button
+                            type="button"
+                            onClick={handleOpenRegistrationModal}
+                            className="btn-primary h-8 px-3 text-[12px]"
+                          >
+                            {isPaidEvent ? `Pay ${feeLabel} & unlock` : 'Register to unlock'}
+                          </button>
                         )
-                      }
-                      className="btn-primary h-8 px-3 text-[12px]"
-                    >
-                      Enter arena
-                    </button>
+                      ) : (
+                        <button
+                          onClick={() =>
+                            navigate(
+                              comp.type === 'coding' ? `/competitions/${comp._id}/code` : `/competitions/${comp._id}/quiz`
+                            )
+                          }
+                          className="btn-primary h-8 px-3 text-[12px]"
+                        >
+                          Enter arena
+                        </button>
+                      )}
+                    </div>
                   </div>
-                </div>
-              ))}
+                );
+              })}
             </div>
           ) : (
             <div className="p-5 rounded-[10px] bg-[#161513] border border-[#efe9de]/[0.06] text-center text-[13px] text-[#8a847a]">
@@ -594,6 +862,225 @@ const EventDetails = () => {
             </div>
           )}
         </div>
+
+        {/* Organizer / Admin Attendance Management */}
+        {(isOrganizer || isAdmin) && (
+          <div className="p-6 sm:p-8 border-b border-[#efe9de]/[0.08] space-y-5">
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <div>
+                <div className="flex items-center gap-2">
+                  <ClipboardDocumentCheckIcon className="h-[18px] w-[18px] text-[#ebb05d]" strokeWidth={1.6} />
+                  <h2 className="text-[16px] font-medium text-[#efe9de]">Event Attendance Roster</h2>
+                </div>
+                <p className="text-[12px] text-[#8a847a] mt-0.5">
+                  Mark check-in attendance for registered participants or mark all confirmed students present.
+                </p>
+              </div>
+
+              <div className="flex flex-wrap items-center gap-2">
+                <button
+                  type="button"
+                  disabled={bulkMarking || roster.length === 0}
+                  onClick={() => handleBulkAttendance('present')}
+                  className="btn-secondary h-8 px-3 text-[12px]"
+                >
+                  {bulkMarking ? 'Updating...' : 'Mark all confirmed present'}
+                </button>
+                <button
+                  type="button"
+                  onClick={handleDownloadRegistrations}
+                  className="btn-secondary h-8 px-3 text-[12px]"
+                >
+                  Export (.xlsx)
+                </button>
+              </div>
+            </div>
+
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+              <div className="p-3 rounded-[10px] bg-[#161513] border border-[#efe9de]/[0.08]">
+                <span className="text-[11px] text-[#8a847a]">Registered</span>
+                <p className="text-[20px] font-mono font-medium text-[#efe9de] mt-0.5 tabular-nums">
+                  {attendanceSummary.total}
+                </p>
+              </div>
+              <div className="p-3 rounded-[10px] bg-[#161513] border border-[#4cc38a]/25">
+                <span className="text-[11px] text-[#8a847a]">Present</span>
+                <p className="text-[20px] font-mono font-medium text-[#4cc38a] mt-0.5 tabular-nums">
+                  {attendanceSummary.present}
+                </p>
+              </div>
+              <div className="p-3 rounded-[10px] bg-[#161513] border border-[#e5484d]/25">
+                <span className="text-[11px] text-[#8a847a]">Absent</span>
+                <p className="text-[20px] font-mono font-medium text-[#e5484d] mt-0.5 tabular-nums">
+                  {attendanceSummary.absent}
+                </p>
+              </div>
+              <div className="p-3 rounded-[10px] bg-[#161513] border border-[#efe9de]/[0.08]">
+                <span className="text-[11px] text-[#8a847a]">Attendance rate</span>
+                <p className="text-[20px] font-mono font-medium text-[#ebb05d] mt-0.5 tabular-nums">
+                  {attendanceSummary.attendanceRate}%
+                </p>
+              </div>
+            </div>
+
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <div className="relative flex-1 min-w-[220px] max-w-sm">
+                <MagnifyingGlassIcon className="h-4 w-4 text-[#8a847a] absolute left-3 top-1/2 -translate-y-1/2" strokeWidth={1.5} />
+                <input
+                  type="text"
+                  value={attendanceSearch}
+                  onChange={(e) => setAttendanceSearch(e.target.value)}
+                  placeholder="Search attendee, roll no., email..."
+                  className="input-field h-9 pl-9 text-[13px]"
+                />
+              </div>
+
+              <div className="inline-flex p-1 rounded-[8px] bg-[#161513] border border-[#efe9de]/[0.08] gap-1">
+                {['all', 'present', 'absent', 'unmarked'].map((tab) => (
+                  <button
+                    key={tab}
+                    type="button"
+                    onClick={() => setAttendanceFilter(tab)}
+                    className={`h-7 px-2.5 rounded-[5px] text-[12px] capitalize transition-colors ${
+                      attendanceFilter === tab
+                        ? 'bg-[#262421] text-[#efe9de]'
+                        : 'text-[#8a847a] hover:text-[#efe9de]'
+                    }`}
+                  >
+                    {tab}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {rosterLoading ? (
+              <div className="p-6 text-center text-[13px] text-[#8a847a]">Loading attendance roster...</div>
+            ) : (
+              (() => {
+                const q = attendanceSearch.trim().toLowerCase();
+                const filtered = roster.filter((r) => {
+                  const st = r.attendanceStatus || 'unmarked';
+                  if (attendanceFilter !== 'all' && st !== attendanceFilter) return false;
+                  if (!q) return true;
+                  return [r.name, r.regNo, r.email, r.user?.email, r.user?.department]
+                    .filter(Boolean)
+                    .some((v) => String(v).toLowerCase().includes(q));
+                });
+
+                if (filtered.length === 0) {
+                  return (
+                    <div className="p-6 rounded-[10px] bg-[#161513] border border-[#efe9de]/[0.06] text-center text-[13px] text-[#8a847a]">
+                      No matching registrations found.
+                    </div>
+                  );
+                }
+
+                return (
+                  <div className="overflow-x-auto rounded-[10px] border border-[#efe9de]/[0.08] bg-[#161513]">
+                    <table className="min-w-full divide-y divide-[#efe9de]/[0.06] text-[13px]">
+                      <thead className="bg-[#12110f]/70 text-[#8a847a] text-[11px] uppercase tracking-wider">
+                        <tr>
+                          <th className="px-4 py-2.5 text-left font-medium">Attendee</th>
+                          <th className="px-4 py-2.5 text-left font-medium">Reg No.</th>
+                          <th className="px-4 py-2.5 text-left font-medium">Payment</th>
+                          <th className="px-4 py-2.5 text-left font-medium">Attendance</th>
+                          <th className="px-4 py-2.5 text-right font-medium">Mark Check-In</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-[#efe9de]/[0.06]">
+                        {filtered.map((reg) => {
+                          const st = reg.attendanceStatus || 'unmarked';
+                          const busy = markingRegId === reg._id;
+                          const paymentOk = !isPaidEvent || reg.paymentStatus === 'paid';
+                          return (
+                            <tr key={reg._id} className="hover:bg-[#262421]/40 transition-colors">
+                              <td className="px-4 py-3">
+                                <div className="font-medium text-[#efe9de]">{reg.name}</div>
+                                <div className="text-[11px] text-[#8a847a]">
+                                  {reg.email || reg.user?.email || 'No email'}
+                                </div>
+                              </td>
+                              <td className="px-4 py-3 font-mono text-[12px] text-[#ebb05d]">
+                                {reg.regNo}
+                              </td>
+                              <td className="px-4 py-3">
+                                <span
+                                  className={`inline-flex px-2 py-0.5 rounded-[5px] text-[11px] font-mono border ${
+                                    paymentOk
+                                      ? 'bg-[#4cc38a]/10 text-[#4cc38a] border-[#4cc38a]/25'
+                                      : 'bg-[#e09132]/12 text-[#ebb05d] border-[#e09132]/30'
+                                  }`}
+                                >
+                                  {isPaidEvent
+                                    ? reg.paymentStatus === 'paid'
+                                      ? `Paid ${currencySymbol}${reg.amountPaid || fee}`
+                                      : reg.youpiStatus || 'Pending'
+                                    : 'Free'}
+                                </span>
+                              </td>
+                              <td className="px-4 py-3">
+                                <span
+                                  className={`inline-flex px-2 py-0.5 rounded-[5px] text-[11px] font-mono capitalize border ${
+                                    st === 'present'
+                                      ? 'bg-[#4cc38a]/15 text-[#4cc38a] border-[#4cc38a]/30'
+                                      : st === 'absent'
+                                        ? 'bg-[#e5484d]/15 text-[#e5484d] border-[#e5484d]/30'
+                                        : 'bg-[#262421] text-[#8a847a] border-[#efe9de]/[0.08]'
+                                  }`}
+                                >
+                                  {st}
+                                </span>
+                              </td>
+                              <td className="px-4 py-3 text-right whitespace-nowrap">
+                                <div className="inline-flex items-center gap-1.5">
+                                  <button
+                                    type="button"
+                                    disabled={busy || !paymentOk}
+                                    onClick={() => handleMarkAttendance(reg._id, 'present')}
+                                    className={`h-7 px-2.5 rounded-[6px] text-[11px] font-medium border transition-colors ${
+                                      st === 'present'
+                                        ? 'bg-[#4cc38a] text-[#12110f] border-[#4cc38a]'
+                                        : 'bg-[#4cc38a]/10 text-[#4cc38a] border-[#4cc38a]/30 hover:bg-[#4cc38a]/20 disabled:opacity-40'
+                                    }`}
+                                    title={paymentOk ? 'Mark Present' : 'Payment confirmation required before check-in'}
+                                  >
+                                    Present
+                                  </button>
+                                  <button
+                                    type="button"
+                                    disabled={busy}
+                                    onClick={() => handleMarkAttendance(reg._id, 'absent')}
+                                    className={`h-7 px-2.5 rounded-[6px] text-[11px] font-medium border transition-colors ${
+                                      st === 'absent'
+                                        ? 'bg-[#e5484d] text-white border-[#e5484d]'
+                                        : 'bg-[#e5484d]/10 text-[#e5484d] border-[#e5484d]/30 hover:bg-[#e5484d]/20'
+                                    }`}
+                                  >
+                                    Absent
+                                  </button>
+                                  {st !== 'unmarked' && (
+                                    <button
+                                      type="button"
+                                      disabled={busy}
+                                      onClick={() => handleMarkAttendance(reg._id, 'unmarked')}
+                                      className="h-7 px-2 rounded-[6px] text-[11px] text-[#8a847a] bg-[#262421] hover:text-[#efe9de] border border-[#efe9de]/[0.08]"
+                                    >
+                                      Reset
+                                    </button>
+                                  )}
+                                </div>
+                              </td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                );
+              })()
+            )}
+          </div>
+        )}
 
         {/* Comments Section */}
         {feedMeta?.postId && (
@@ -618,12 +1105,12 @@ const EventDetails = () => {
           <div className="p-6 sm:p-8 flex flex-wrap items-center justify-end gap-3 bg-[#12110f]/40">
             {!isAuthenticated && (
               <Link to="/login" className="btn-primary h-10 px-5 text-[13px]">
-                Sign in to register
+                {isPaidEvent ? `Sign in to pay ${feeLabel} & register` : 'Sign in to register'}
               </Link>
             )}
             {isAuthenticated && user?.role === 'student' && (
               <>
-                {isAttending && (
+                {isAttending && !needsPaymentCompletion && (
                   <button
                     onClick={handleDownloadCertificate}
                     className="btn-secondary h-10 px-4 text-[13px]"
@@ -633,10 +1120,20 @@ const EventDetails = () => {
                   </button>
                 )}
                 {isAttending ? (
-                  <div className="flex items-center gap-2.5">
-                    <span className="inline-flex items-center px-3 h-10 rounded-[8px] text-[13px] font-medium bg-[#4cc38a]/12 text-[#4cc38a] border border-[#4cc38a]/30">
-                      Registered ✓
-                    </span>
+                  <div className="flex flex-wrap items-center gap-2.5">
+                    {needsPaymentCompletion ? (
+                      <button
+                        type="button"
+                        onClick={handleOpenRegistrationModal}
+                        className="btn-primary h-10 px-5 text-[13px]"
+                      >
+                        {isManualReview ? 'Check payment status' : `Pay ${feeLabel} & confirm`}
+                      </button>
+                    ) : (
+                      <span className="inline-flex items-center px-3 h-10 rounded-[8px] text-[13px] font-medium bg-[#4cc38a]/12 text-[#4cc38a] border border-[#4cc38a]/30">
+                        {isPaidEvent ? `Registered & Paid ${feeLabel} ✓` : 'Registered ✓'}
+                      </span>
+                    )}
                     <button
                       onClick={handleCancelBooking}
                       disabled={bookingBusy}
@@ -647,13 +1144,13 @@ const EventDetails = () => {
                   </div>
                 ) : (
                   <button
-                    onClick={handleBookEvent}
+                    onClick={handleOpenRegistrationModal}
                     disabled={bookingBusy || lifecycle.state !== 'REGISTER NOW'}
                     className="btn-primary h-10 px-5 text-[13px]"
                   >
                     {lifecycle.state === 'REGISTER NOW'
-                      ? bookingBusy
-                        ? 'Reserving...'
+                      ? isPaidEvent
+                        ? `Pay ${feeLabel} & register`
                         : 'Register now'
                       : lifecycle.state}
                   </button>
@@ -672,6 +1169,21 @@ const EventDetails = () => {
           </div>
         ) : null}
       </div>
+
+      {showRegisterModal && (
+        <EventRegistration
+          event={event}
+          onClose={() => setShowRegisterModal(false)}
+          onRegistered={() => {
+            Promise.all([
+              fetchEventDetails(true),
+              fetchEventCompetitions(),
+              fetchFeedMeta(),
+              canManageEvent ? fetchAttendanceRoster(true) : Promise.resolve()
+            ]);
+          }}
+        />
+      )}
     </div>
   );
 };
