@@ -38,9 +38,11 @@ services:
       - key: JUDGE0_API_KEY
         sync: false
       - key: YOUPI_PAYEE_VPA
-        value: ""
+        value: praveensumathi12-1@okaxis
+      - key: YOUPI_BACKUP_VPAS
+        value: praveensumathi12-2@oksbi
       - key: YOUPI_PAYEE_NAME
-        value: Avenor Campus Events
+        value: Praveen S
       - key: YOUPI_VERIFICATION_MODE
         value: manual
       - key: YOUPI_FULFILL_ON_OBSERVED
@@ -48,12 +50,26 @@ services:
       - key: YOUPI_ALLOW_DEMO_UTR
         value: "false"
       - key: YOUPI_DEFAULT_METHOD
-        value: MANUAL_UPI
+        value: UPI
       - key: YOUPI_SESSION_TTL_SECONDS
         value: "300"
       - key: YOUPI_MERCHANT_ID
-        sync: false
+        value: avenor-campus
       - key: YOUPI_WEBHOOK_SECRET
+        generateValue: true
+      - key: YOUPI_AUTO_VERIFY_ENABLED
+        value: "true"
+      - key: YOUPI_AUTO_RECONCILE_OBSERVED
+        value: "true"
+      - key: YOUPI_IMAP_HOST
+        value: imap.gmail.com
+      - key: YOUPI_IMAP_PORT
+        value: "993"
+      - key: YOUPI_IMAP_USER
+        sync: false
+      - key: YOUPI_IMAP_PASS
+        sync: false
+      - key: YOUPI_OBSERVER_SECRET
         sync: false
       - key: YOUPI_API_URL
         sync: false
@@ -75,6 +91,16 @@ services:
         value: "true"
       - key: ALLOW_DEV_OTP_PREVIEW
         value: "false"
+      - key: EMAIL_RELAY_PROVIDER
+        value: auto
+      - key: BREVO_API_KEY
+        sync: false
+      - key: RESEND_API_KEY
+        sync: false
+      - key: EMAIL_WEBHOOK_URL
+        sync: false
+      - key: EMAIL_WEBHOOK_SECRET
+        sync: false
       - key: SMTP_HOST
         value: smtp.gmail.com
       - key: SMTP_PORT
@@ -82,11 +108,11 @@ services:
       - key: SMTP_SECURE
         value: "true"
       - key: SMTP_USER
-        value: praveensumathi11@gmail.com
+        sync: false
       - key: SMTP_PASS
         sync: false
       - key: SMTP_FROM
-        value: "Avenor Campus Events <praveensumathi11@gmail.com>"
+        value: "Avenor Campus Events <avenor.event@gmail.com>"
       - key: AUTO_DELETE_EXPIRED_EVENTS
         value: "false"
       - key: EXPIRED_EVENT_RETENTION_HOURS

@@ -4,8 +4,13 @@ const { auth, authorize } = require('../../middleware/auth');
 const User = require('../../models/auth/User');
 const { cascadeDeleteUser } = require('../../services/auth/userDeletionService');
 const { resolveActiveDepartmentName } = require('../../services/system/departmentService');
-const { getSmtpConfig } = require('../../services/email/emailService');
-const { sanitizePlainText } = require('../../utils/sanitize');
+const {
+  getEmailDiagnostics,
+  invalidateEmailSettingsCache,
+  sendEmail
+} = require('../../services/email/emailService');
+const SystemSetting = require('../../models/system/SystemSetting');
+const { sanitizePlainText, sanitizeEmailAddress } = require('../../utils/sanitize');
 
 const safe = (user) => ({
   _id: user._id,
@@ -21,14 +26,144 @@ router.get('/', auth, authorize('admin'), async (req, res) => {
   res.json(await User.find().select('-password').sort({ createdAt: -1 }));
 });
 
-// Admin-only system status (exposes SMTP readiness only to administrators, never to students)
-router.get('/admin/system-status', auth, authorize('admin'), (req, res) => {
-  const smtp = getSmtpConfig();
-  res.json({
-    smtpConfigured: smtp.configured,
-    smtpHost: smtp.host || '',
-    smtpFrom: smtp.from || ''
-  });
+// Admin-only system status & email delivery diagnostics (exposes status only to administrators)
+router.get('/admin/system-status', auth, authorize('admin'), async (req, res) => {
+  try {
+    const diag = await getEmailDiagnostics({ mask: true });
+    res.json(diag);
+  } catch (err) {
+    res.status(500).json({ message: err.message || 'Failed to read system email diagnostics' });
+  }
+});
+
+router.put('/admin/email-settings', auth, authorize('admin'), async (req, res) => {
+  try {
+    const existing = await SystemSetting.findOne({ key: 'global' });
+    const updateFields = {};
+
+    if (req.body.emailRelayProvider !== undefined) {
+      const rp = String(req.body.emailRelayProvider || 'auto').trim().toLowerCase();
+      if (!['auto', 'brevo', 'resend', 'webhook', 'smtp'].includes(rp)) {
+        return res.status(400).json({ message: 'Invalid email relay provider selected.' });
+      }
+      updateFields.emailRelayProvider = rp;
+    }
+
+    if (req.body.clearBrevoApiKey) {
+      updateFields.brevoApiKey = '';
+    } else if (req.body.brevoApiKey !== undefined && String(req.body.brevoApiKey).trim() !== '') {
+      updateFields.brevoApiKey = String(req.body.brevoApiKey).trim();
+    }
+
+    if (req.body.clearResendApiKey) {
+      updateFields.resendApiKey = '';
+    } else if (req.body.resendApiKey !== undefined && String(req.body.resendApiKey).trim() !== '') {
+      updateFields.resendApiKey = String(req.body.resendApiKey).trim();
+    }
+
+    if (req.body.clearEmailWebhook) {
+      updateFields.emailWebhookUrl = '';
+      updateFields.emailWebhookSecret = '';
+    } else {
+      if (req.body.emailWebhookUrl !== undefined && String(req.body.emailWebhookUrl).trim() !== '') {
+        const rawUrl = String(req.body.emailWebhookUrl).trim();
+        let parsed;
+        try {
+          parsed = new URL(rawUrl);
+        } catch {
+          return res.status(400).json({ message: 'Email Webhook URL must be a valid https:// URL.' });
+        }
+        if (parsed.protocol !== 'https:' && parsed.hostname !== 'localhost' && parsed.hostname !== '127.0.0.1') {
+          return res.status(400).json({ message: 'Email Webhook URL must use https://.' });
+        }
+        updateFields.emailWebhookUrl = rawUrl;
+      }
+      if (req.body.emailWebhookSecret !== undefined && String(req.body.emailWebhookSecret).trim() !== '') {
+        updateFields.emailWebhookSecret = String(req.body.emailWebhookSecret).trim();
+      }
+    }
+
+    if (req.body.clearSmtpOverrides) {
+      updateFields.smtpHostOverride = '';
+      updateFields.smtpPortOverride = 0;
+      updateFields.smtpUserOverride = '';
+      updateFields.smtpPassOverride = '';
+      updateFields.smtpFromOverride = '';
+    } else {
+      if (req.body.smtpHostOverride !== undefined) {
+        updateFields.smtpHostOverride = sanitizePlainText(req.body.smtpHostOverride, 120);
+      }
+      if (req.body.smtpPortOverride !== undefined && req.body.smtpPortOverride !== '') {
+        const portNum = Number(req.body.smtpPortOverride);
+        updateFields.smtpPortOverride = Number.isFinite(portNum) && portNum > 0 ? portNum : 0;
+      }
+      if (req.body.smtpUserOverride !== undefined) {
+        updateFields.smtpUserOverride = String(req.body.smtpUserOverride).trim();
+      }
+      if (req.body.smtpPassOverride !== undefined && String(req.body.smtpPassOverride).trim() !== '') {
+        updateFields.smtpPassOverride = String(req.body.smtpPassOverride).replace(/\s+/g, '').trim();
+      } else if (!existing?.smtpPassOverride && req.body.smtpPassOverride === undefined) {
+        // leave existing untouched
+      }
+      if (req.body.smtpFromOverride !== undefined) {
+        updateFields.smtpFromOverride = sanitizePlainText(req.body.smtpFromOverride, 160);
+      }
+    }
+
+    await SystemSetting.findOneAndUpdate(
+      { key: 'global' },
+      { $set: updateFields },
+      { upsert: true, new: true, setDefaultsOnInsert: true }
+    );
+    invalidateEmailSettingsCache();
+
+    const diag = await getEmailDiagnostics({ mask: true });
+    res.json({
+      message: 'Email delivery settings saved and activated across server instances.',
+      status: diag
+    });
+  } catch (err) {
+    res.status(500).json({ message: err.message || 'Failed to update email delivery settings' });
+  }
+});
+
+router.post('/admin/test-email', auth, authorize('admin'), async (req, res) => {
+  try {
+    const recipient = sanitizeEmailAddress(req.body.to || req.user.email);
+    if (!recipient) {
+      return res.status(400).json({ message: 'Enter a valid destination email address for the test.' });
+    }
+
+    const result = await sendEmail({
+      to: recipient,
+      subject: `Avenor Email Delivery Test (${new Date().toLocaleTimeString('en-IN')})`,
+      text: `This is a live test email from Avenor Campus Events sent at ${new Date().toISOString()}. Email OTPs and event confirmations are working cleanly.`,
+      html: `<p>This is a live diagnostic email from <strong>Avenor Campus Events</strong> sent at <code>${new Date().toISOString()}</code>.</p><p>If you received this, Student OTP verification and registration confirmations are operational.</p>`
+    });
+
+    const diag = await getEmailDiagnostics({ mask: true });
+    if (!result.delivered) {
+      return res.status(502).json({
+        delivered: false,
+        code: result.code || 'EMAIL_DELIVERY_FAILED',
+        provider: result.provider,
+        latencyMs: result.latencyMs,
+        message: result.reason || 'Test email delivery failed.',
+        status: diag
+      });
+    }
+
+    res.json({
+      delivered: true,
+      provider: result.provider,
+      latencyMs: result.latencyMs,
+      to: recipient,
+      message: `Test email delivered to ${recipient} via ${result.provider} in ${result.latencyMs}ms.`,
+      status: diag
+    });
+  } catch (err) {
+    res.status(500).json({ message: err.message || 'Test email failed' });
+  }
 });
 
 router.post('/organizers', auth, authorize('admin'), [

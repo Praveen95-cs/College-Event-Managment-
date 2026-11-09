@@ -118,9 +118,24 @@ function parsePaymentInputs(body, existing = null) {
       : existing?.paymentUpiId || '';
 
   if (cleanVpa && !isValidVpa(cleanVpa)) {
-    const err = new Error('Please enter a valid UPI VPA (for example, clubtreasury@ybl).');
+    const err = new Error('Please enter a valid UPI VPA (for example, clubtreasury@okicici).');
     err.status = 400;
     throw err;
+  }
+
+  let backupPaymentUpiIds = Array.isArray(existing?.backupPaymentUpiIds)
+    ? existing.backupPaymentUpiIds
+    : [];
+  if (body.backupPaymentUpiIds !== undefined) {
+    const rawBackups = list(body.backupPaymentUpiIds);
+    for (const vpa of rawBackups) {
+      if (!isValidVpa(vpa)) {
+        const err = new Error(`Invalid backup UPI VPA: ${vpa}`);
+        err.status = 400;
+        throw err;
+      }
+    }
+    backupPaymentUpiIds = [...new Set(rawBackups.filter(v => v !== cleanVpa))];
   }
 
   return {
@@ -131,6 +146,7 @@ function parsePaymentInputs(body, existing = null) {
         ? sanitizePlainText(body.currency, 10) || 'INR'
         : existing?.currency || 'INR',
     paymentUpiId: cleanVpa,
+    backupPaymentUpiIds,
     paymentInstructions:
       body.paymentInstructions !== undefined
         ? sanitizePlainText(body.paymentInstructions, 500)
@@ -269,7 +285,7 @@ router.get('/public', async (req, res) => {
       await Event.find(f)
         .populate('club', 'name slug logo')
         .select(
-          'title description date time location department type category tags eligibility registrationDeadline registrationOpen isPaid registrationFee currency paymentUpiId paymentInstructions capacity attendees photo status club'
+          'title description date time location department type category tags eligibility registrationDeadline registrationOpen isPaid registrationFee currency paymentUpiId backupPaymentUpiIds paymentInstructions capacity attendees photo status club'
         )
         .sort({ date: 1 })
         .limit(50)
@@ -581,7 +597,7 @@ async function update(req, res) {
     }
 
     if (
-      ['isPaid', 'registrationFee', 'currency', 'paymentUpiId', 'paymentInstructions'].some(
+      ['isPaid', 'registrationFee', 'currency', 'paymentUpiId', 'backupPaymentUpiIds', 'paymentInstructions'].some(
         k => req.body[k] !== undefined
       )
     ) {

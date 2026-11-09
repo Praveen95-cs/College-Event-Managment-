@@ -507,7 +507,13 @@ const Profile = () => {
                             </>
                           ) : (
                             <Link
-                              to={event._id ? `/events/${event._id}` : '/events'}
+                              to={
+                                reg.youpiPaymentId
+                                  ? `/payment/${reg.youpiPaymentId}`
+                                  : event._id
+                                    ? `/events/${event._id}/checkout`
+                                    : '/events'
+                              }
                               className="btn-primary flex-1 h-9 text-[13px]"
                             >
                               Complete {feeSymbol}{event.registrationFee} payment

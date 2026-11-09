@@ -13,11 +13,70 @@ const AdminDashboard = () => {
   const [departments, setDepartments] = useState([]);
   const [competitions, setCompetitions] = useState([]);
   const [youpiSessions, setYoupiSessions] = useState([]);
-  const [youpiGatewayInfo, setYoupiGatewayInfo] = useState(null);
-  const [systemStatus, setSystemStatus] = useState({ smtpConfigured: false, smtpHost: '', smtpFrom: '' });
+  const [youpiAutomation, setYoupiAutomation] = useState({
+    primaryVpa: '',
+    backupVpas: [],
+    autoVerifyEnabled: true,
+    autoReconcileObserved: true,
+    imapHost: 'imap.gmail.com',
+    imapPort: 993,
+    imapUser: '',
+    imapConfigured: false,
+    hasImapPass: false,
+    imapPassHint: '',
+    observerConfigured: false,
+    hasObserverSecret: false,
+    observerSecretHint: '',
+    lastPollAt: null,
+    lastPollResult: null
+  });
+  const [youpiObservations, setYoupiObservations] = useState([]);
+  const [youpiAutoForm, setYoupiAutoForm] = useState({
+    backupVpas: '',
+    autoVerifyEnabled: true,
+    autoReconcileObserved: true,
+    imapHost: 'imap.gmail.com',
+    imapPort: '993',
+    imapUser: '',
+    imapPass: ''
+  });
+  const [savingYoupiAuto, setSavingYoupiAuto] = useState(false);
+  const [pollingInbox, setPollingInbox] = useState(false);
+  const [reconcilingCsv, setReconcilingCsv] = useState(false);
+  const [csvSummary, setCsvSummary] = useState(null);
+  const [generatedObserverSecret, setGeneratedObserverSecret] = useState('');
+
+  const [systemStatus, setSystemStatus] = useState({
+    configured: false,
+    smtpConfigured: false,
+    httpConfigured: false,
+    smtpHost: '',
+    smtpFrom: '',
+    activeChannels: [],
+    relayProvider: 'auto',
+    lastEmailStatus: null
+  });
+  const [showEmailPanel, setShowEmailPanel] = useState(false);
+  const [showAppsScriptCode, setShowAppsScriptCode] = useState(false);
+  const [emailForm, setEmailForm] = useState({
+    emailRelayProvider: 'auto',
+    brevoApiKey: '',
+    resendApiKey: '',
+    emailWebhookUrl: '',
+    emailWebhookSecret: '',
+    smtpHostOverride: '',
+    smtpPortOverride: '',
+    smtpUserOverride: '',
+    smtpPassOverride: '',
+    smtpFromOverride: ''
+  });
+  const [savingEmailCfg, setSavingEmailCfg] = useState(false);
+  const [testEmailTo, setTestEmailTo] = useState('');
+  const [sendingTestEmail, setSendingTestEmail] = useState(false);
+  const [testEmailResult, setTestEmailResult] = useState(null);
+
   const [loading, setLoading] = useState(true);
   const [reconcilingId, setReconcilingId] = useState('');
-  const [syncingPaymentId, setSyncingPaymentId] = useState('');
   const [deletingUserId, setDeletingUserId] = useState('');
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
@@ -55,28 +114,38 @@ const AdminDashboard = () => {
     try {
       const token = localStorage.getItem('token');
       const headers = token ? { Authorization: `Bearer ${token}` } : {};
-      const [eventsRes, usersRes, compsRes, paymentsRes, cleanupRes, deptsList, statusRes] =
-        await Promise.all([
-          axios.get(`${backendUrl}/api/events`, { headers }),
-          axios.get(`${backendUrl}/api/users`, { headers }),
-          axios.get(`${backendUrl}/api/competitions`, { headers }).catch(() => ({ data: [] })),
-          axios
-            .get(`${backendUrl}/api/payments/youpi/admin/sessions`, { headers })
-            .catch(() => ({ data: { sessions: [] } })),
-          axios
-            .get(`${backendUrl}/api/events/admin/cleanup-policy`, { headers })
-            .catch(() => ({ data: null })),
-          fetchDepartments({ includeInactive: true, includeStats: true }),
-          axios
-            .get(`${backendUrl}/api/users/admin/system-status`, { headers })
-            .catch(() => ({ data: null }))
-        ]);
+      const [
+        eventsRes,
+        usersRes,
+        compsRes,
+        paymentsRes,
+        cleanupRes,
+        deptsList,
+        statusRes,
+        autoRes
+      ] = await Promise.all([
+        axios.get(`${backendUrl}/api/events`, { headers }),
+        axios.get(`${backendUrl}/api/users`, { headers }),
+        axios.get(`${backendUrl}/api/competitions`, { headers }).catch(() => ({ data: [] })),
+        axios
+          .get(`${backendUrl}/api/payments/youpi/admin/sessions`, { headers })
+          .catch(() => ({ data: { sessions: [] } })),
+        axios
+          .get(`${backendUrl}/api/events/admin/cleanup-policy`, { headers })
+          .catch(() => ({ data: null })),
+        fetchDepartments({ includeInactive: true, includeStats: true }),
+        axios
+          .get(`${backendUrl}/api/users/admin/system-status`, { headers })
+          .catch(() => ({ data: null })),
+        axios
+          .get(`${backendUrl}/api/payments/youpi/admin/automation`, { headers })
+          .catch(() => ({ data: null }))
+      ]);
 
       setEvents(eventsRes.data || []);
       setUsers(usersRes.data || []);
       setCompetitions(compsRes.data || []);
       setYoupiSessions(paymentsRes.data?.sessions || []);
-      setYoupiGatewayInfo(paymentsRes.data?.gatewayInfo || null);
       setDepartments(Array.isArray(deptsList) ? deptsList : []);
 
       const activeDeptNames = (deptsList || [])
@@ -100,6 +169,25 @@ const AdminDashboard = () => {
       }
       if (statusRes.data) {
         setSystemStatus(statusRes.data);
+        setEmailForm((prev) => ({
+          ...prev,
+          emailRelayProvider: statusRes.data.relayProvider || 'auto',
+          smtpFromOverride: prev.smtpFromOverride || statusRes.data.smtpFrom || ''
+        }));
+      }
+      if (autoRes.data?.config) {
+        const ac = autoRes.data.config;
+        setYoupiAutomation(ac);
+        setYoupiAutoForm({
+          backupVpas: Array.isArray(ac.backupVpas) ? ac.backupVpas.join(', ') : '',
+          autoVerifyEnabled: ac.autoVerifyEnabled !== false,
+          autoReconcileObserved: ac.autoReconcileObserved !== false,
+          imapHost: ac.imapHost || 'imap.gmail.com',
+          imapPort: String(ac.imapPort || 993),
+          imapUser: ac.imapUser || '',
+          imapPass: ''
+        });
+        setYoupiObservations(autoRes.data.observations || []);
       }
     } catch (err) {
       setError(err.response?.data?.message || 'Failed to fetch data');
@@ -355,31 +443,6 @@ const AdminDashboard = () => {
     }
   };
 
-  const handleSyncYoupiSession = async (paymentId) => {
-    try {
-      setError('');
-      setSuccess('');
-      setSyncingPaymentId(paymentId);
-      const token = localStorage.getItem('token');
-      const res = await axios.post(
-        `${backendUrl}/api/payments/youpi/admin/sessions/${paymentId}/sync`,
-        {},
-        { headers: { Authorization: `Bearer ${token}` } }
-      );
-      const updated = res.data?.session;
-      if (updated) {
-        setYoupiSessions((prev) =>
-          prev.map((item) => (item.paymentId === paymentId ? { ...item, ...updated } : item))
-        );
-        setSuccess(`Synced order ${updated.orderId}: status is now ${updated.status}.`);
-      }
-    } catch (err) {
-      setError(err.response?.data?.message || 'Failed to sync session from external YouPI-PG gateway');
-    } finally {
-      setSyncingPaymentId('');
-    }
-  };
-
   const handleUpdateCleanupPolicy = async (nextValues) => {
     try {
       setError('');
@@ -441,6 +504,176 @@ const AdminDashboard = () => {
     }
   };
 
+  const handleSaveEmailSettings = async (e) => {
+    e.preventDefault();
+    try {
+      setError('');
+      setSuccess('');
+      setSavingEmailCfg(true);
+      const token = localStorage.getItem('token');
+      const res = await axios.put(`${backendUrl}/api/users/admin/email-settings`, emailForm, {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      if (res.data?.status) setSystemStatus(res.data.status);
+      setEmailForm((prev) => ({
+        ...prev,
+        brevoApiKey: '',
+        resendApiKey: '',
+        emailWebhookSecret: '',
+        smtpPassOverride: ''
+      }));
+      setSuccess(res.data?.message || 'Email delivery relay settings saved.');
+    } catch (err) {
+      setError(err.response?.data?.message || 'Failed to save email settings.');
+    } finally {
+      setSavingEmailCfg(false);
+    }
+  };
+
+  const handleResetEmailChannel = async (payload) => {
+    try {
+      setError('');
+      setSuccess('');
+      setSavingEmailCfg(true);
+      const token = localStorage.getItem('token');
+      const res = await axios.put(`${backendUrl}/api/users/admin/email-settings`, payload, {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      if (res.data?.status) setSystemStatus(res.data.status);
+      setSuccess('Email channel cleared.');
+    } catch (err) {
+      setError(err.response?.data?.message || 'Failed to reset email channel.');
+    } finally {
+      setSavingEmailCfg(false);
+    }
+  };
+
+  const handleSendTestEmail = async (e) => {
+    e.preventDefault();
+    try {
+      setError('');
+      setSuccess('');
+      setTestEmailResult(null);
+      setSendingTestEmail(true);
+      const token = localStorage.getItem('token');
+      const res = await axios.post(
+        `${backendUrl}/api/users/admin/test-email`,
+        { to: (testEmailTo || user?.email || '').trim() },
+        { headers: { Authorization: `Bearer ${token}` } }
+      );
+      if (res.data?.status) setSystemStatus(res.data.status);
+      setTestEmailResult({ ok: true, ...res.data });
+      setSuccess(`Test email delivered via ${res.data.provider} in ${res.data.latencyMs}ms.`);
+    } catch (err) {
+      const data = err.response?.data || {};
+      if (data.status) setSystemStatus(data.status);
+      setTestEmailResult({
+        ok: false,
+        code: data.code || 'EMAIL_DELIVERY_FAILED',
+        message: data.message || err.message || 'Test email delivery failed.',
+        latencyMs: data.latencyMs
+      });
+      setError(data.message || 'Test email failed.');
+    } finally {
+      setSendingTestEmail(false);
+    }
+  };
+
+  const handleSaveYoupiAutomation = async (e, extraFlags = {}) => {
+    if (e) e.preventDefault();
+    try {
+      setError('');
+      setSuccess('');
+      setSavingYoupiAuto(true);
+      const token = localStorage.getItem('token');
+      const res = await axios.put(
+        `${backendUrl}/api/payments/youpi/admin/automation`,
+        {
+          ...youpiAutoForm,
+          imapPort: Number(youpiAutoForm.imapPort) || 993,
+          ...extraFlags
+        },
+        { headers: { Authorization: `Bearer ${token}` } }
+      );
+      if (res.data?.config) {
+        setYoupiAutomation(res.data.config);
+        setYoupiAutoForm((prev) => ({
+          ...prev,
+          backupVpas: Array.isArray(res.data.config.backupVpas)
+            ? res.data.config.backupVpas.join(', ')
+            : prev.backupVpas,
+          imapPass: ''
+        }));
+      }
+      if (res.data?.generatedObserverSecret) {
+        setGeneratedObserverSecret(res.data.generatedObserverSecret);
+      }
+      setSuccess(res.data?.message || 'YouPI automation settings saved.');
+    } catch (err) {
+      setError(err.response?.data?.message || 'Failed to save YouPI automation settings.');
+    } finally {
+      setSavingYoupiAuto(false);
+    }
+  };
+
+  const handlePollBankInboxNow = async () => {
+    try {
+      setError('');
+      setSuccess('');
+      setPollingInbox(true);
+      const token = localStorage.getItem('token');
+      const res = await axios.post(
+        `${backendUrl}/api/payments/youpi/admin/poll-now`,
+        {},
+        { headers: { Authorization: `Bearer ${token}` } }
+      );
+      if (res.data?.config) setYoupiAutomation(res.data.config);
+      if (res.data?.observations) setYoupiObservations(res.data.observations);
+      const sum = res.data?.summary || {};
+      if (sum.ok) {
+        setSuccess(
+          `Bank inbox scanned (${sum.scanned || 0} email(s)) · ${sum.matched || 0} payment(s) auto-reconciled.`
+        );
+        await fetchData();
+      } else {
+        setError(sum.reason || sum.error || 'Bank inbox poll skipped or failed.');
+      }
+    } catch (err) {
+      setError(err.response?.data?.message || 'Failed to poll bank inbox.');
+    } finally {
+      setPollingInbox(false);
+    }
+  };
+
+  const handleUploadStatementCsv = async (e) => {
+    const file = e.target.files?.[0];
+    e.target.value = '';
+    if (!file) return;
+    try {
+      setError('');
+      setSuccess('');
+      setCsvSummary(null);
+      setReconcilingCsv(true);
+      const csvText = await file.text();
+      const token = localStorage.getItem('token');
+      const res = await axios.post(
+        `${backendUrl}/api/payments/youpi/admin/reconcile-csv`,
+        { csvText },
+        { headers: { Authorization: `Bearer ${token}` } }
+      );
+      if (res.data?.summary) setCsvSummary(res.data.summary);
+      if (res.data?.observations) setYoupiObservations(res.data.observations);
+      setSuccess(
+        `Processed ${res.data?.summary?.creditRows || 0} bank credit row(s) — ${res.data?.summary?.matchedCount || 0} session(s) settled.`
+      );
+      await fetchData();
+    } catch (err) {
+      setError(err.response?.data?.message || 'Failed to process bank CSV statement.');
+    } finally {
+      setReconcilingCsv(false);
+    }
+  };
+
   if (!user || user.role !== 'admin') {
     return (
       <div className="min-h-[60vh] flex items-center justify-center">
@@ -481,25 +714,357 @@ const AdminDashboard = () => {
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-2.5 self-start sm:self-auto">
-          <span
-            className={`h-9 inline-flex items-center px-3 rounded-[8px] text-[12px] font-mono border ${
-              systemStatus.smtpConfigured
-                ? 'bg-[#4cc38a]/10 text-[#4cc38a] border-[#4cc38a]/25'
+          <button
+            type="button"
+            onClick={() => setShowEmailPanel((v) => !v)}
+            className={`h-9 inline-flex items-center gap-2 px-3 rounded-[8px] text-[12px] font-mono border transition-colors ${
+              systemStatus.configured
+                ? systemStatus.lastEmailStatus?.delivered === false
+                  ? 'bg-[#e5484d]/10 text-[#e5484d] border-[#e5484d]/30'
+                  : 'bg-[#4cc38a]/10 text-[#4cc38a] border-[#4cc38a]/25'
                 : 'bg-[#e09132]/10 text-[#ebb05d] border-[#e09132]/25'
             }`}
-            title={
-              systemStatus.smtpConfigured
-                ? `Live SMTP email active via ${systemStatus.smtpHost || 'SMTP'}`
-                : 'Configure SMTP_USER & SMTP_PASS in backend/.env or Render Env for live emails'
-            }
           >
-            {systemStatus.smtpConfigured ? 'SMTP Email Live' : 'Email Console Mode (Configure SMTP)'}
-          </span>
+            <span>
+              {systemStatus.configured
+                ? systemStatus.lastEmailStatus?.delivered === false
+                  ? 'Email Warning · Configure / Test'
+                  : `Email Live (${(systemStatus.activeChannels || []).join(', ') || 'configured'})`
+                : 'Email Console Mode · Configure Relay'}
+            </span>
+          </button>
           <Link to="/create-event" className="btn-primary h-9 px-4 text-[13px]">
             New event
           </Link>
         </div>
       </div>
+
+      {/* Email Delivery & Cloud HTTPS Relay Diagnostics Drawer */}
+      {showEmailPanel && (
+        <div className="rounded-[14px] bg-[#1c1a18] border border-[#e09132]/30 p-5 sm:p-6 space-y-5">
+          <div className="flex flex-wrap items-start justify-between gap-3 pb-4 border-b border-[#efe9de]/[0.08]">
+            <div>
+              <h2 className="text-[17px] font-medium text-[#efe9de]">
+                Email Delivery &amp; Cloud HTTPS Relay Diagnostics
+              </h2>
+              <p className="text-[12.5px] text-[#aaa398] mt-1">
+                Cloud hosts (Render Free) frequently throttle or timeout SMTP ports 465/587. Configure a <strong>Port 443 HTTPS relay</strong> (Brevo Free API, Resend, or a 10-line Google Apps Script Gmail Bridge) for sub-second OTP &amp; registration emails without touching Render redeploy.
+              </p>
+            </div>
+            <button
+              type="button"
+              onClick={() => setShowEmailPanel(false)}
+              className="btn-secondary h-8 px-3 text-[12px]"
+            >
+              Close panel
+            </button>
+          </div>
+
+          <div className="grid grid-cols-1 lg:grid-cols-12 gap-5">
+            {/* Test Email & Last Status */}
+            <div className="lg:col-span-5 space-y-4">
+              <div className="rounded-[12px] bg-[#161513] border border-[#efe9de]/[0.08] p-4 space-y-2.5 text-[12px]">
+                <div className="flex items-center justify-between">
+                  <span className="text-[#8a847a] font-mono uppercase">Active Channels</span>
+                  <span className="font-mono text-[#ebb05d]">
+                    Mode: {systemStatus.relayProvider || 'auto'}
+                  </span>
+                </div>
+                <div className="flex flex-wrap gap-1.5">
+                  {systemStatus.brevoConfigured && (
+                    <span className="px-2 py-0.5 rounded-[5px] bg-[#4cc38a]/12 text-[#4cc38a] border border-[#4cc38a]/25 font-mono text-[11px]">
+                      Brevo HTTPS ✓
+                    </span>
+                  )}
+                  {systemStatus.webhookConfigured && (
+                    <span className="px-2 py-0.5 rounded-[5px] bg-[#4cc38a]/12 text-[#4cc38a] border border-[#4cc38a]/25 font-mono text-[11px]">
+                      Webhook HTTPS ({systemStatus.webhookUrlHost}) ✓
+                    </span>
+                  )}
+                  {systemStatus.resendConfigured && (
+                    <span className="px-2 py-0.5 rounded-[5px] bg-[#4cc38a]/12 text-[#4cc38a] border border-[#4cc38a]/25 font-mono text-[11px]">
+                      Resend HTTPS ✓
+                    </span>
+                  )}
+                  {systemStatus.smtpConfigured && (
+                    <span className="px-2 py-0.5 rounded-[5px] bg-[#262421] text-[#efe9de] border border-[#efe9de]/[0.1] font-mono text-[11px]">
+                      SMTP {systemStatus.smtpHost}:{systemStatus.smtpPort} ({systemStatus.smtpUserMasked})
+                    </span>
+                  )}
+                  {!systemStatus.configured && (
+                    <span className="text-[#e5484d]">No mail transports configured</span>
+                  )}
+                </div>
+
+                {systemStatus.lastEmailStatus && (
+                  <div className="pt-2 border-t border-[#efe9de]/[0.06] space-y-1">
+                    <span className="text-[#8a847a]">Last delivery attempt:</span>
+                    <div
+                      className={`font-mono text-[11px] ${
+                        systemStatus.lastEmailStatus.delivered ? 'text-[#4cc38a]' : 'text-[#e5484d]'
+                      }`}
+                    >
+                      {systemStatus.lastEmailStatus.delivered ? 'DELIVERED' : 'FAILED'} via{' '}
+                      {systemStatus.lastEmailStatus.provider} ({systemStatus.lastEmailStatus.latencyMs}ms)
+                    </div>
+                    {systemStatus.lastEmailStatus.reason && (
+                      <p className="text-[11px] text-[#e5484d] break-words">
+                        {systemStatus.lastEmailStatus.reason}
+                      </p>
+                    )}
+                  </div>
+                )}
+              </div>
+
+              <form
+                onSubmit={handleSendTestEmail}
+                className="rounded-[12px] bg-[#161513] border border-[#efe9de]/[0.08] p-4 space-y-3"
+              >
+                <span className="block text-[13px] font-medium text-[#efe9de]">
+                  Send Diagnostic Test Email
+                </span>
+                <input
+                  type="email"
+                  value={testEmailTo}
+                  onChange={(e) => setTestEmailTo(e.target.value)}
+                  placeholder={user?.email || 'recipient@gmail.com'}
+                  className="input-field h-9 text-[12px]"
+                />
+                <button
+                  type="submit"
+                  disabled={sendingTestEmail}
+                  className="btn-primary w-full h-9 text-[12px]"
+                >
+                  {sendingTestEmail ? 'Testing Transports...' : 'Send Test Email Now'}
+                </button>
+                {testEmailResult && (
+                  <p
+                    className={`text-[11.5px] font-mono ${
+                      testEmailResult.ok ? 'text-[#4cc38a]' : 'text-[#e5484d]'
+                    }`}
+                  >
+                    {testEmailResult.ok
+                      ? `Delivered via ${testEmailResult.provider} in ${testEmailResult.latencyMs}ms.`
+                      : `${testEmailResult.code}: ${testEmailResult.message}`}
+                  </p>
+                )}
+              </form>
+            </div>
+
+            {/* Relay Config Form */}
+            <form onSubmit={handleSaveEmailSettings} className="lg:col-span-7 space-y-3.5">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-[11.5px] text-[#aaa398] mb-1">
+                    Relay Priority Mode
+                  </label>
+                  <select
+                    value={emailForm.emailRelayProvider}
+                    onChange={(e) =>
+                      setEmailForm((p) => ({ ...p, emailRelayProvider: e.target.value }))
+                    }
+                    className="input-field h-9 py-0 text-[12px]"
+                  >
+                    <option value="auto">Auto (HTTPS Relays first in Cloud)</option>
+                    <option value="brevo">Brevo HTTPS API First</option>
+                    <option value="webhook">Google Apps Script / Webhook First</option>
+                    <option value="resend">Resend HTTPS API First</option>
+                    <option value="smtp">Direct SMTP First</option>
+                  </select>
+                </div>
+
+                <div>
+                  <label className="block text-[11.5px] text-[#aaa398] mb-1">
+                    Sender From Address
+                  </label>
+                  <input
+                    type="text"
+                    value={emailForm.smtpFromOverride}
+                    onChange={(e) =>
+                      setEmailForm((p) => ({ ...p, smtpFromOverride: e.target.value }))
+                    }
+                    placeholder="Avenor Events <you@gmail.com>"
+                    className="input-field h-9 text-[12px]"
+                  />
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                  <div className="flex justify-between text-[11.5px] text-[#aaa398] mb-1">
+                    <span>Brevo API Key (300 free/day, Port 443)</span>
+                    {systemStatus.brevoConfigured && (
+                      <button
+                        type="button"
+                        onClick={() => handleResetEmailChannel({ clearBrevoApiKey: true })}
+                        className="text-[#e5484d] hover:underline"
+                      >
+                        Clear
+                      </button>
+                    )}
+                  </div>
+                  <input
+                    type="password"
+                    value={emailForm.brevoApiKey}
+                    onChange={(e) =>
+                      setEmailForm((p) => ({ ...p, brevoApiKey: e.target.value }))
+                    }
+                    placeholder={
+                      systemStatus.brevoConfigured ? 'Saved ✓ (leave blank to keep)' : 'xkeysib-...'
+                    }
+                    className="input-field h-9 text-[12px] font-mono"
+                  />
+                </div>
+
+                <div>
+                  <div className="flex justify-between text-[11.5px] text-[#aaa398] mb-1">
+                    <span>Resend API Key (Optional)</span>
+                    {systemStatus.resendConfigured && (
+                      <button
+                        type="button"
+                        onClick={() => handleResetEmailChannel({ clearResendApiKey: true })}
+                        className="text-[#e5484d] hover:underline"
+                      >
+                        Clear
+                      </button>
+                    )}
+                  </div>
+                  <input
+                    type="password"
+                    value={emailForm.resendApiKey}
+                    onChange={(e) =>
+                      setEmailForm((p) => ({ ...p, resendApiKey: e.target.value }))
+                    }
+                    placeholder={
+                      systemStatus.resendConfigured ? 'Saved ✓ (leave blank to keep)' : 're_...'
+                    }
+                    className="input-field h-9 text-[12px] font-mono"
+                  />
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                  <div className="flex justify-between text-[11.5px] text-[#aaa398] mb-1">
+                    <span>Google Apps Script / HTTPS Webhook URL</span>
+                    {systemStatus.webhookConfigured && (
+                      <button
+                        type="button"
+                        onClick={() => handleResetEmailChannel({ clearEmailWebhook: true })}
+                        className="text-[#e5484d] hover:underline"
+                      >
+                        Clear
+                      </button>
+                    )}
+                  </div>
+                  <input
+                    type="url"
+                    value={emailForm.emailWebhookUrl}
+                    onChange={(e) =>
+                      setEmailForm((p) => ({ ...p, emailWebhookUrl: e.target.value }))
+                    }
+                    placeholder={
+                      systemStatus.webhookConfigured
+                        ? `Configured (${systemStatus.webhookUrlHost})`
+                        : 'https://script.google.com/macros/s/.../exec'
+                    }
+                    className="input-field h-9 text-[12px]"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-[11.5px] text-[#aaa398] mb-1">
+                    Webhook Secret Token (Optional)
+                  </label>
+                  <input
+                    type="password"
+                    value={emailForm.emailWebhookSecret}
+                    onChange={(e) =>
+                      setEmailForm((p) => ({ ...p, emailWebhookSecret: e.target.value }))
+                    }
+                    placeholder={
+                      systemStatus.webhookSecretConfigured ? 'Saved ✓ (blank to keep)' : 'Shared secret'
+                    }
+                    className="input-field h-9 text-[12px] font-mono"
+                  />
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                <input
+                  type="text"
+                  value={emailForm.smtpHostOverride}
+                  onChange={(e) =>
+                    setEmailForm((p) => ({ ...p, smtpHostOverride: e.target.value }))
+                  }
+                  placeholder="SMTP Host (e.g. smtp.gmail.com)"
+                  className="input-field h-9 text-[12px]"
+                />
+                <input
+                  type="email"
+                  value={emailForm.smtpUserOverride}
+                  onChange={(e) =>
+                    setEmailForm((p) => ({ ...p, smtpUserOverride: e.target.value }))
+                  }
+                  placeholder="SMTP Username override"
+                  className="input-field h-9 text-[12px]"
+                />
+                <input
+                  type="password"
+                  value={emailForm.smtpPassOverride}
+                  onChange={(e) =>
+                    setEmailForm((p) => ({ ...p, smtpPassOverride: e.target.value }))
+                  }
+                  placeholder="Gmail App Password (blank to keep)"
+                  className="input-field h-9 text-[12px] font-mono"
+                />
+              </div>
+
+              <div className="flex flex-wrap items-center justify-between gap-2 pt-1">
+                <button
+                  type="button"
+                  onClick={() => setShowAppsScriptCode((v) => !v)}
+                  className="text-[11.5px] text-[#ebb05d] hover:underline"
+                >
+                  {showAppsScriptCode
+                    ? 'Hide Free Gmail Apps Script Guide'
+                    : 'Free Setup: Use Your Gmail Over HTTPS (No SMTP Port Block)'}
+                </button>
+                <div className="flex gap-2">
+                  <button
+                    type="button"
+                    onClick={() => handleResetEmailChannel({ clearSmtpOverrides: true })}
+                    className="btn-secondary h-9 px-3 text-[12px]"
+                  >
+                    Clear SMTP Override
+                  </button>
+                  <button
+                    type="submit"
+                    disabled={savingEmailCfg}
+                    className="btn-primary h-9 px-4 text-[12px]"
+                  >
+                    {savingEmailCfg ? 'Saving...' : 'Save Relay Settings'}
+                  </button>
+                </div>
+              </div>
+
+              {showAppsScriptCode && (
+                <pre className="p-3 rounded-[10px] bg-[#12110f] border border-[#efe9de]/[0.08] text-[11px] font-mono text-[#d9ceb8] overflow-x-auto leading-relaxed">
+{`// Deploy at script.google.com -> New project -> Deploy as Web App (Execute as: Me, Access: Anyone)
+function doPost(e) {
+  var body = JSON.parse(e.postData.contents);
+  GmailApp.sendEmail(body.to, body.subject, body.text || '', {
+    htmlBody: body.html || undefined,
+    name: body.fromName || 'Avenor Campus Events'
+  });
+  return ContentService.createTextOutput(JSON.stringify({ ok: true })).setMimeType(ContentService.MimeType.JSON);
+}`}
+                </pre>
+              )}
+            </form>
+          </div>
+        </div>
+      )}
 
       {/* Compact 4-Card Summary Strip */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
@@ -1136,66 +1701,233 @@ const AdminDashboard = () => {
             </div>
           </div>
         ) : (
-          <div>
-            {youpiGatewayInfo && (
-              <div className="px-5 py-4 border-b border-[#efe9de]/[0.08] bg-[#161513]/70 flex flex-col lg:flex-row lg:items-center justify-between gap-4">
-                <div className="space-y-1.5">
-                  <div className="flex flex-wrap items-center gap-2">
-                    <span className="text-[13px] font-medium text-[#efe9de]">
-                      {youpiGatewayInfo.gatewayMode === 'external'
-                        ? 'Option 2 · Separate External YouPI-PG V2 Gateway'
-                        : 'Option 1 · Embedded YouPI-PG Mode'}
-                    </span>
-                    <span
-                      className={`px-2 py-0.5 rounded-[5px] text-[11px] font-mono border ${
-                        youpiGatewayInfo.gatewayMode === 'external'
-                          ? youpiGatewayInfo.externalConfigured
-                            ? 'bg-[#4cc38a]/10 text-[#4cc38a] border-[#4cc38a]/25'
-                            : 'bg-[#e09132]/12 text-[#ebb05d] border-[#e09132]/30'
-                          : 'bg-[#262421] text-[#aaa398] border-[#efe9de]/[0.08]'
-                      }`}
-                    >
-                      Method: {youpiGatewayInfo.defaultMethod} ({youpiGatewayInfo.verificationMode})
-                    </span>
-                    {youpiGatewayInfo.apiUrlOrigin && (
-                      <span className="px-2 py-0.5 rounded-[5px] text-[11px] font-mono bg-[#12110f] text-[#ebb05d] border border-[#efe9de]/[0.08]">
-                        {youpiGatewayInfo.apiUrlOrigin}
-                      </span>
-                    )}
-                  </div>
-                  <p className="text-[12px] text-[#8a847a]">
-                    Webhook callback:{' '}
-                    <code className="font-mono text-[#aaa398]">
-                      {(backendUrl || window.location.origin).replace(/\/+$/, '')}
-                      {youpiGatewayInfo.webhookCallbackPath || '/api/payments/youpi/webhook'}
-                    </code>
-                    {' · '}Configure a non-Google Pay UPI VPA (PhonePe @ybl, Paytm, BHIM @upi, SBI @sbi) inside your external YouPI-PG Admin with <code className="font-mono text-[#aaa398]">MANUAL_UPI</code>.
+          <div className="divide-y divide-[#efe9de]/[0.08]">
+            {/* YouPI Automated Bank Verification, Multi-VPA Rotation & CSV Reconciliation */}
+            <div className="p-5 bg-[#161513]/70 space-y-5">
+              <div className="flex flex-wrap items-start justify-between gap-3">
+                <div>
+                  <h3 className="text-[15px] font-medium text-[#efe9de]">
+                    YouPI Automated Payment Verification &amp; Backup UPI Pool
+                  </h3>
+                  <p className="text-[12px] text-[#8a847a] mt-0.5">
+                    Configure backup receiver UPI IDs (for GPay day-limit bypass), enable real-time bank Gmail IMAP / SMS observer auto-reconciliation, or bulk-match bank CSV statements.
                   </p>
                 </div>
-
-                {youpiGatewayInfo.gatewayMode === 'external' && (
-                  <div className="flex flex-wrap items-center gap-1.5 shrink-0 text-[11px] font-mono">
-                    {[
-                      { label: 'API URL', ok: Boolean(youpiGatewayInfo.apiUrlOrigin) },
-                      { label: 'Merchant ID', ok: Boolean(youpiGatewayInfo.merchantIdConfigured) },
-                      { label: 'Merchant Key', ok: Boolean(youpiGatewayInfo.merchantKeyConfigured) },
-                      { label: 'Webhook Secret', ok: Boolean(youpiGatewayInfo.webhookSecretConfigured) }
-                    ].map((badge) => (
-                      <span
-                        key={badge.label}
-                        className={`px-2 py-0.5 rounded-[5px] border ${
-                          badge.ok
-                            ? 'bg-[#4cc38a]/10 text-[#4cc38a] border-[#4cc38a]/25'
-                            : 'bg-[#e5484d]/10 text-[#e5484d] border-[#e5484d]/25'
-                        }`}
-                      >
-                        {badge.ok ? '✓' : '✕'} {badge.label}
-                      </span>
-                    ))}
-                  </div>
-                )}
+                <div className="flex flex-wrap items-center gap-2">
+                  <span
+                    className={`px-2.5 py-1 rounded-[6px] text-[11px] font-mono border ${
+                      youpiAutomation.imapConfigured
+                        ? 'bg-[#4cc38a]/10 text-[#4cc38a] border-[#4cc38a]/25'
+                        : 'bg-[#262421] text-[#8a847a] border-[#efe9de]/[0.08]'
+                    }`}
+                  >
+                    {youpiAutomation.imapConfigured ? 'IMAP Auto-Poll Ready' : 'IMAP Not Configured'}
+                  </span>
+                  <span
+                    className={`px-2.5 py-1 rounded-[6px] text-[11px] font-mono border ${
+                      youpiAutomation.observerConfigured
+                        ? 'bg-[#4cc38a]/10 text-[#4cc38a] border-[#4cc38a]/25'
+                        : 'bg-[#262421] text-[#8a847a] border-[#efe9de]/[0.08]'
+                    }`}
+                  >
+                    {youpiAutomation.observerConfigured ? 'SMS/Webhook Bridge Armed' : 'Webhook Secret Unset'}
+                  </span>
+                </div>
               </div>
-            )}
+
+              <div className="grid grid-cols-1 lg:grid-cols-12 gap-4">
+                <form
+                  onSubmit={handleSaveYoupiAutomation}
+                  className="lg:col-span-8 rounded-[12px] bg-[#12110f] border border-[#efe9de]/[0.08] p-4 space-y-3.5"
+                >
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    <div>
+                      <label className="block text-[11.5px] text-[#aaa398] mb-1">
+                        Backup UPI VPAs (comma-separated)
+                      </label>
+                      <input
+                        type="text"
+                        value={youpiAutoForm.backupVpas}
+                        onChange={(e) =>
+                          setYoupiAutoForm((p) => ({ ...p, backupVpas: e.target.value }))
+                        }
+                        placeholder="praveensumathi12-2@oksbi, alt@okicici"
+                        className="input-field h-9 text-[12px] font-mono"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-[11.5px] text-[#aaa398] mb-1">
+                        Bank Alert Gmail IMAP Email
+                      </label>
+                      <input
+                        type="email"
+                        value={youpiAutoForm.imapUser}
+                        onChange={(e) =>
+                          setYoupiAutoForm((p) => ({ ...p, imapUser: e.target.value }))
+                        }
+                        placeholder="bank-alerts-gmail@gmail.com"
+                        className="input-field h-9 text-[12px]"
+                      />
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                    <div>
+                      <label className="block text-[11.5px] text-[#aaa398] mb-1">
+                        Gmail IMAP App Password
+                      </label>
+                      <input
+                        type="password"
+                        value={youpiAutoForm.imapPass}
+                        onChange={(e) =>
+                          setYoupiAutoForm((p) => ({ ...p, imapPass: e.target.value }))
+                        }
+                        placeholder={
+                          youpiAutomation.hasImapPass
+                            ? `Saved (${youpiAutomation.imapPassHint})`
+                            : '16-char Google App Password'
+                        }
+                        className="input-field h-9 text-[12px] font-mono"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-[11.5px] text-[#aaa398] mb-1">
+                        IMAP Host
+                      </label>
+                      <input
+                        type="text"
+                        value={youpiAutoForm.imapHost}
+                        onChange={(e) =>
+                          setYoupiAutoForm((p) => ({ ...p, imapHost: e.target.value }))
+                        }
+                        className="input-field h-9 text-[12px] font-mono"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-[11.5px] text-[#aaa398] mb-1">
+                        IMAP Port
+                      </label>
+                      <input
+                        type="number"
+                        value={youpiAutoForm.imapPort}
+                        onChange={(e) =>
+                          setYoupiAutoForm((p) => ({ ...p, imapPort: e.target.value }))
+                        }
+                        className="input-field h-9 text-[12px] font-mono"
+                      />
+                    </div>
+                  </div>
+
+                  <div className="flex flex-wrap items-center gap-4 text-[12px] text-[#d9ceb8]">
+                    <label className="inline-flex items-center gap-2 cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={youpiAutoForm.autoVerifyEnabled}
+                        onChange={(e) =>
+                          setYoupiAutoForm((p) => ({ ...p, autoVerifyEnabled: e.target.checked }))
+                        }
+                        className="h-4 w-4 rounded-[4px] border-[#efe9de]/20 bg-[#262421] text-[#e09132]"
+                      />
+                      <span>Enable automated bank polling while sessions are active</span>
+                    </label>
+                    <label className="inline-flex items-center gap-2 cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={youpiAutoForm.autoReconcileObserved}
+                        onChange={(e) =>
+                          setYoupiAutoForm((p) => ({
+                            ...p,
+                            autoReconcileObserved: e.target.checked
+                          }))
+                        }
+                        className="h-4 w-4 rounded-[4px] border-[#efe9de]/20 bg-[#262421] text-[#e09132]"
+                      />
+                      <span>Auto-settle &amp; unlock passes on verified bank match</span>
+                    </label>
+                  </div>
+
+                  {generatedObserverSecret && (
+                    <div className="p-2.5 rounded-[8px] bg-[#4cc38a]/10 border border-[#4cc38a]/30 text-[11px] font-mono text-[#4cc38a] break-all">
+                      New X-Youpi-Observer-Secret (copy now): {generatedObserverSecret}
+                    </div>
+                  )}
+
+                  <div className="flex flex-wrap items-center justify-between gap-2 pt-1">
+                    <div className="flex flex-wrap gap-2">
+                      <button
+                        type="button"
+                        disabled={pollingInbox}
+                        onClick={handlePollBankInboxNow}
+                        className="btn-secondary h-8 px-3 text-[12px]"
+                      >
+                        {pollingInbox ? 'Polling IMAP...' : 'Poll Bank Inbox Now'}
+                      </button>
+                      <button
+                        type="button"
+                        disabled={savingYoupiAuto}
+                        onClick={() =>
+                          handleSaveYoupiAutomation(null, { generateObserverSecret: true })
+                        }
+                        className="btn-secondary h-8 px-3 text-[12px]"
+                      >
+                        Generate SMS Observer Secret
+                      </button>
+                    </div>
+                    <button
+                      type="submit"
+                      disabled={savingYoupiAuto}
+                      className="btn-primary h-8 px-4 text-[12px]"
+                    >
+                      {savingYoupiAuto ? 'Saving...' : 'Save Automation Settings'}
+                    </button>
+                  </div>
+
+                  {youpiAutomation.lastPollAt && (
+                    <p className="text-[11px] font-mono text-[#8a847a]">
+                      Last IMAP sweep: {new Date(youpiAutomation.lastPollAt).toLocaleString()} ·{' '}
+                      {youpiAutomation.lastPollResult?.ok
+                        ? `Scanned ${youpiAutomation.lastPollResult.scanned || 0}, Matched ${youpiAutomation.lastPollResult.matched || 0}`
+                        : youpiAutomation.lastPollResult?.error || 'Idle'}
+                    </p>
+                  )}
+                </form>
+
+                {/* Bank CSV Bulk Reconciliation */}
+                <div className="lg:col-span-4 rounded-[12px] bg-[#12110f] border border-[#efe9de]/[0.08] p-4 flex flex-col justify-between space-y-3">
+                  <div className="space-y-1.5">
+                    <span className="text-[13px] font-medium text-[#efe9de]">
+                      Bank CSV Statement Auto-Match
+                    </span>
+                    <p className="text-[11.5px] text-[#8a847a] leading-relaxed">
+                      Upload your HDFC / SBI / ICICI / Axis CSV statement to match and reconcile pending YouPI sessions by UTR &amp; exact paise amount.
+                    </p>
+                    <p className="text-[10.5px] font-mono text-[#aaa398] break-all pt-1">
+                      SMS Webhook: {window.location.origin}/api/payments/youpi/observer/sms
+                    </p>
+                  </div>
+
+                  {csvSummary && (
+                    <div className="p-2.5 rounded-[8px] bg-[#1c1a18] border border-[#efe9de]/[0.08] text-[11px] font-mono space-y-0.5 text-[#d9ceb8]">
+                      <div>Credit rows: {csvSummary.creditRows}</div>
+                      <div className="text-[#4cc38a]">Settled: {csvSummary.matchedCount}</div>
+                      <div className="text-[#ebb05d]">Ambiguous held: {csvSummary.ambiguousCount}</div>
+                      <div className="text-[#8a847a]">Unmatched/Dup: {csvSummary.unattributedCount + csvSummary.duplicateCount}</div>
+                    </div>
+                  )}
+
+                  <label className="btn-primary h-9 px-3 text-[12px] cursor-pointer text-center">
+                    <span>{reconcilingCsv ? 'Reconciling CSV...' : 'Upload Bank Statement (.csv)'}</span>
+                    <input
+                      type="file"
+                      accept=".csv,text/csv"
+                      disabled={reconcilingCsv}
+                      onChange={handleUploadStatementCsv}
+                      className="hidden"
+                    />
+                  </label>
+                </div>
+              </div>
+            </div>
 
             <div className="overflow-x-auto">
               <table className="min-w-full divide-y divide-[#efe9de]/[0.06]">
@@ -1218,18 +1950,20 @@ const AdminDashboard = () => {
                     </tr>
                   ) : (
                     youpiSessions.map((ps) => {
-                      const canReconcile = ['MANUAL_REVIEW', 'ACTIVE', 'OBSERVED_SUCCESS'].includes(ps.status);
-                      const canSyncExternal =
-                        ps.gatewayMode === 'external' &&
-                        !['RECONCILED', 'SUCCESS', 'CANCELLED', 'EXPIRED', 'FAILED'].includes(ps.status);
+                      const canReconcile = [
+                        'MANUAL_REVIEW',
+                        'ACTIVE',
+                        'PROCESSING',
+                        'OBSERVED_SUCCESS'
+                      ].includes(ps.status);
                       const busy = reconcilingId === ps.paymentId;
-                      const syncing = syncingPaymentId === ps.paymentId;
                       return (
                         <tr key={ps.paymentId} className="hover:bg-[#262421]/40 transition-colors duration-150">
                           <td className="px-5 py-3.5 whitespace-nowrap text-[12px] font-mono">
                             <div className="text-[#efe9de]">{ps.orderId}</div>
                             <div className="text-[#8a847a] mt-0.5">
-                              {ps.utr ? `UTR: ${ps.utr}` : `${ps.gatewayMode.toUpperCase()} · ${ps.method || 'UPI'}`}
+                              {ps.utr ? `UTR: ${ps.utr}` : ps.gatewayMode.toUpperCase()}
+                              {ps.payeeVpa ? ` · ${ps.payeeVpa}` : ''}
                             </div>
                           </td>
                           <td className="px-5 py-3.5 whitespace-nowrap text-[13px] text-[#efe9de]">
@@ -1254,45 +1988,30 @@ const AdminDashboard = () => {
                             </span>
                           </td>
                           <td className="px-5 py-3.5 whitespace-nowrap text-[12px]">
-                            <div className="flex flex-wrap items-center gap-2">
-                              {canSyncExternal && (
+                            {canReconcile ? (
+                              <div className="flex items-center gap-2">
                                 <button
                                   type="button"
-                                  disabled={syncing || busy}
-                                  onClick={() => handleSyncYoupiSession(ps.paymentId)}
-                                  className="h-8 px-2.5 rounded-[6px] font-medium text-[#ebb05d] bg-[#e09132]/12 border border-[#e09132]/30 hover:bg-[#e09132]/20 transition-colors"
-                                  title="Poll latest status from external YouPI-PG gateway"
+                                  disabled={busy}
+                                  onClick={() => handleReconcileYoupi(ps.paymentId, 'approve')}
+                                  className="h-8 px-2.5 rounded-[6px] font-medium text-[#4cc38a] bg-[#4cc38a]/10 border border-[#4cc38a]/25 hover:bg-[#4cc38a]/20 transition-colors"
                                 >
-                                  {syncing ? 'Syncing...' : 'Sync'}
+                                  Approve &amp; Unlock
                                 </button>
-                              )}
-                              {canReconcile ? (
-                                <>
-                                  <button
-                                    type="button"
-                                    disabled={busy || syncing}
-                                    onClick={() => handleReconcileYoupi(ps.paymentId, 'approve')}
-                                    className="h-8 px-2.5 rounded-[6px] font-medium text-[#4cc38a] bg-[#4cc38a]/10 border border-[#4cc38a]/25 hover:bg-[#4cc38a]/20 transition-colors"
-                                  >
-                                    Approve &amp; Unlock
-                                  </button>
-                                  <button
-                                    type="button"
-                                    disabled={busy || syncing}
-                                    onClick={() => handleReconcileYoupi(ps.paymentId, 'reject')}
-                                    className="h-8 px-2.5 rounded-[6px] font-medium text-[#e5484d] bg-[#e5484d]/10 border border-[#e5484d]/25 hover:bg-[#e5484d]/20 transition-colors"
-                                  >
-                                    Reject
-                                  </button>
-                                </>
-                              ) : (
-                                !canSyncExternal && (
-                                  <span className="text-[11px] font-mono text-[#8a847a]">
-                                    {ps.settlementState}
-                                  </span>
-                                )
-                              )}
-                            </div>
+                                <button
+                                  type="button"
+                                  disabled={busy}
+                                  onClick={() => handleReconcileYoupi(ps.paymentId, 'reject')}
+                                  className="h-8 px-2.5 rounded-[6px] font-medium text-[#e5484d] bg-[#e5484d]/10 border border-[#e5484d]/25 hover:bg-[#e5484d]/20 transition-colors"
+                                >
+                                  Reject
+                                </button>
+                              </div>
+                            ) : (
+                              <span className="text-[11px] font-mono text-[#8a847a]">
+                                {ps.settlementState}
+                              </span>
+                            )}
                           </td>
                         </tr>
                       );
@@ -1301,6 +2020,43 @@ const AdminDashboard = () => {
                 </tbody>
               </table>
             </div>
+
+            {youpiObservations.length > 0 && (
+              <div className="p-5 bg-[#12110f]/40 space-y-2.5">
+                <h4 className="text-[13px] font-medium text-[#aaa398]">
+                  Recent Automated Bank Observations ({youpiObservations.length})
+                </h4>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-2.5">
+                  {youpiObservations.slice(0, 8).map((obs) => (
+                    <div
+                      key={obs._id || obs.fingerprint}
+                      className="rounded-[9px] bg-[#161513] border border-[#efe9de]/[0.07] p-3 text-[11.5px] space-y-1"
+                    >
+                      <div className="flex items-center justify-between gap-2 font-mono">
+                        <span className="text-[#ebb05d]">
+                          {obs.source} · ₹{((Number(obs.amountPaise) || 0) / 100).toFixed(2)}
+                        </span>
+                        <span
+                          className={`px-1.5 py-0.5 rounded-[4px] border text-[10px] ${
+                            obs.attributionStatus?.startsWith('MATCHED')
+                              ? 'bg-[#4cc38a]/10 text-[#4cc38a] border-[#4cc38a]/25'
+                              : obs.attributionStatus === 'AMBIGUOUS'
+                                ? 'bg-[#e09132]/12 text-[#ebb05d] border-[#e09132]/30'
+                                : 'bg-[#e5484d]/10 text-[#e5484d] border-[#e5484d]/25'
+                          }`}
+                        >
+                          {obs.attributionStatus}
+                        </span>
+                      </div>
+                      <p className="text-[#8a847a] truncate">
+                        Sender: {obs.sender || '—'} {obs.bankRef ? `· UTR: ${obs.bankRef}` : ''}
+                      </p>
+                      <p className="text-[#aaa398] line-clamp-1">{obs.reason || obs.rawSnippet}</p>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
           </div>
         )}
       </div>

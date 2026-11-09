@@ -55,6 +55,7 @@ const CreateEvent = () => {
     registrationFee: '',
     currency: 'INR',
     paymentUpiId: '',
+    backupPaymentUpiIds: '',
     paymentInstructions: '',
     whatsappGroupLink: '',
     autoDeleteWhenExpired: 'inherit',
@@ -78,10 +79,8 @@ const CreateEvent = () => {
   const [loading, setLoading] = useState(false);
   const [youpiConfig, setYoupiConfig] = useState({
     gatewayMode: 'embedded',
-    externalConfigured: false,
     vpaConfigured: false,
     defaultPayeeVpa: '',
-    defaultMethod: 'UPI',
     verificationMode: 'manual'
   });
 
@@ -143,6 +142,9 @@ const CreateEvent = () => {
           registrationFee: ev.registrationFee ? String(ev.registrationFee) : '',
           currency: ev.currency || 'INR',
           paymentUpiId: ev.paymentUpiId || '',
+          backupPaymentUpiIds: Array.isArray(ev.backupPaymentUpiIds)
+            ? ev.backupPaymentUpiIds.join(', ')
+            : '',
           paymentInstructions: ev.paymentInstructions || '',
           whatsappGroupLink: ev.whatsappGroupLink || '',
           autoDeleteWhenExpired: ev.autoDeleteWhenExpired || 'inherit',
@@ -234,6 +236,7 @@ const CreateEvent = () => {
       );
       formDataToSend.append('currency', formData.currency || 'INR');
       formDataToSend.append('paymentUpiId', formData.paymentUpiId || '');
+      formDataToSend.append('backupPaymentUpiIds', formData.backupPaymentUpiIds || '');
       formDataToSend.append('paymentInstructions', formData.paymentInstructions || '');
       formDataToSend.append('whatsappGroupLink', formData.whatsappGroupLink.trim());
       formDataToSend.append('autoDeleteWhenExpired', formData.autoDeleteWhenExpired || 'inherit');
@@ -667,7 +670,7 @@ const CreateEvent = () => {
                       ? '*'
                       : youpiConfig.defaultPayeeVpa
                         ? `(optional — defaults to ${youpiConfig.defaultPayeeVpa})`
-                        : '(optional — managed in external YouPI-PG Admin)'}
+                        : '(managed by external YouPI-PG merchant account)'}
                   </label>
                   <input
                     type="text"
@@ -676,14 +679,23 @@ const CreateEvent = () => {
                     required={formData.isPaid && youpiConfig.gatewayMode === 'embedded' && !youpiConfig.vpaConfigured}
                     value={formData.paymentUpiId}
                     onChange={handleChange}
-                    placeholder="clubtreasury@ybl"
+                    placeholder="your-club-or-college@bank"
                     className="input-field font-mono"
                   />
-                  {youpiConfig.gatewayMode === 'external' && (
-                    <p className="text-[11px] text-[#8a847a] mt-1">
-                      Option 2 external gateway active: receiving UPI ID (use a non-Google Pay PSP such as PhonePe @ybl, Paytm, or BHIM @upi) is controlled in YouPI-PG Merchant Admin.
-                    </p>
-                  )}
+                </div>
+                <div className="md:col-span-2">
+                  <label htmlFor="backupPaymentUpiIds" className="block text-[12px] font-medium text-[#aaa398] mb-1">
+                    Backup UPI VPAs for automatic rotation (optional, comma-separated)
+                  </label>
+                  <input
+                    type="text"
+                    id="backupPaymentUpiIds"
+                    name="backupPaymentUpiIds"
+                    value={formData.backupPaymentUpiIds}
+                    onChange={handleChange}
+                    placeholder="e.g. backup1@oksbi, backup2@okicici (used if GPay hits daily receiver limit)"
+                    className="input-field font-mono"
+                  />
                 </div>
                 <div className="md:col-span-2">
                   <label htmlFor="paymentInstructions" className="block text-[12px] font-medium text-[#aaa398] mb-1">

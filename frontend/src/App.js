@@ -10,6 +10,7 @@ import ForgotPassword from './pages/auth/ForgotPassword';
 import Events from './pages/events/Events';
 import EventDetails from './pages/events/EventDetails';
 import CreateEvent from './pages/events/CreateEvent';
+import Payment from './pages/events/Payment';
 import Profile from './pages/dashboard/Profile';
 import AdminDashboard from './pages/dashboard/AdminDashboard';
 import CommunityMessage from './components/community/CommunityMessage';
@@ -65,7 +66,30 @@ function AppShell() {
           <Route path="/clubs/:clubId" element={<ClubProfile />} />
           <Route path="/community" element={<CommunityMessage />} />
           <Route path="/motivation" element={<Navigate to="/" replace />} />
-          <Route path="/payment" element={<Navigate to="/events" replace />} />
+          <Route
+            path="/payment/:paymentId"
+            element={
+              <ProtectedRoute>
+                <Payment />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/payment"
+            element={
+              <ProtectedRoute>
+                <Payment />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/events/:id/checkout"
+            element={
+              <ProtectedRoute>
+                <Payment />
+              </ProtectedRoute>
+            }
+          />
           <Route path="/about" element={<About />} />
           <Route path="/privacy-policy" element={<PrivacyPolicy />} />
           <Route path="/competitions" element={<Competitions />} />

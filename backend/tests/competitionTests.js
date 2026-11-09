@@ -4,6 +4,11 @@ require('dotenv').config({ path: path.join(__dirname, '..', '.env') });
 process.env.SMTP_HOST = '';
 process.env.SMTP_USER = '';
 process.env.SMTP_PASS = '';
+process.env.BREVO_API_KEY = '';
+process.env.RESEND_API_KEY = '';
+process.env.EMAIL_WEBHOOK_URL = '';
+process.env.EMAIL_WEBHOOK_SECRET = '';
+process.env.DISABLE_DB_EMAIL_SETTINGS = 'true';
 const mongoose = require('mongoose');
 const assert = require('assert');
 
@@ -25,7 +30,6 @@ const {
 } = require('../utils/sanitize');
 const { generateQrSvg } = require('../utils/qrGenerator');
 const crypto = require('crypto');
-const http = require('http');
 const Notification = require('../models/community/Notification');
 const EmailOtp = require('../models/auth/EmailOtp');
 const SystemSetting = require('../models/system/SystemSetting');
@@ -49,15 +53,27 @@ const {
   signWebhookPayload,
   verifyYoupiWebhook,
   createYoupiPaymentSession,
-  syncAndGetYoupiSession,
-  syncAndGetYoupiSessionByOrderId,
   submitUtrAndProcessSession,
-  cancelYoupiSession,
+  switchSessionVpa,
+  markSessionProcessing,
   reconcileSessionByAdmin,
   processIncomingWebhook
 } = require('../services/payments/youpiGatewayService');
 const YoupiPaymentSession = require('../models/payments/YoupiPaymentSession');
 const YoupiWebhookReceipt = require('../models/payments/YoupiWebhookReceipt');
+const YoupiBankObservation = require('../models/payments/YoupiBankObservation');
+const {
+  isAuthorizedBankEmailSender,
+  isLikelyBankSmsSender,
+  BankEmailParser,
+  BankSmsParser,
+  parseStatementCsv
+} = require('../services/payments/bankAlertParserService');
+const {
+  ingestBankObservation,
+  reconcileStatementCsv
+} = require('../services/payments/paymentAutomationService');
+const emailService = require('../services/email/emailService');
 const competitionsRouter = require('../routes/competitions/competitions');
 const authRouter = require('../routes/auth/auth');
 
@@ -744,8 +760,6 @@ if input_data:
 
   // TEST 20: Strict Production YouPI-PG Checkout -> Missing VPA Guard -> MANUAL_REVIEW -> Admin Reconcile -> Unlock & Amount Guard
   await test('YouPI-PG E2E Service - Strict VPA check, manual reconciliation, amount guard & competition unlock', async () => {
-    const prevExternalUrl20 = process.env.YOUPI_API_URL;
-    process.env.YOUPI_API_URL = '';
     const orgId = new mongoose.Types.ObjectId();
     const adminActor = { _id: orgId, role: 'admin', email: 'admin@collegeevents.com' };
     const cfg = getYoupiConfig();
@@ -956,8 +970,6 @@ if input_data:
       await Competition.deleteOne({ _id: comp._id });
       await Event.deleteMany({ _id: { $in: [paidEvent._id, missingVpaEvent._id] } });
       await User.deleteMany({ _id: { $in: [studentA._id, studentB._id] } });
-      if (prevExternalUrl20 !== undefined) process.env.YOUPI_API_URL = prevExternalUrl20;
-      else delete process.env.YOUPI_API_URL;
     }
   });
 
@@ -975,8 +987,6 @@ if input_data:
 
   // TEST 22: Paid Event WhatsApp Link Gating, Email Tracking & Cloud Auto-Cleanup Cascade
   await test('Features - Conditional WhatsApp link reveal, email tracking, and cloud cascade cleanup', async () => {
-    const prevExternalUrl22 = process.env.YOUPI_API_URL;
-    process.env.YOUPI_API_URL = '';
     const uniqueSuffix = Date.now();
     const adminActor = (await User.findOne({ role: 'admin' })) || (await User.findOne({}));
     const student = await User.create({
@@ -1004,7 +1014,7 @@ if input_data:
       isPaid: true,
       registrationFee: 199,
       currency: 'INR',
-      paymentUpiId: 'avenorcampus@ybl',
+      paymentUpiId: 'praveensumathi12-1@okaxis',
       whatsappGroupLink: 'https://chat.whatsapp.com/AvenorTestGroupLink99',
       autoDeleteWhenExpired: 'always'
     });
@@ -1129,8 +1139,6 @@ if input_data:
       await Notification.deleteMany({ relatedEvent: expiredPaidEvent._id });
       await Event.deleteMany({ _id: expiredPaidEvent._id });
       await User.deleteMany({ _id: student._id });
-      if (prevExternalUrl22 !== undefined) process.env.YOUPI_API_URL = prevExternalUrl22;
-      else delete process.env.YOUPI_API_URL;
     }
   });
 
@@ -1427,274 +1435,508 @@ if input_data:
     }
   });
 
-  // TEST 27: Option 2 External Dedicated YouPI-PG Gateway E2E (MANUAL_UPI, Return URL, Order Sync, Webhook Unlock & Cancel)
-  await test('27. Option 2 External YouPI-PG Gateway - MANUAL_UPI creation, order sync, webhook unlock & cancel', async () => {
-    const prevEnv = {
-      YOUPI_API_URL: process.env.YOUPI_API_URL,
-      YOUPI_MERCHANT_ID: process.env.YOUPI_MERCHANT_ID,
-      YOUPI_MERCHANT_KEY: process.env.YOUPI_MERCHANT_KEY,
-      YOUPI_WEBHOOK_SECRET: process.env.YOUPI_WEBHOOK_SECRET,
-      YOUPI_DEFAULT_METHOD: process.env.YOUPI_DEFAULT_METHOD,
-      FRONTEND_URL: process.env.FRONTEND_URL
-    };
-
-    const gatewaySessions = new Map();
-    const receivedCreates = [];
-    const receivedCancels = [];
-
-    const mockGateway = http.createServer((req, res) => {
-      let bodyChunks = '';
-      req.on('data', chunk => {
-        bodyChunks += chunk;
-      });
-      req.on('end', () => {
-        const hdrMerchant = req.headers['x-merchant-id'];
-        const hdrKey = req.headers['x-merchant-key'];
-        if (hdrMerchant !== 'ext-merch-27' || hdrKey !== 'ext-key-27') {
-          res.writeHead(401, { 'Content-Type': 'application/json' });
-          res.end(JSON.stringify({ error: 'Unauthorized merchant credentials' }));
-          return;
-        }
-
-        if (req.method === 'POST' && req.url === '/api/v1/payments') {
-          const parsed = JSON.parse(bodyChunks || '{}');
-          receivedCreates.push(parsed);
-          const extId = `ext-pay-${receivedCreates.length}`;
-          const rec = {
-            paymentId: extId,
-            orderId: parsed.orderId,
-            amount: parsed.amount,
-            amountPaise: '19900',
-            currency: parsed.currency || 'INR',
-            method: parsed.method,
-            status: 'INITIATED',
-            internalStatus: 'INITIATED',
-            settlementState: 'PENDING',
-            utr: ''
-          };
-          gatewaySessions.set(extId, rec);
-          res.writeHead(201, { 'Content-Type': 'application/json' });
-          res.end(
-            JSON.stringify({
-              ...rec,
-              checkoutUrl: `${process.env.YOUPI_API_URL}/checkout/${extId}`
-            })
-          );
-          return;
-        }
-
-        const getMatch = req.url.match(/^\/api\/v1\/payments\/([^/?]+)$/);
-        if (req.method === 'GET' && getMatch) {
-          const extId = decodeURIComponent(getMatch[1]);
-          const rec = gatewaySessions.get(extId);
-          if (!rec) {
-            res.writeHead(404, { 'Content-Type': 'application/json' });
-            res.end(JSON.stringify({ error: 'Not found' }));
-            return;
-          }
-          res.writeHead(200, { 'Content-Type': 'application/json' });
-          res.end(JSON.stringify(rec));
-          return;
-        }
-
-        const cancelMatch = req.url.match(/^\/api\/v1\/checkout\/([^/?]+)\/cancel$/);
-        if (req.method === 'POST' && cancelMatch) {
-          const extId = decodeURIComponent(cancelMatch[1]);
-          receivedCancels.push(extId);
-          const rec = gatewaySessions.get(extId);
-          if (rec) {
-            rec.status = 'CANCELLED';
-            rec.internalStatus = 'CANCELLED';
-            rec.settlementState = 'NOT_APPLICABLE';
-          }
-          res.writeHead(200, { 'Content-Type': 'application/json' });
-          res.end(JSON.stringify({ paymentId: extId, status: 'CANCELLED' }));
-          return;
-        }
-
-        res.writeHead(404, { 'Content-Type': 'application/json' });
-        res.end(JSON.stringify({ error: 'Route not found' }));
-      });
-    });
-
-    await new Promise(resolve => mockGateway.listen(0, '127.0.0.1', resolve));
-    const { port } = mockGateway.address();
-    const mockBaseUrl = `http://127.0.0.1:${port}`;
-
-    process.env.YOUPI_API_URL = mockBaseUrl;
-    process.env.YOUPI_MERCHANT_ID = 'ext-merch-27';
-    process.env.YOUPI_MERCHANT_KEY = 'ext-key-27';
-    process.env.YOUPI_WEBHOOK_SECRET = 'ext-webhook-secret-27';
-    delete process.env.YOUPI_DEFAULT_METHOD;
-    process.env.FRONTEND_URL = 'https://avenor-portal.onrender.com';
-
+  // TEST 27: Strict %20 UPI Encoding & Backup VPA Pool Rotation (GPay Day-Limit Mitigation)
+  await test('27. Strict %20 buildUpiUri encoding & authorized backup VPA pool rotation', async () => {
     const suffix = Date.now();
-    const orgId = new mongoose.Types.ObjectId();
+    const rawUri = buildUpiUri({
+      payeeVpa: 'praveensumathi12-1@okaxis',
+      payeeName: 'Avenor Campus Events',
+      amountPaise: 14900,
+      transactionRef: `ORD_${suffix}`,
+      transactionNote: 'Campus Tech Pass'
+    });
+    assert(rawUri.startsWith('upi://pay?pa=praveensumathi12-1@okaxis&'), 'Must preserve literal @ in pa=');
+    assert(!rawUri.includes('+'), 'RFC3986 UPI deep-link must use %20 instead of + for spaces');
+    assert(rawUri.includes('pn=Avenor%20Campus%20Events'), 'Payee name must use %20 encoding');
+    assert(rawUri.includes('am=149.00&cu=INR'), 'Amount must format as exact 2 decimals');
+
+    let adminActor = await User.findOne({ role: 'admin' });
+    let createdAdmin = false;
+    if (!adminActor) {
+      adminActor = await User.create({
+        name: 'VPA Test Admin',
+        email: `vpa_admin_${suffix}@example.com`,
+        password: 'Password123!',
+        role: 'admin',
+        department: 'Computer Science'
+      });
+      createdAdmin = true;
+    }
+
     const student = await User.create({
-      name: `External GW Student ${suffix}`,
-      email: `ext_student_${suffix}@example.com`,
+      name: 'VPA Test Student',
+      email: `vpa_student_${suffix}@example.com`,
       password: 'Password123!',
       role: 'student',
       department: 'Computer Science',
       emailVerified: true
     });
-    const studentCancel = await User.create({
-      name: `External Cancel Student ${suffix}`,
-      email: `ext_cancel_${suffix}@example.com`,
-      password: 'Password123!',
-      role: 'student',
-      department: 'Computer Science',
-      emailVerified: true
-    });
+
     const paidEvent = await Event.create({
-      title: `Option 2 External GW Event ${suffix}`,
-      description: 'Testing external dedicated YouPI-PG V2 gateway',
-      date: new Date(Date.now() + 2 * 86400000),
-      time: '02:00 PM',
-      location: 'Main Auditorium',
-      department: 'Computer Science',
+      title: `VPA Rotation Event ${suffix}`,
+      description: 'Tests backup VPA pool switching',
+      date: new Date(Date.now() + 4 * 86400000),
+      time: '10:00 AM',
+      location: 'Main Hall',
       type: 'tech',
+      department: 'Computer Science',
+      organizer: adminActor._id,
+      capacity: 100,
       status: 'approved',
-      capacity: 50,
       isPaid: true,
       registrationFee: 199,
       currency: 'INR',
-      paymentUpiId: '',
-      whatsappGroupLink: 'https://chat.whatsapp.com/ExtOption2TestGroup',
-      organizer: orgId
-    });
-    const gatedComp = await Competition.create({
-      title: `Option 2 Gated Comp ${suffix}`,
-      description: 'Competition unlocked by external YouPI-PG webhook',
-      event: paidEvent._id,
-      requireEventRegistration: true,
-      organizer: orgId,
-      status: 'published',
-      startTime: new Date(Date.now() - 60000),
-      endTime: new Date(Date.now() + 3600000)
+      paymentUpiId: `primary.${suffix}@okaxis`,
+      backupPaymentUpiIds: [`backup.${suffix}@oksbi`]
     });
 
     let createdOrderId = '';
     try {
-      const cfg = getYoupiConfig();
-      assert.strictEqual(cfg.gatewayMode, 'external');
-      assert.strictEqual(cfg.externalConfigured, true);
-      assert.strictEqual(cfg.defaultMethod, 'MANUAL_UPI', 'External gateway must default to MANUAL_UPI');
-
-      const fakeReq = {
-        get: name => (String(name).toLowerCase() === 'host' ? 'api-internal.local:5000' : ''),
-        protocol: 'http'
-      };
       const created = await createYoupiPaymentSession({
         eventId: paidEvent._id.toString(),
         user: student,
-        body: { name: student.name, regNo: '27EXT01' },
-        req: fakeReq
+        body: { name: student.name, regNo: `VPA${suffix}` }
       });
       createdOrderId = created.session.orderId;
-      assert.strictEqual(created.session.gatewayMode, 'external');
-      assert.strictEqual(created.session.method, 'MANUAL_UPI');
-      assert.strictEqual(created.session.externalPaymentId, 'ext-pay-1');
-      assert.strictEqual(created.session.checkoutUrl, `${mockBaseUrl}/checkout/ext-pay-1`);
-      assert.strictEqual(receivedCreates.length, 1);
-      assert.strictEqual(receivedCreates[0].method, 'MANUAL_UPI');
-      assert(
-        receivedCreates[0].returnUrl.startsWith(
-          `https://avenor-portal.onrender.com/events/${paidEvent._id}?youpiOrder=`
-        ),
-        'returnUrl must use FRONTEND_URL origin rather than backend host'
-      );
+      assert.strictEqual(created.session.payeeVpa, `primary.${suffix}@okaxis`);
+      assert(created.session.availableVpas.includes(`backup.${suffix}@oksbi`));
 
-      // Local submit-utr must be rejected in external mode
-      let externalRejected = false;
+      // Student requesting an unauthorized arbitrary VPA must fail 403
+      let spoofRejected = false;
       try {
-        await submitUtrAndProcessSession({
+        await switchSessionVpa({
           paymentId: created.session.paymentId,
           user: student,
-          body: { utr: '998877665544' }
+          targetVpa: 'attacker@okicici'
         });
       } catch (err) {
-        externalRejected = err.status === 400 && err.code === 'EXTERNAL_CHECKOUT_REQUIRED';
+        spoofRejected = err.status === 403 && err.code === 'UNAUTHORIZED_VPA';
       }
-      assert.strictEqual(externalRejected, true, 'External mode must require hosted checkout UTR submission');
+      assert.strictEqual(spoofRejected, true, 'Unauthorized VPA injection must fail with 403 UNAUTHORIZED_VPA');
 
-      // External gateway transitions to MANUAL_REVIEW with customerUtr
-      const extRec = gatewaySessions.get('ext-pay-1');
-      extRec.status = 'MANUAL_REVIEW';
-      extRec.internalStatus = 'MANUAL_REVIEW';
-      extRec.settlementState = 'MANUAL_REVIEW';
-      extRec.customerUtr = '998877665544';
-
-      const syncedManual = await syncAndGetYoupiSessionByOrderId({
-        orderId: createdOrderId,
-        user: student
+      // Rotate cleanly to authorized backup VPA
+      const rotated = await switchSessionVpa({
+        paymentId: created.session.paymentId,
+        user: student,
+        targetVpa: `backup.${suffix}@oksbi`
       });
-      assert.strictEqual(syncedManual.status, 'MANUAL_REVIEW');
-      assert.strictEqual(syncedManual.utr, '998877665544');
-      assert.strictEqual(syncedManual.settled, false);
-      assert.strictEqual(syncedManual.whatsappGroupLink, '', 'WhatsApp link must remain hidden until settled');
-      assert(syncedManual.registration && syncedManual.registration.paymentStatus === 'pending');
-
-      const stillLocked = await competitionsRouter.evaluateCompetitionAccess(gatedComp, student);
-      assert.strictEqual(stillLocked.allowed, false);
-
-      // External YouPI-PG sends signed webhook PAYMENT.RECONCILED
-      extRec.status = 'RECONCILED';
-      extRec.internalStatus = 'RECONCILED';
-      extRec.settlementState = 'RECONCILED';
-      const signedReconcile = signWebhookPayload(
-        {
-          event: 'PAYMENT.RECONCILED',
-          status: 'RECONCILED',
-          paymentId: 'ext-pay-1',
-          orderId: createdOrderId,
-          amountPaise: '19900',
-          method: 'MANUAL_UPI',
-          customerUtr: '998877665544',
-          verificationTag: 'ADMIN_RECONCILED'
-        },
-        'ext-webhook-secret-27'
-      );
-      const webhookRes = await processIncomingWebhook({
-        rawBody: signedReconcile.rawBody,
-        signatureHeader: signedReconcile.signatureHeader,
-        timestampHeader: signedReconcile.timestamp,
-        deliveryIdHeader: signedReconcile.deliveryId
-      });
-      assert.strictEqual(webhookRes.session.status, 'RECONCILED');
-      assert.strictEqual(webhookRes.registration.paymentStatus, 'paid');
-      assert.strictEqual(webhookRes.registration.transactionId, '998877665544');
-
-      const unlocked = await competitionsRouter.evaluateCompetitionAccess(gatedComp, student);
-      assert.strictEqual(unlocked.allowed, true, 'External PAYMENT.RECONCILED webhook must unlock competition');
-
-      // Test external cancel forwarding
-      const cancelSession = await createYoupiPaymentSession({
-        eventId: paidEvent._id.toString(),
-        user: studentCancel,
-        body: { name: studentCancel.name, regNo: '27EXT02' },
-        req: fakeReq
-      });
-      const cancelled = await cancelYoupiSession({
-        paymentId: cancelSession.session.paymentId,
-        user: studentCancel
-      });
-      assert.strictEqual(cancelled.status, 'CANCELLED');
-      assert(receivedCancels.includes('ext-pay-2'), 'Cancel must be forwarded to external YouPI-PG checkout');
+      assert.strictEqual(rotated.payeeVpa, `backup.${suffix}@oksbi`);
+      assert(rotated.upiUri.includes(`pa=backup.${suffix}@oksbi`));
+      assert(rotated.vpaHistory.includes(`backup.${suffix}@oksbi`));
     } finally {
-      await new Promise(resolve => mockGateway.close(resolve));
-      for (const [k, v] of Object.entries(prevEnv)) {
-        if (v !== undefined) process.env[k] = v;
-        else delete process.env[k];
-      }
-      if (createdOrderId) {
-        await YoupiWebhookReceipt.deleteMany({ orderId: createdOrderId });
-      }
+      if (createdOrderId) await YoupiWebhookReceipt.deleteMany({ orderId: createdOrderId });
       await YoupiPaymentSession.deleteMany({ event: paidEvent._id });
       await Registration.deleteMany({ event: paidEvent._id });
-      await Competition.deleteOne({ _id: gatedComp._id });
       await Event.deleteMany({ _id: paidEvent._id });
-      await User.deleteMany({ _id: { $in: [student._id, studentCancel._id] } });
+      await User.deleteMany({ _id: student._id });
+      if (createdAdmin) await User.deleteMany({ _id: adminActor._id });
+    }
+  });
+
+  // TEST 28: Authentic Bank Alert & Statement CSV Parsers (Email, DLT SMS, HDFC/SBI CSV)
+  await test('28. BankEmailParser, BankSmsParser, domain/DLT spoof guards & CSV statement parser', async () => {
+    assert.strictEqual(isAuthorizedBankEmailSender('alerts@hdfcbank.net'), true);
+    assert.strictEqual(isAuthorizedBankEmailSender('alerts@evil-phish.com'), false);
+    assert.strictEqual(isLikelyBankSmsSender('VK-HDFCBK-S'), true);
+    assert.strictEqual(isLikelyBankSmsSender('+919876543210'), false);
+
+    // Email credit extraction strips Available Balance so Avl Bal Rs 25,000 is never picked up
+    const emailParsed = BankEmailParser.parse({
+      from: 'HDFC Bank InstaAlerts <alerts@hdfcbank.net>',
+      subject: 'Credit Alert: UPI Payment Received',
+      body: 'Dear Customer, Rs. 347.00 has been credited to A/c XX1234 from rahul@okicici. UPI Ref No 509812345678. Avl Bal Rs 25,000.00.',
+      date: new Date().toISOString()
+    });
+    assert(emailParsed, 'Valid bank email must parse');
+    assert.strictEqual(emailParsed.amountPaise, 34700);
+    assert.strictEqual(emailParsed.bankReferenceNumber, '509812345678');
+    assert.strictEqual(emailParsed.isBankDomain, true);
+
+    // Debit email must return null
+    const debitIgnored = BankEmailParser.parse({
+      from: 'alerts@sbi.co.in',
+      subject: 'Debit Alert',
+      body: 'Rs. 347.00 has been debited from your A/c XX4421 towards merchant. Avl Bal Rs 1200.00.'
+    });
+    assert.strictEqual(debitIgnored, null, 'Debit alerts must never parse as credits');
+
+    // SMS DLT credit alert parsing
+    const smsParsed = BankSmsParser.parse({
+      sender: 'AD-SBIUPI',
+      text: 'Dear UPI user A/c X4421 credited by Rs 347.00 on 10Nov26 RefNo 612345678901 Avl Bal Rs 8,400.50'
+    });
+    assert(smsParsed, 'Valid bank SMS must parse');
+    assert.strictEqual(smsParsed.amountPaise, 34700);
+    assert.strictEqual(smsParsed.bankReferenceNumber, '612345678901');
+
+    // CSV parsing
+    const csvRes = parseStatementCsv(
+      [
+        'Date,Narration,Chq./Ref.No.,Value Dt,Withdrawal Amt.,Deposit Amt.,Closing Balance',
+        '10/11/2026,UPI/CR/778899001122/student@okaxis,778899001122,10/11/2026,,347.00,10347.00',
+        '10/11/2026,UPI/DR/112233445566/vendor@oksbi,112233445566,10/11/2026,200.00,,10147.00'
+      ].join('\n')
+    );
+    assert.strictEqual(csvRes.error, undefined);
+    assert.strictEqual(csvRes.lines.length, 2);
+    assert.strictEqual(csvRes.lines[0].direction, 'CREDIT');
+    assert.strictEqual(csvRes.lines[0].amountPaise, 34700);
+    assert.strictEqual(csvRes.lines[0].utr, '778899001122');
+    assert.strictEqual(csvRes.lines[1].direction, 'DEBIT');
+  });
+
+  // TEST 29: Automated Bank Observation Ingestion (Auto-Reconcile, Ambiguous Hold, Spoof & Anti-Replay)
+  await test('29. Automated bank ingestion settles unique open session & holds ambiguous/spoofed alerts', async () => {
+    const suffix = Date.now();
+    // Use distinctive prime-like rupee fees so unrelated live sessions on Atlas cannot collide on exact paise
+    const uniqueFeeRupees = 713 + (suffix % 97);
+    const ambiguousFeeRupees = 829 + (suffix % 89);
+
+    let adminActor = await User.findOne({ role: 'admin' });
+    let createdAdmin = false;
+    if (!adminActor) {
+      adminActor = await User.create({
+        name: 'Auto Pay Admin',
+        email: `autopay_admin_${suffix}@example.com`,
+        password: 'Password123!',
+        role: 'admin',
+        department: 'Computer Science'
+      });
+      createdAdmin = true;
+    }
+
+    const [student1, student2] = await User.create([
+      {
+        name: 'Auto Student One',
+        email: `auto_s1_${suffix}@example.com`,
+        password: 'Password123!',
+        role: 'student',
+        department: 'Computer Science',
+        emailVerified: true
+      },
+      {
+        name: 'Auto Student Two',
+        email: `auto_s2_${suffix}@example.com`,
+        password: 'Password123!',
+        role: 'student',
+        department: 'Computer Science',
+        emailVerified: true
+      }
+    ]);
+
+    const [uniqueEvent, ambEvent] = await Event.create([
+      {
+        title: `Unique Auto Event ${suffix}`,
+        description: 'Automated reconciliation test',
+        date: new Date(Date.now() + 5 * 86400000),
+        time: '11:00 AM',
+        location: 'Lab 1',
+        type: 'tech',
+        department: 'Computer Science',
+        organizer: adminActor._id,
+        capacity: 50,
+        status: 'approved',
+        isPaid: true,
+        registrationFee: uniqueFeeRupees,
+        currency: 'INR',
+        paymentUpiId: `auto.${suffix}@okaxis`
+      },
+      {
+        title: `Ambiguous Auto Event ${suffix}`,
+        description: 'Ambiguous amount guard test',
+        date: new Date(Date.now() + 6 * 86400000),
+        time: '02:00 PM',
+        location: 'Lab 2',
+        type: 'tech',
+        department: 'Computer Science',
+        organizer: adminActor._id,
+        capacity: 50,
+        status: 'approved',
+        isPaid: true,
+        registrationFee: ambiguousFeeRupees,
+        currency: 'INR',
+        paymentUpiId: `auto.${suffix}@okaxis`
+      }
+    ]);
+
+    const createdFingerprints = [];
+    const createdOrderIds = [];
+    const uniqueUtr = `9${String(suffix).slice(-11).padStart(11, '0')}`;
+
+    try {
+      // 1. Spoofed personal mobile SMS must be rejected immediately
+      const spoofRes = await ingestBankObservation({
+        source: 'SMS_OBSERVER',
+        sender: '9876543210',
+        text: `Rs ${uniqueFeeRupees}.00 credited to A/c Ref ${uniqueUtr}`,
+        messageKey: `spoof-${suffix}`
+      });
+      assert.strictEqual(spoofRes.accepted, false);
+      assert.strictEqual(spoofRes.status, 'REJECTED_SPOOF');
+      if (spoofRes.observation?.fingerprint) createdFingerprints.push(spoofRes.observation.fingerprint);
+
+      // 2. Create single open session -> mark PROCESSING -> authentic DLT SMS auto-reconciles & settles
+      const sUnique = await createYoupiPaymentSession({
+        eventId: uniqueEvent._id.toString(),
+        user: student1,
+        body: { name: student1.name, regNo: `AU1_${suffix}` }
+      });
+      createdOrderIds.push(sUnique.session.orderId);
+
+      const procRes = await markSessionProcessing({
+        paymentId: sUnique.session.paymentId,
+        user: student1
+      });
+      assert.strictEqual(procRes.session.status, 'PROCESSING');
+
+      const autoRes = await ingestBankObservation({
+        source: 'SMS_OBSERVER',
+        sender: 'VK-HDFCBK',
+        text: `Rs ${uniqueFeeRupees}.00 credited to A/c X1234 by UPI Ref ${uniqueUtr}. Avl Bal Rs 9,000.00`,
+        autoReconcileOverride: true,
+        messageKey: `sms-${suffix}`
+      });
+      if (autoRes.observation?.fingerprint) createdFingerprints.push(autoRes.observation.fingerprint);
+      assert.strictEqual(autoRes.accepted, true, 'Authentic bank SMS matching 1 open session must auto-reconcile');
+      assert.strictEqual(autoRes.status, 'MATCHED_RECONCILED');
+      assert.strictEqual(autoRes.session.status, 'RECONCILED');
+      assert.strictEqual(autoRes.registration.paymentStatus, 'paid');
+
+      // 3. Replaying same UTR under a different source/messageKey must block as DUPLICATE_UTR
+      const dupRes = await ingestBankObservation({
+        source: 'IMAP_EMAIL',
+        sender: 'alerts@hdfcbank.net',
+        subject: 'UPI Credit Alert',
+        text: `Rs. ${uniqueFeeRupees}.00 credited to your A/c. UPI Ref No ${uniqueUtr}.`,
+        messageKey: `dup-email-${suffix}`
+      });
+      if (dupRes.observation?.fingerprint) createdFingerprints.push(dupRes.observation.fingerprint);
+      assert.strictEqual(dupRes.accepted, false);
+      assert.strictEqual(dupRes.status, 'DUPLICATE_UTR');
+
+      // 4. Two concurrent open sessions with identical amount & no Order ID / matching UTR must hold as AMBIGUOUS
+      const amb1 = await createYoupiPaymentSession({
+        eventId: ambEvent._id.toString(),
+        user: student1,
+        body: { name: student1.name, regNo: `AMB1_${suffix}` }
+      });
+      const amb2 = await createYoupiPaymentSession({
+        eventId: ambEvent._id.toString(),
+        user: student2,
+        body: { name: student2.name, regNo: `AMB2_${suffix}` }
+      });
+      createdOrderIds.push(amb1.session.orderId, amb2.session.orderId);
+
+      const ambUtr = `8${String(suffix).slice(-11).padStart(11, '0')}`;
+      const ambRes = await ingestBankObservation({
+        source: 'IMAP_EMAIL',
+        sender: 'alerts@sbi.co.in',
+        subject: 'Credit Alert',
+        text: `INR ${ambiguousFeeRupees}.00 credited via UPI Ref ${ambUtr} to your A/c.`,
+        messageKey: `amb-${suffix}`
+      });
+      if (ambRes.observation?.fingerprint) createdFingerprints.push(ambRes.observation.fingerprint);
+      assert.strictEqual(ambRes.accepted, false);
+      assert.strictEqual(ambRes.status, 'AMBIGUOUS');
+
+      const [reloadedAmb1, reloadedAmb2] = await Promise.all([
+        YoupiPaymentSession.findOne({ paymentId: amb1.session.paymentId }),
+        YoupiPaymentSession.findOne({ paymentId: amb2.session.paymentId })
+      ]);
+      assert.notStrictEqual(reloadedAmb1.status, 'RECONCILED');
+      assert.notStrictEqual(reloadedAmb2.status, 'RECONCILED');
+    } finally {
+      if (createdFingerprints.length > 0) {
+        await YoupiBankObservation.deleteMany({ fingerprint: { $in: createdFingerprints } });
+      }
+      if (createdOrderIds.length > 0) {
+        await YoupiWebhookReceipt.deleteMany({ orderId: { $in: createdOrderIds } });
+      }
+      await YoupiPaymentSession.deleteMany({ event: { $in: [uniqueEvent._id, ambEvent._id] } });
+      await Registration.deleteMany({ event: { $in: [uniqueEvent._id, ambEvent._id] } });
+      await Event.deleteMany({ _id: { $in: [uniqueEvent._id, ambEvent._id] } });
+      await User.deleteMany({ _id: { $in: [student1._id, student2._id] } });
+      if (createdAdmin) await User.deleteMany({ _id: adminActor._id });
+    }
+  });
+
+  // TEST 30: Admin Bulk CSV Bank Statement Reconciler
+  await test('30. reconcileStatementCsv settles open PROCESSING session & skips debit rows', async () => {
+    const suffix = Date.now();
+    const csvFee = 919 + (suffix % 73);
+    const csvUtr = `7${String(suffix).slice(-11).padStart(11, '0')}`;
+
+    let adminActor = await User.findOne({ role: 'admin' });
+    let createdAdmin = false;
+    if (!adminActor) {
+      adminActor = await User.create({
+        name: 'CSV Admin',
+        email: `csv_admin_${suffix}@example.com`,
+        password: 'Password123!',
+        role: 'admin',
+        department: 'Computer Science'
+      });
+      createdAdmin = true;
+    }
+
+    const student = await User.create({
+      name: 'CSV Student',
+      email: `csv_student_${suffix}@example.com`,
+      password: 'Password123!',
+      role: 'student',
+      department: 'Computer Science',
+      emailVerified: true
+    });
+
+    const csvEvent = await Event.create({
+      title: `CSV Reconcile Event ${suffix}`,
+      description: 'CSV bulk bank reconciliation test',
+      date: new Date(Date.now() + 7 * 86400000),
+      time: '03:00 PM',
+      location: 'Auditorium',
+      type: 'tech',
+      department: 'Computer Science',
+      organizer: adminActor._id,
+      capacity: 50,
+      status: 'approved',
+      isPaid: true,
+      registrationFee: csvFee,
+      currency: 'INR',
+      paymentUpiId: `csv.${suffix}@okaxis`
+    });
+
+    let createdOrderId = '';
+    try {
+      const created = await createYoupiPaymentSession({
+        eventId: csvEvent._id.toString(),
+        user: student,
+        body: { name: student.name, regNo: `CSV${suffix}` }
+      });
+      createdOrderId = created.session.orderId;
+      await markSessionProcessing({ paymentId: created.session.paymentId, user: student });
+
+      const now = new Date();
+      const dd = String(now.getUTCDate()).padStart(2, '0');
+      const mm = String(now.getUTCMonth() + 1).padStart(2, '0');
+      const yyyy = now.getUTCFullYear();
+      const todayCsv = `${dd}/${mm}/${yyyy}`;
+      const csvText = [
+        'Date,Narration,Ref No.,Withdrawal,Deposit',
+        `${todayCsv},UPI/DR/000111222333/expense@oksbi,000111222333,${csvFee}.00,`,
+        `${todayCsv},UPI/CR/${csvUtr}/student@okaxis,${csvUtr},,${csvFee}.00`
+      ].join('\n');
+
+      const summary = await reconcileStatementCsv({ csvText, adminUser: adminActor });
+      assert.strictEqual(summary.totalRows, 2);
+      assert.strictEqual(summary.creditRows, 1);
+      assert.strictEqual(summary.matchedCount, 1);
+
+      const settled = await YoupiPaymentSession.findOne({ paymentId: created.session.paymentId });
+      assert.strictEqual(settled.status, 'RECONCILED');
+      assert.strictEqual(settled.observationSource, 'STATEMENT_CSV');
+    } finally {
+      await YoupiBankObservation.deleteMany({ bankRef: csvUtr });
+      if (createdOrderId) await YoupiWebhookReceipt.deleteMany({ orderId: createdOrderId });
+      await YoupiPaymentSession.deleteMany({ event: csvEvent._id });
+      await Registration.deleteMany({ event: csvEvent._id });
+      await Event.deleteMany({ _id: csvEvent._id });
+      await User.deleteMany({ _id: student._id });
+      if (createdAdmin) await User.deleteMany({ _id: adminActor._id });
+    }
+  });
+
+  // TEST 31: Email Delivery Error Classification & Port 443 HTTPS Relay Transports (Webhook + Brevo)
+  await test('31. emailService classifies unconfigured state cleanly & routes via Port 443 HTTPS relays', async () => {
+    const prevFetch = global.fetch;
+    const prevWebhookUrl = process.env.EMAIL_WEBHOOK_URL;
+    const prevWebhookSecret = process.env.EMAIL_WEBHOOK_SECRET;
+    const prevBrevoKey = process.env.BREVO_API_KEY;
+    const prevProvider = process.env.EMAIL_RELAY_PROVIDER;
+
+    try {
+      // 1. Unconfigured returns explicit EMAIL_NOT_CONFIGURED
+      process.env.EMAIL_WEBHOOK_URL = '';
+      process.env.EMAIL_WEBHOOK_SECRET = '';
+      process.env.BREVO_API_KEY = '';
+      process.env.EMAIL_RELAY_PROVIDER = 'auto';
+      emailService.invalidateEmailSettingsCache();
+
+      const unconf = await emailService.sendEmail({
+        to: 'student@example.com',
+        subject: 'Unconfigured Check',
+        text: 'Hello'
+      });
+      assert.strictEqual(unconf.delivered, false);
+      assert.strictEqual(unconf.code, 'EMAIL_NOT_CONFIGURED');
+
+      // 2. Webhook HTTPS relay sends expected payload & succeeds
+      let calledUrl = '';
+      let calledHeaders = null;
+      let calledBody = null;
+      global.fetch = async (url, init = {}) => {
+        calledUrl = url;
+        calledHeaders = init.headers;
+        calledBody = JSON.parse(init.body || '{}');
+        return {
+          ok: true,
+          status: 200,
+          url,
+          text: async () => JSON.stringify({ ok: true, messageId: 'gas-msg-101' })
+        };
+      };
+
+      process.env.EMAIL_WEBHOOK_URL = 'https://script.google.com/macros/s/test-bridge/exec';
+      process.env.EMAIL_WEBHOOK_SECRET = 'sec_bridge_123';
+      process.env.EMAIL_RELAY_PROVIDER = 'webhook';
+      emailService.invalidateEmailSettingsCache();
+
+      const webhookRes = await emailService.sendEmail({
+        to: 'student@example.com',
+        subject: 'Avenor Test OTP',
+        text: '123456'
+      });
+      assert.strictEqual(webhookRes.delivered, true);
+      assert.strictEqual(webhookRes.provider, 'webhook');
+      assert.strictEqual(calledUrl, 'https://script.google.com/macros/s/test-bridge/exec');
+      assert.strictEqual(calledHeaders['X-Email-Webhook-Secret'], 'sec_bridge_123');
+      assert.strictEqual(calledBody.to, 'student@example.com');
+
+      // 3. Brevo REST API fallback works cleanly on HTTP 201
+      global.fetch = async (url, init = {}) => {
+        calledUrl = url;
+        calledHeaders = init.headers;
+        calledBody = JSON.parse(init.body || '{}');
+        return {
+          ok: true,
+          status: 201,
+          json: async () => ({ messageId: '<brevo-test-id>' })
+        };
+      };
+      process.env.EMAIL_WEBHOOK_URL = '';
+      process.env.BREVO_API_KEY = 'xkeysib-test-key';
+      process.env.EMAIL_RELAY_PROVIDER = 'brevo';
+      emailService.invalidateEmailSettingsCache();
+
+      const brevoRes = await emailService.sendEmail({
+        to: 'student@example.com',
+        subject: 'Brevo Verification',
+        text: '654321'
+      });
+      assert.strictEqual(brevoRes.delivered, true);
+      assert.strictEqual(brevoRes.provider, 'brevo');
+      assert.strictEqual(calledUrl, 'https://api.brevo.com/v3/smtp/email');
+      assert.strictEqual(calledHeaders['api-key'], 'xkeysib-test-key');
+    } finally {
+      global.fetch = prevFetch;
+      if (prevWebhookUrl !== undefined) process.env.EMAIL_WEBHOOK_URL = prevWebhookUrl;
+      else delete process.env.EMAIL_WEBHOOK_URL;
+      if (prevWebhookSecret !== undefined) process.env.EMAIL_WEBHOOK_SECRET = prevWebhookSecret;
+      else delete process.env.EMAIL_WEBHOOK_SECRET;
+      if (prevBrevoKey !== undefined) process.env.BREVO_API_KEY = prevBrevoKey;
+      else delete process.env.BREVO_API_KEY;
+      if (prevProvider !== undefined) process.env.EMAIL_RELAY_PROVIDER = prevProvider;
+      else delete process.env.EMAIL_RELAY_PROVIDER;
+      emailService.invalidateEmailSettingsCache();
     }
   });
 

@@ -95,7 +95,12 @@ app.use(helmet({
   crossOriginResourcePolicy: { policy: 'cross-origin' },
   contentSecurityPolicy: false
 }));
-app.use(compression());
+app.use(compression({
+  filter: (req, res) => {
+    if (req.path && req.path.endsWith('/stream')) return false;
+    return compression.filter(req, res);
+  }
+}));
 const youpiRouter = require('./routes/payments/youpi');
 
 app.use(cors({
@@ -246,6 +251,8 @@ async function start() {
   await ensureAllPublishedEventsSynced(true).catch(err => console.warn('Initial feed sync note:', err.message));
   const { startExpiredEventScheduler } = require('./services/events/eventCleanupService');
   startExpiredEventScheduler();
+  const { startPaymentAutomationScheduler } = require('./services/payments/paymentAutomationService');
+  startPaymentAutomationScheduler();
   app.listen(PORT, '0.0.0.0', () => console.log(`Server running on port ${PORT}`));
 }
 start().catch(err => {

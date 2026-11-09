@@ -19,7 +19,7 @@ import {
   ChatBubbleLeftRightIcon,
   EnvelopeIcon
 } from '@heroicons/react/24/outline';
-import { Link } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 
 function formatCountdown(seconds) {
   const safe = Math.max(0, Number(seconds) || 0);
@@ -28,21 +28,9 @@ function formatCountdown(seconds) {
   return `${String(mins).padStart(2, '0')}:${String(secs).padStart(2, '0')}`;
 }
 
-function buildExternalIframeUrl(rawUrl) {
-  if (!rawUrl) return '';
-  try {
-    const parsed = new URL(rawUrl, window.location.origin);
-    parsed.searchParams.set('embedded', '1');
-    parsed.searchParams.set('youpiParentOrigin', window.location.origin);
-    return parsed.toString();
-  } catch {
-    const sep = rawUrl.includes('?') ? '&' : '?';
-    return `${rawUrl}${sep}embedded=1&youpiParentOrigin=${encodeURIComponent(window.location.origin)}`;
-  }
-}
-
-const EventRegistration = ({ event, initialSession = null, onClose, onRegistered }) => {
+const EventRegistration = ({ event, onClose, onRegistered }) => {
   const { user } = useAuth();
+  const navigate = useNavigate();
   const backendUrl = getBackendUrl();
 
   const fee = Number(event?.registrationFee || 0);
@@ -54,35 +42,24 @@ const EventRegistration = ({ event, initialSession = null, onClose, onRegistered
   const isStudentAccount = user?.role === 'student';
 
   const [formData, setFormData] = useState({
-    name: initialSession?.customerName || user?.name || '',
-    regNo: initialSession?.customerRegNo || (accountEmail ? accountEmail.split('@')[0] : ''),
-    email: initialSession?.customerEmail || accountEmail,
-    needsAccommodation: Boolean(initialSession?.needsAccommodation)
+    name: user?.name || '',
+    regNo: accountEmail ? accountEmail.split('@')[0] : '',
+    email: accountEmail,
+    needsAccommodation: false
   });
-  const [youpiSession, setYoupiSession] = useState(initialSession || null);
-  const [gatewayConfig, setGatewayConfig] = useState(null);
-  const [utr, setUtr] = useState(initialSession?.utr || '');
+  const [youpiSession, setYoupiSession] = useState(null);
+  const [utr, setUtr] = useState('');
   const [upiCopied, setUpiCopied] = useState(false);
-  const [secondsLeft, setSecondsLeft] = useState(initialSession?.timeRemainingSeconds || 0);
+  const [secondsLeft, setSecondsLeft] = useState(0);
 
   const [loading, setLoading] = useState(false);
   const [submittingUtr, setSubmittingUtr] = useState(false);
   const [pollingStatus, setPollingStatus] = useState(false);
   const [error, setError] = useState('');
-  const [bookingSuccess, setBookingSuccess] = useState(
-    Boolean(initialSession?.settled && initialSession?.registration)
-  );
-  const [confirmedRegistration, setConfirmedRegistration] = useState(
-    initialSession?.settled ? initialSession?.registration || null : null
-  );
-  const [confirmedWhatsappLink, setConfirmedWhatsappLink] = useState(
-    initialSession?.settled ? initialSession?.whatsappGroupLink || event?.whatsappGroupLink || '' : ''
-  );
-  const [confirmedEmailTarget, setConfirmedEmailTarget] = useState(
-    initialSession?.settled
-      ? initialSession?.customerEmail || initialSession?.registration?.email || accountEmail || ''
-      : ''
-  );
+  const [bookingSuccess, setBookingSuccess] = useState(false);
+  const [confirmedRegistration, setConfirmedRegistration] = useState(null);
+  const [confirmedWhatsappLink, setConfirmedWhatsappLink] = useState('');
+  const [confirmedEmailTarget, setConfirmedEmailTarget] = useState('');
 
   const effectiveEmail = isStudentAccount ? accountEmail : (formData.email.trim() || accountEmail);
 
@@ -94,39 +71,6 @@ const EventRegistration = ({ event, initialSession = null, onClose, onRegistered
       [name]: type === 'checkbox' ? checked : value
     }));
   };
-
-  // Fetch gateway mode config so pre-checkout UI accurately reflects external vs embedded mode
-  useEffect(() => {
-    if (!isPaidEvent || initialSession) return undefined;
-    let active = true;
-    axios
-      .get(`${backendUrl}/api/payments/youpi/config`)
-      .then((res) => {
-        if (active && res.data) setGatewayConfig(res.data);
-      })
-      .catch(() => {});
-    return () => {
-      active = false;
-    };
-  }, [backendUrl, initialSession, isPaidEvent]);
-
-  // Apply resumed session (e.g. returned from external checkout ?youpiOrder= callback)
-  useEffect(() => {
-    if (!initialSession?.paymentId) return;
-    setYoupiSession(initialSession);
-    if (initialSession.utr) setUtr(initialSession.utr);
-    if (initialSession.settled && initialSession.registration) {
-      setConfirmedRegistration(initialSession.registration);
-      setConfirmedWhatsappLink(initialSession.whatsappGroupLink || event?.whatsappGroupLink || '');
-      setConfirmedEmailTarget(
-        initialSession.customerEmail ||
-          initialSession.registration?.email ||
-          accountEmail ||
-          ''
-      );
-      setBookingSuccess(true);
-    }
-  }, [accountEmail, event?.whatsappGroupLink, initialSession]);
 
   // Sync live countdown timer from server expiresAt
   useEffect(() => {
@@ -158,7 +102,6 @@ const EventRegistration = ({ event, initialSession = null, onClose, onRegistered
         );
         const nextSession = res.data?.session;
         if (!nextSession) return;
-        const prevStatus = youpiSession?.status;
         setYoupiSession(nextSession);
         if (nextSession.settled && nextSession.registration) {
           setConfirmedRegistration(nextSession.registration);
@@ -167,12 +110,6 @@ const EventRegistration = ({ event, initialSession = null, onClose, onRegistered
             nextSession.customerEmail || nextSession.registration?.email || effectiveEmail || ''
           );
           setBookingSuccess(true);
-          onRegistered?.(nextSession.registration);
-        } else if (
-          nextSession.status === 'MANUAL_REVIEW' &&
-          nextSession.registration &&
-          prevStatus !== 'MANUAL_REVIEW'
-        ) {
           onRegistered?.(nextSession.registration);
         }
       } catch (err) {
@@ -183,31 +120,14 @@ const EventRegistration = ({ event, initialSession = null, onClose, onRegistered
         if (!silent) setPollingStatus(false);
       }
     },
-    [
-      backendUrl,
-      effectiveEmail,
-      event?.whatsappGroupLink,
-      onRegistered,
-      youpiSession?.paymentId,
-      youpiSession?.status
-    ]
+    [backendUrl, effectiveEmail, event?.whatsappGroupLink, onRegistered, youpiSession?.paymentId]
   );
 
   // Listen for YouPI-PG portal postMessage & poll external gateway sessions automatically
   useEffect(() => {
     if (!youpiSession?.paymentId || bookingSuccess) return undefined;
 
-    let expectedOrigin = '';
-    if (youpiSession.checkoutUrl) {
-      try {
-        expectedOrigin = new URL(youpiSession.checkoutUrl, window.location.origin).origin;
-      } catch {
-        expectedOrigin = '';
-      }
-    }
-
     const onMessage = (e) => {
-      if (expectedOrigin && e.origin && e.origin !== expectedOrigin) return;
       const evt = e?.data?.event;
       if (!evt || typeof evt !== 'string' || !evt.startsWith('youpi.')) return;
       if (
@@ -217,16 +137,8 @@ const EventRegistration = ({ event, initialSession = null, onClose, onRegistered
           'youpi.payment_observed',
           'youpi.payment_manual_review',
           'youpi.payment_failed',
-          'youpi.payment_expired',
-          'youpi.payment_cancelled',
-          'youpi.payment_blocked'
+          'youpi.payment_expired'
         ].includes(evt)
-      ) {
-        handleRefreshStatus(false);
-      } else if (
-        ['youpi.cancel', 'youpi.modal_close', 'youpi.close', 'youpi.payment_blocked_exit'].includes(
-          evt
-        )
       ) {
         handleRefreshStatus(false);
       }
@@ -251,7 +163,6 @@ const EventRegistration = ({ event, initialSession = null, onClose, onRegistered
   }, [
     bookingSuccess,
     handleRefreshStatus,
-    youpiSession?.checkoutUrl,
     youpiSession?.gatewayMode,
     youpiSession?.paymentId,
     youpiSession?.status
@@ -321,6 +232,9 @@ const EventRegistration = ({ event, initialSession = null, onClose, onRegistered
         );
         setBookingSuccess(true);
         onRegistered?.(session.registration);
+      } else if (session.paymentId) {
+        onClose?.();
+        navigate(`/payment/${session.paymentId}`);
       }
     } catch (err) {
       console.error('YouPI session initialization error:', err);
@@ -451,7 +365,6 @@ const EventRegistration = ({ event, initialSession = null, onClose, onRegistered
       setYoupiSession(null);
       setUtr('');
       setError('');
-      onRegistered?.(null);
     }
   };
 
@@ -470,25 +383,10 @@ const EventRegistration = ({ event, initialSession = null, onClose, onRegistered
       (youpiSession.status === 'ACTIVE' && youpiSession.expiresAt && secondsLeft <= 0));
   const isSessionTerminalError =
     youpiSession && ['FAILED', 'CANCELLED'].includes(youpiSession.status);
-  const isExternalIframeActive = Boolean(
-    !bookingSuccess &&
-      youpiSession?.gatewayMode === 'external' &&
-      youpiSession?.checkoutUrl &&
-      !isSessionExpired &&
-      !isSessionTerminalError &&
-      youpiSession?.status !== 'MANUAL_REVIEW'
-  );
-  const externalIframeSrc = isExternalIframeActive
-    ? buildExternalIframeUrl(youpiSession.checkoutUrl)
-    : '';
 
   return (
     <div className="fixed inset-0 z-50 bg-black/75 backdrop-blur-sm flex items-center justify-center p-4 overflow-y-auto">
-      <div
-        className={`bg-[#1c1a18] border border-[#efe9de]/[0.12] rounded-[16px] p-6 sm:p-7 ${
-          isExternalIframeActive ? 'max-w-3xl' : 'max-w-lg'
-        } w-full shadow-[0_16px_48px_rgba(0,0,0,0.5)] relative my-auto transition-all`}
-      >
+      <div className="bg-[#1c1a18] border border-[#efe9de]/[0.12] rounded-[16px] p-6 sm:p-7 max-w-lg w-full shadow-[0_16px_48px_rgba(0,0,0,0.5)] relative my-auto">
         <button
           onClick={onClose}
           className="absolute top-4 right-4 p-1.5 rounded-[8px] text-[#8a847a] hover:text-[#efe9de] hover:bg-[#262421] transition-colors duration-150"
@@ -743,25 +641,8 @@ const EventRegistration = ({ event, initialSession = null, onClose, onRegistered
                       </span>
                     </div>
                     <p className="text-[12px] text-[#aaa398] leading-relaxed">
-                      {gatewayConfig?.gatewayMode === 'external' ? (
-                        <>
-                          Next step opens the dedicated YouPI-PG V2 checkout gateway for{' '}
-                          <strong className="font-mono text-[#efe9de]">{currencySymbol}{fee}</strong>
-                          . Complete your UPI payment and submit the transaction UTR inside the gateway to unlock this event pass and linked competitions.
-                        </>
-                      ) : (
-                        <>
-                          Next step generates a dynamic ISO/IEC 18004 UPI QR code, app intents, and cryptographic HMAC webhook session for{' '}
-                          <strong className="font-mono text-[#efe9de]">{currencySymbol}{fee}</strong>{' '}
-                          to unlock this event pass and linked competitions.
-                        </>
-                      )}
+                      Next step generates a dynamic ISO/IEC 18004 UPI QR code, app intents, and cryptographic HMAC webhook session for <strong className="font-mono text-[#efe9de]">{currencySymbol}{fee}</strong> to unlock this event pass and linked competitions.
                     </p>
-                    {gatewayConfig?.gatewayMode === 'external' && !gatewayConfig?.externalConfigured && (
-                      <p className="text-[11px] text-[#ebb05d]">
-                        Note: External YouPI-PG credentials (`YOUPI_API_URL`, `YOUPI_MERCHANT_ID`, `YOUPI_MERCHANT_KEY`, `YOUPI_WEBHOOK_SECRET`) must be configured on the backend before starting checkout.
-                      </p>
-                    )}
                     {(event?.hasWhatsappGroup || event?.whatsappGroupLink) && (
                       <p className="text-[12px] text-[#4cc38a] flex items-center gap-1.5 pt-0.5">
                         <ChatBubbleLeftRightIcon className="h-4 w-4 shrink-0" strokeWidth={1.75} />
@@ -889,57 +770,36 @@ const EventRegistration = ({ event, initialSession = null, onClose, onRegistered
                         />
                         <span>{pollingStatus ? 'Checking...' : 'Check verification status'}</span>
                       </button>
-                      {youpiSession.gatewayMode === 'external' && youpiSession.checkoutUrl ? (
-                        <a
-                          href={youpiSession.checkoutUrl}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          className="btn-secondary h-9 px-3 text-[12px] inline-flex items-center gap-1"
-                        >
-                          <span>View portal status</span>
-                          <ArrowUpRightIcon className="h-3.5 w-3.5" strokeWidth={1.75} />
-                        </a>
-                      ) : (
-                        <button
-                          type="button"
-                          onClick={() => createOrRestartYoupiSession(true)}
-                          className="btn-secondary h-9 px-3 text-[12px]"
-                        >
-                          Retry new UTR
-                        </button>
-                      )}
+                      <button
+                        type="button"
+                        onClick={() => createOrRestartYoupiSession(true)}
+                        className="btn-secondary h-9 px-3 text-[12px]"
+                      >
+                        Retry new UTR
+                      </button>
                     </div>
                   </div>
                 ) : youpiSession.gatewayMode === 'external' && youpiSession.checkoutUrl ? (
                   /* External YouPI-PG Hosted Checkout Gateway */
                   <div className="space-y-3">
-                    <div className="rounded-[12px] overflow-hidden border border-[#efe9de]/[0.12] bg-[#12110f] h-[520px] max-h-[62vh]">
+                    <div className="rounded-[12px] overflow-hidden border border-[#efe9de]/[0.12] bg-[#12110f] h-[340px]">
                       <iframe
-                        src={externalIframeSrc}
+                        src={youpiSession.checkoutUrl}
                         title="YouPI-PG Hosted Checkout"
                         className="w-full h-full border-0"
                         allow="payment"
                       />
                     </div>
                     <div className="flex flex-wrap items-center justify-between gap-2">
-                      <div className="flex flex-wrap items-center gap-3">
-                        <a
-                          href={youpiSession.checkoutUrl}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          className="btn-secondary h-9 px-3 text-[12px] inline-flex items-center gap-1.5 text-[#ebb05d]"
-                        >
-                          <span>Open external checkout portal</span>
-                          <ArrowUpRightIcon className="h-3.5 w-3.5" strokeWidth={1.75} />
-                        </a>
-                        <button
-                          type="button"
-                          onClick={handleCancelSession}
-                          className="text-[12px] text-[#8a847a] hover:text-[#e5484d] transition-colors"
-                        >
-                          Cancel session &amp; edit details
-                        </button>
-                      </div>
+                      <a
+                        href={youpiSession.checkoutUrl}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="inline-flex items-center gap-1 text-[12px] text-[#ebb05d] hover:underline"
+                      >
+                        <span>Open external checkout portal</span>
+                        <ArrowUpRightIcon className="h-3.5 w-3.5" strokeWidth={1.75} />
+                      </a>
                       <button
                         type="button"
                         onClick={() => handleRefreshStatus(false)}

@@ -1,21 +1,36 @@
 const express = require('express');
+const crypto = require('crypto');
+const jwt = require('jsonwebtoken');
 const router = express.Router();
 const { auth, authorize } = require('../../middleware/auth');
+const User = require('../../models/auth/User');
+const SystemSetting = require('../../models/system/SystemSetting');
 const YoupiPaymentSession = require('../../models/payments/YoupiPaymentSession');
+const YoupiBankObservation = require('../../models/payments/YoupiBankObservation');
 const Event = require('../../models/events/Event');
+const { sanitizePlainText } = require('../../utils/sanitize');
 const {
+  PaymentEventBus,
   UPI_PROVIDERS,
   getYoupiConfig,
+  parseVpaList,
   createYoupiPaymentSession,
   syncAndGetYoupiSession,
-  syncAndGetYoupiSessionByOrderId,
   submitUtrAndProcessSession,
+  switchSessionVpa,
+  markSessionProcessing,
   cancelYoupiSession,
   reconcileSessionByAdmin,
   listAdminYoupiSessions,
   processIncomingWebhook,
   toRupeesString
 } = require('../../services/payments/youpiGatewayService');
+const {
+  getAutomationConfig,
+  ingestBankObservation,
+  pollBankInboxOnce,
+  reconcileStatementCsv
+} = require('../../services/payments/paymentAutomationService');
 const { generateQrSvg } = require('../../utils/qrGenerator');
 
 function escapeHtml(value) {
@@ -27,19 +42,61 @@ function escapeHtml(value) {
     .replace(/'/g, '&#39;');
 }
 
-router.get('/config', (req, res) => {
+function constantTimeSecretEqual(expected, actual) {
+  const a = Buffer.from(String(expected || ''), 'utf8');
+  const b = Buffer.from(String(actual || ''), 'utf8');
+  if (a.length === 0 || a.length !== b.length) return false;
+  try {
+    return crypto.timingSafeEqual(a, b);
+  } catch {
+    return false;
+  }
+}
+
+async function authStream(req, res, next) {
+  try {
+    const header = req.header('Authorization') || '';
+    const bearer = header.startsWith('Bearer ') ? header.slice(7).trim() : '';
+    const token = bearer || String(req.query.token || '').trim();
+    if (!token) {
+      return res.status(401).json({ message: 'Authentication required' });
+    }
+    const decoded = jwt.verify(token, process.env.JWT_SECRET);
+    const user = await User.findById(decoded.userId).select('-password');
+    if (!user) {
+      return res.status(401).json({ message: 'User not found' });
+    }
+    req.user = user;
+    next();
+  } catch {
+    return res.status(401).json({ message: 'Invalid or expired token' });
+  }
+}
+
+router.get('/config', async (req, res) => {
   const cfg = getYoupiConfig();
+  const autoCfg = await getAutomationConfig().catch(() => ({
+    autoVerifyEnabled: false,
+    autoReconcileObserved: true,
+    backupVpas: cfg.backupPayeeVpas,
+    imapConfigured: false,
+    observerConfigured: false
+  }));
   res.json({
     gateway: 'YouPI-PG V2',
     gatewayMode: cfg.gatewayMode,
-    externalConfigured: cfg.externalConfigured,
     verificationMode: cfg.verificationMode,
     fulfillOnObserved: cfg.fulfillOnObserved,
     allowDemoUtr: cfg.allowDemoUtr,
     defaultMethod: cfg.defaultMethod,
     vpaConfigured: Boolean(cfg.defaultPayeeVpa),
     defaultPayeeVpa: cfg.defaultPayeeVpa,
+    backupVpas: autoCfg.backupVpas || cfg.backupPayeeVpas,
+    backupVpaCount: (autoCfg.backupVpas || cfg.backupPayeeVpas || []).length,
     defaultPayeeName: cfg.defaultPayeeName,
+    autoVerifyEnabled: Boolean(autoCfg.autoVerifyEnabled),
+    autoReconcileObserved: Boolean(autoCfg.autoReconcileObserved),
+    automationActive: Boolean(autoCfg.imapConfigured || autoCfg.observerConfigured),
     sessionTtlSeconds: Math.round(cfg.sessionTtlMs / 1000),
     providers: UPI_PROVIDERS
   });
@@ -121,7 +178,7 @@ router.get('/portal/:paymentId', async (req, res) => {
     const qrBase64 = session.qrSvg ? Buffer.from(session.qrSvg, 'utf8').toString('base64') : '';
     const amountStr = toRupeesString(session.amountPaise);
     const remainingSec =
-      session.status === 'ACTIVE' && session.expiresAt
+      ['ACTIVE', 'PROCESSING'].includes(session.status) && session.expiresAt
         ? Math.max(0, Math.ceil((new Date(session.expiresAt).getTime() - Date.now()) / 1000))
         : 0;
 
@@ -136,46 +193,49 @@ router.get('/portal/:paymentId', async (req, res) => {
     body { margin:0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; background:#12110f; color:#efe9de; display:flex; min-height:100vh; align-items:center; justify-content:center; padding:20px; box-sizing:border-box; }
     .card { width:100%; max-width:440px; background:#1c1a18; border:1px solid rgba(239,233,222,0.12); border-radius:16px; padding:24px; box-shadow:0 20px 50px rgba(0,0,0,0.45); }
     .top { display:flex; justify-content:space-between; align-items:center; border-bottom:1px solid rgba(239,233,222,0.08); padding-bottom:14px; margin-bottom:16px; }
-    .brand { font-weight:600; color:#ebb05d; font-size:14px; letter-spacing:0.03em; }
-    .badge { font-family:monospace; font-size:12px; padding:4px 8px; border-radius:6px; background:#262421; border:1px solid rgba(239,233,222,0.1); color:#efe9de; }
-    .amt { font-size:28px; font-weight:600; font-family:monospace; color:#ebb05d; margin:6px 0; }
-    .qr-box { background:#ffffff; border-radius:12px; padding:14px; display:flex; flex-direction:column; align-items:center; margin:16px 0; }
+    .brand { font-weight:600; color:#ebb05d; font-size:13px; letter-spacing:0.06em; }
+    .badge { font-family:monospace; font-size:11px; padding:4px 8px; border-radius:999px; background:#262421; border:1px solid rgba(239,233,222,0.12); color:#efe9de; }
+    .amt { font-size:30px; font-weight:700; font-family:monospace; color:#ebb05d; margin:6px 0; }
+    .qr-box { background:#ffffff; border-radius:14px; padding:16px; display:flex; flex-direction:column; align-items:center; margin:16px 0; }
     .qr-box img { width:200px; height:200px; display:block; }
-    .vpa { font-family:monospace; font-size:13px; background:#161513; padding:10px 12px; border-radius:8px; border:1px solid rgba(239,233,222,0.08); display:flex; justify-content:space-between; align-items:center; gap:8px; }
-    .btn { display:inline-flex; align-items:center; justify-content:center; background:#e09132; color:#12110f; font-weight:600; border:none; border-radius:8px; padding:10px 14px; text-decoration:none; cursor:pointer; font-size:13px; width:100%; margin-top:12px; box-sizing:border-box; }
+    .vpa { font-family:monospace; font-size:13px; background:#161513; padding:10px 12px; border-radius:10px; border:1px solid rgba(239,233,222,0.08); display:flex; justify-content:space-between; align-items:center; gap:8px; }
+    .copy-btn { background:#2a2723; color:#ebb05d; border:1px solid rgba(235,176,93,0.35); border-radius:6px; padding:4px 9px; font-size:11px; cursor:pointer; }
+    .btn { display:inline-flex; align-items:center; justify-content:center; background:#e09132; color:#12110f; font-weight:600; border:none; border-radius:10px; padding:11px 14px; text-decoration:none; cursor:pointer; font-size:13px; width:100%; margin-top:12px; box-sizing:border-box; }
+    .hint { background:rgba(224,145,50,0.08); border:1px solid rgba(224,145,50,0.22); border-radius:10px; padding:10px 12px; font-size:11.5px; color:#d9ceb8; margin-top:12px; line-height:1.45; }
     .muted { font-size:12px; color:#aaa398; line-height:1.5; }
   </style>
 </head>
 <body>
   <div class="card">
     <div class="top">
-      <div class="brand">YOUPI-PG V2 GATEWAY</div>
+      <div class="brand">AVENOR · YOUPI-PG V2</div>
       <span class="badge">${escapeHtml(session.status)}</span>
     </div>
     <div class="muted">${escapeHtml(eventDoc?.title || 'Avenor Event Pass')}</div>
-    <div class="amt">${escapeHtml(session.currency)} ${escapeHtml(amountStr)}</div>
+    <div class="amt">₹${escapeHtml(amountStr)}</div>
     <div class="muted">Order: <code>${escapeHtml(session.orderId)}</code> · Remaining: <span id="timer">${escapeHtml(remainingSec)}s</span></div>
     ${
       qrBase64
-        ? `<div class="qr-box"><img src="data:image/svg+xml;base64,${qrBase64}" alt="UPI QR" /><div style="color:#0f172a;font-size:11px;font-family:monospace;margin-top:6px;">Scan with any UPI app</div></div>`
+        ? `<div class="qr-box"><img src="data:image/svg+xml;base64,${qrBase64}" alt="UPI QR" /><div style="color:#0f172a;font-size:11px;font-family:monospace;margin-top:6px;">Scan directly with GPay, PhonePe, Paytm or BHIM</div></div>`
         : ''
     }
     <div class="vpa">
-      <span>${escapeHtml(session.payeeVpa)}</span>
-      <span class="muted">0% fee</span>
+      <span id="vpa-text">${escapeHtml(session.payeeVpa)}</span>
+      <button type="button" class="copy-btn" onclick="navigator.clipboard && navigator.clipboard.writeText(${JSON.stringify(session.payeeVpa).replace(/</g, '\\u003c')}).then(function(){this.textContent='Copied';}.bind(this))">Copy VPA</button>
     </div>
     ${
       session.upiUri
         ? `<a class="btn" href="${escapeHtml(session.upiUri)}">Open UPI App to Pay ₹${escapeHtml(amountStr)}</a>`
         : ''
     }
-    <p class="muted" style="margin-top:14px;">Return to your Avenor checkout modal and enter your 12-digit UTR to confirm registration &amp; unlock linked competitions.</p>
+    <div class="hint">Seeing GPay "Day limit exceeded"? Copy the UPI ID above, open Google Pay → <strong>Pay UPI ID or number</strong> manually, or switch to an alternate UPI ID inside Avenor Checkout.</div>
+    <p class="muted" style="margin-top:12px;">Once paid, Avenor auto-verifies bank alerts or you can submit your 12-digit UTR to unlock your pass &amp; linked competitions.</p>
   </div>
   <script>
     var status = ${JSON.stringify(session.status).replace(/</g, '\\u003c')};
     var remaining = ${Number(remainingSec)};
     var timerEl = document.getElementById('timer');
-    if (status === 'ACTIVE' && remaining > 0 && timerEl) {
+    if ((status === 'ACTIVE' || status === 'PROCESSING') && remaining > 0 && timerEl) {
       setInterval(function () {
         if (remaining > 0) {
           remaining -= 1;
@@ -221,21 +281,6 @@ router.post('/sessions', auth, async (req, res) => {
   }
 });
 
-router.get('/orders/:orderId', auth, async (req, res) => {
-  try {
-    const session = await syncAndGetYoupiSessionByOrderId({
-      orderId: req.params.orderId,
-      user: req.user
-    });
-    res.json({ session });
-  } catch (err) {
-    res.status(err.status || 400).json({
-      code: err.code || 'YOUPI_ORDER_STATUS_ERROR',
-      message: err.message || 'Unable to fetch payment status for this order.'
-    });
-  }
-});
-
 router.get('/sessions/:paymentId', auth, async (req, res) => {
   try {
     const session = await syncAndGetYoupiSession({
@@ -247,6 +292,104 @@ router.get('/sessions/:paymentId', auth, async (req, res) => {
     res.status(err.status || 400).json({
       code: err.code || 'YOUPI_STATUS_ERROR',
       message: err.message || 'Unable to fetch payment status.'
+    });
+  }
+});
+
+router.get('/sessions/:paymentId/stream', authStream, async (req, res) => {
+  try {
+    const initial = await syncAndGetYoupiSession({
+      paymentId: req.params.paymentId,
+      user: req.user
+    });
+
+    res.setHeader('Content-Type', 'text/event-stream; charset=utf-8');
+    res.setHeader('Cache-Control', 'no-cache, no-transform');
+    res.setHeader('Connection', 'keep-alive');
+    res.setHeader('X-Accel-Buffering', 'no');
+    if (typeof res.flushHeaders === 'function') {
+      res.flushHeaders();
+    }
+
+    const sendSessionEvent = dto => {
+      try {
+        res.write(`event: session\ndata: ${JSON.stringify(dto)}\n\n`);
+      } catch {}
+    };
+
+    sendSessionEvent(initial);
+
+    const onSessionUpdate = dto => {
+      if (dto && dto.paymentId === req.params.paymentId) {
+        sendSessionEvent(dto);
+      }
+    };
+
+    PaymentEventBus.on('session.update', onSessionUpdate);
+    const heartbeat = setInterval(() => {
+      try {
+        res.write(`: heartbeat ${Date.now()}\n\n`);
+      } catch {}
+    }, 15000);
+
+    const cleanup = () => {
+      clearInterval(heartbeat);
+      PaymentEventBus.removeListener('session.update', onSessionUpdate);
+    };
+    req.on('close', cleanup);
+    res.on('close', cleanup);
+  } catch (err) {
+    if (!res.headersSent) {
+      res.status(err.status || 400).json({
+        code: err.code || 'YOUPI_STREAM_ERROR',
+        message: err.message || 'Unable to open live payment stream.'
+      });
+    }
+  }
+});
+
+router.post('/sessions/:paymentId/switch-vpa', auth, async (req, res) => {
+  try {
+    const session = await switchSessionVpa({
+      paymentId: req.params.paymentId,
+      user: req.user,
+      targetVpa: req.body?.targetVpa || ''
+    });
+    res.json({ session });
+  } catch (err) {
+    res.status(err.status || 400).json({
+      code: err.code || 'YOUPI_VPA_SWITCH_ERROR',
+      message: err.message || 'Unable to switch merchant UPI VPA.'
+    });
+  }
+});
+
+router.post('/sessions/:paymentId/verify-now', auth, async (req, res) => {
+  try {
+    const marked = await markSessionProcessing({
+      paymentId: req.params.paymentId,
+      user: req.user
+    });
+
+    let pollSummary = null;
+    const autoCfg = await getAutomationConfig();
+    if (autoCfg.autoVerifyEnabled && autoCfg.imapConfigured && !marked.session.settled) {
+      pollSummary = await pollBankInboxOnce();
+    }
+
+    const latestSession = await syncAndGetYoupiSession({
+      paymentId: req.params.paymentId,
+      user: req.user
+    });
+
+    res.json({
+      session: latestSession,
+      pollSummary
+    });
+  } catch (err) {
+    res.status(err.status || 400).json({
+      code: err.code || 'YOUPI_VERIFY_ERROR',
+      message: err.message || 'Unable to start verification.'
     });
   }
 });
@@ -282,27 +425,69 @@ router.post('/sessions/:paymentId/cancel', auth, async (req, res) => {
   }
 });
 
+async function handleObserverWebhook(req, res) {
+  try {
+    const cfg = await getAutomationConfig({ includeSecrets: true });
+    if (!cfg.observerSecret) {
+      return res.status(503).json({
+        received: false,
+        code: 'OBSERVER_SECRET_NOT_CONFIGURED',
+        message: 'Bank observer secret is not configured. Generate one in Admin → YouPI Payments.'
+      });
+    }
+
+    const authHeader = String(req.headers.authorization || '').trim();
+    const bearerSecret = authHeader.startsWith('Bearer ') ? authHeader.slice(7).trim() : '';
+    const suppliedSecret = String(req.headers['x-youpi-observer-secret'] || bearerSecret || '').trim();
+
+    if (!constantTimeSecretEqual(cfg.observerSecret, suppliedSecret)) {
+      return res.status(401).json({
+        received: false,
+        code: 'INVALID_OBSERVER_SECRET',
+        message: 'Invalid YouPI bank observer secret.'
+      });
+    }
+
+    const sourceHint = String(req.body?.source || '').toUpperCase();
+    const source =
+      req.path.endsWith('/sms') || sourceHint === 'SMS_OBSERVER' ? 'SMS_OBSERVER' : 'IMAP_EMAIL';
+
+    const result = await ingestBankObservation({
+      source,
+      sender: String(req.body?.sender || req.body?.from || '').trim(),
+      subject: String(req.body?.subject || '').trim(),
+      text: String(req.body?.text || req.body?.body || req.body?.message || '').trim(),
+      observedAt: req.body?.timestamp || req.body?.observedAt || new Date(),
+      messageKey: String(req.body?.messageKey || req.body?.id || '').trim()
+    });
+
+    res.status(200).json({
+      received: true,
+      accepted: Boolean(result.accepted),
+      duplicate: Boolean(result.duplicate),
+      status: result.status,
+      reason: result.reason || result.observation?.reason || '',
+      matchedOrderId: result.observation?.matchedOrderId || ''
+    });
+  } catch (err) {
+    res.status(err.status || 400).json({
+      received: false,
+      code: err.code || 'OBSERVER_INGEST_ERROR',
+      message: err.message || 'Failed to ingest bank alert.'
+    });
+  }
+}
+
+router.post('/observer/alert', handleObserverWebhook);
+router.post('/observer/sms', handleObserverWebhook);
+
 router.get('/admin/sessions', auth, authorize('admin', 'organizer'), async (req, res) => {
   try {
-    const cfg = getYoupiConfig();
     const sessions = await listAdminYoupiSessions({
       user: req.user,
       statusFilter: req.query.status || ''
     });
-    res.json({
-      sessions,
-      gatewayInfo: {
-        gatewayMode: cfg.gatewayMode,
-        externalConfigured: cfg.externalConfigured,
-        apiUrlOrigin: cfg.apiUrlOrigin,
-        merchantIdConfigured: Boolean(cfg.merchantId),
-        merchantKeyConfigured: Boolean(cfg.merchantKey),
-        webhookSecretConfigured: Boolean(cfg.webhookSecret),
-        defaultMethod: cfg.defaultMethod,
-        verificationMode: cfg.verificationMode,
-        webhookCallbackPath: '/api/payments/youpi/webhook'
-      }
-    });
+    res.json({ sessions });
   } catch (err) {
     res.status(err.status || 500).json({
       code: err.code || 'YOUPI_ADMIN_LIST_ERROR',
@@ -311,36 +496,118 @@ router.get('/admin/sessions', auth, authorize('admin', 'organizer'), async (req,
   }
 });
 
-router.post('/admin/sessions/:paymentId/sync', auth, authorize('admin', 'organizer'), async (req, res) => {
+router.get('/admin/automation', auth, authorize('admin', 'organizer'), async (req, res) => {
   try {
-    if (req.user.role !== 'admin') {
-      const targetSession = await YoupiPaymentSession.findOne({ paymentId: req.params.paymentId }).populate(
-        'event',
-        'organizer'
-      );
-      if (!targetSession) {
-        return res.status(404).json({
-          code: 'SESSION_NOT_FOUND',
-          message: 'YouPI payment session not found.'
-        });
-      }
-      const isEventOwner = targetSession.event?.organizer?.toString() === req.user._id.toString();
-      if (!isEventOwner) {
-        return res.status(403).json({
-          code: 'FORBIDDEN',
-          message: 'Not authorized to sync payment sessions for this event.'
-        });
-      }
-    }
-    const session = await syncAndGetYoupiSession({
-      paymentId: req.params.paymentId,
-      user: req.user
+    const [config, observations, openCount] = await Promise.all([
+      getAutomationConfig({ includeSecrets: false }),
+      YoupiBankObservation.find().sort({ createdAt: -1 }).limit(30).lean(),
+      YoupiPaymentSession.countDocuments({ status: { $in: ['ACTIVE', 'PROCESSING', 'MANUAL_REVIEW'] } })
+    ]);
+    res.json({
+      config,
+      observations,
+      openSessionCount: openCount
     });
-    res.json({ session });
+  } catch (err) {
+    res.status(err.status || 500).json({
+      code: err.code || 'YOUPI_AUTOMATION_STATUS_ERROR',
+      message: err.message || 'Failed to load automation settings.'
+    });
+  }
+});
+
+router.put('/admin/automation', auth, authorize('admin'), async (req, res) => {
+  try {
+    const body = req.body || {};
+    const updateFields = {};
+
+    if (body.backupVpas !== undefined) {
+      updateFields.youpiBackupVpas = parseVpaList(body.backupVpas);
+    }
+    if (body.autoVerifyEnabled !== undefined) {
+      updateFields.youpiAutoVerifyEnabled = Boolean(body.autoVerifyEnabled);
+    }
+    if (body.autoReconcileObserved !== undefined) {
+      updateFields.youpiAutoReconcileObserved = Boolean(body.autoReconcileObserved);
+    }
+    if (body.imapHost !== undefined) {
+      updateFields.youpiImapHost = sanitizePlainText(body.imapHost, 120) || 'imap.gmail.com';
+    }
+    if (body.imapPort !== undefined) {
+      const p = Number(body.imapPort);
+      if (!Number.isInteger(p) || p < 1 || p > 65535) {
+        return res.status(400).json({ message: 'IMAP port must be between 1 and 65535.' });
+      }
+      updateFields.youpiImapPort = p;
+    }
+    if (body.imapUser !== undefined) {
+      updateFields.youpiImapUser = String(body.imapUser || '').trim().toLowerCase();
+    }
+    if (body.clearImapPass) {
+      updateFields.youpiImapPass = '';
+    } else if (typeof body.imapPass === 'string' && body.imapPass.trim() !== '') {
+      updateFields.youpiImapPass = body.imapPass.trim();
+    }
+
+    let generatedObserverSecret = '';
+    if (body.generateObserverSecret) {
+      generatedObserverSecret = crypto.randomBytes(24).toString('hex');
+      updateFields.youpiObserverSecret = generatedObserverSecret;
+    } else if (body.clearObserverSecret) {
+      updateFields.youpiObserverSecret = '';
+    } else if (typeof body.observerSecret === 'string' && body.observerSecret.trim() !== '') {
+      updateFields.youpiObserverSecret = body.observerSecret.trim();
+    }
+
+    await SystemSetting.findOneAndUpdate(
+      { key: 'global' },
+      { $set: updateFields },
+      { upsert: true, new: true }
+    );
+
+    const config = await getAutomationConfig({ includeSecrets: false });
+    res.json({
+      message: 'YouPI payment automation & backup UPI settings saved.',
+      config,
+      ...(generatedObserverSecret ? { generatedObserverSecret } : {})
+    });
   } catch (err) {
     res.status(err.status || 400).json({
-      code: err.code || 'YOUPI_ADMIN_SYNC_ERROR',
-      message: err.message || 'Failed to sync YouPI session.'
+      code: err.code || 'YOUPI_AUTOMATION_SAVE_ERROR',
+      message: err.message || 'Failed to save automation settings.'
+    });
+  }
+});
+
+router.post('/admin/poll-now', auth, authorize('admin', 'organizer'), async (req, res) => {
+  try {
+    const summary = await pollBankInboxOnce({ force: true });
+    const [config, observations] = await Promise.all([
+      getAutomationConfig({ includeSecrets: false }),
+      YoupiBankObservation.find().sort({ createdAt: -1 }).limit(30).lean()
+    ]);
+    res.json({ summary, config, observations });
+  } catch (err) {
+    res.status(err.status || 500).json({
+      code: err.code || 'YOUPI_POLL_ERROR',
+      message: err.message || 'Failed to poll bank alert inbox.'
+    });
+  }
+});
+
+router.post('/admin/reconcile-csv', auth, authorize('admin', 'organizer'), async (req, res) => {
+  try {
+    const csvText = typeof req.body?.csvText === 'string' ? req.body.csvText : '';
+    if (!csvText.trim()) {
+      return res.status(400).json({ message: 'Please upload or paste a bank statement CSV.' });
+    }
+    const summary = await reconcileStatementCsv({ csvText, adminUser: req.user });
+    const observations = await YoupiBankObservation.find().sort({ createdAt: -1 }).limit(30).lean();
+    res.json({ summary, observations });
+  } catch (err) {
+    res.status(err.status || 400).json({
+      code: err.code || 'YOUPI_CSV_RECONCILE_ERROR',
+      message: err.message || 'Failed to reconcile CSV statement.'
     });
   }
 });

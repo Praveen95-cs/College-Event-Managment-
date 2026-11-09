@@ -27,6 +27,7 @@ const schema = new mongoose.Schema({
     registrationFee: { type: Number, default: 0, min: 0 },
     currency: { type: String, default: 'INR', trim: true },
     paymentUpiId: { type: String, default: '', trim: true },
+    backupPaymentUpiIds: [{ type: String, trim: true }],
     paymentInstructions: { type: String, default: '', trim: true },
     whatsappGroupLink: { type: String, default: '', trim: true },
     autoDeleteWhenExpired: {

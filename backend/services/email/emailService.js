@@ -1,62 +1,451 @@
+const mongoose = require('mongoose');
 const { sanitizePlainText, sanitizeEmailAddress } = require('../../utils/sanitize');
 
+const SETTINGS_CACHE_TTL_MS = 15 * 1000;
 let cachedTransporter = null;
 let cachedConfigKey = '';
+let cachedDbSettings = null;
+let cachedDbFetchedAt = 0;
+let lastRecordedEmailStatus = null;
 
-function getSmtpConfig() {
-  const user = String(process.env.SMTP_USER || '').trim();
+function parseFromHeader(rawFrom, fallbackEmail = '') {
+  const clean = String(rawFrom || '').trim();
+  const match = clean.match(/^(.*?)\s*<([^<>]+)>\s*$/);
+  if (match) {
+    return {
+      name: match[1].replace(/^"|"$/g, '').trim() || 'Avenor Campus Events',
+      email: sanitizeEmailAddress(match[2]) || fallbackEmail || 'no-reply@avenor.campus'
+    };
+  }
+  const emailOnly = sanitizeEmailAddress(clean);
+  if (emailOnly) {
+    return { name: 'Avenor Campus Events', email: emailOnly };
+  }
+  return {
+    name: 'Avenor Campus Events',
+    email: sanitizeEmailAddress(fallbackEmail) || 'no-reply@avenor.campus'
+  };
+}
+
+function maskEmail(email) {
+  const clean = sanitizeEmailAddress(email);
+  if (!clean) return '';
+  const [local, domain] = clean.split('@');
+  if (!local || !domain) return clean;
+  const visible = local.length <= 2 ? local[0] : local.slice(0, 2);
+  return `${visible}***@${domain}`;
+}
+
+function invalidateEmailSettingsCache() {
+  cachedDbSettings = null;
+  cachedDbFetchedAt = 0;
+  cachedTransporter = null;
+  cachedConfigKey = '';
+}
+
+async function loadDbEmailSettings(force = false) {
+  if (process.env.DISABLE_DB_EMAIL_SETTINGS === 'true') {
+    return null;
+  }
+  if (mongoose.connection.readyState !== 1) {
+    return cachedDbSettings;
+  }
+  if (!force && cachedDbSettings !== null && Date.now() - cachedDbFetchedAt < SETTINGS_CACHE_TTL_MS) {
+    return cachedDbSettings;
+  }
+  try {
+    const SystemSetting = require('../../models/system/SystemSetting');
+    const doc = await SystemSetting.findOne({ key: 'global' })
+      .select(
+        'emailRelayProvider brevoApiKey resendApiKey emailWebhookUrl emailWebhookSecret smtpHostOverride smtpPortOverride smtpUserOverride smtpPassOverride smtpFromOverride lastEmailStatus'
+      )
+      .lean();
+    cachedDbSettings = doc || {};
+    cachedDbFetchedAt = Date.now();
+    if (doc?.lastEmailStatus && !lastRecordedEmailStatus) {
+      lastRecordedEmailStatus = doc.lastEmailStatus;
+    }
+    return cachedDbSettings;
+  } catch {
+    return cachedDbSettings || {};
+  }
+}
+
+function buildEffectiveConfigFromDb(db = {}) {
+  const useDb = process.env.DISABLE_DB_EMAIL_SETTINGS !== 'true' && db && typeof db === 'object';
+
+  const user = String((useDb && db.smtpUserOverride) || process.env.SMTP_USER || '').trim();
   // Gmail/Google 16-char App Passwords copy with spaces (e.g. "abcd efgh ijkl mnop")
-  const pass = String(process.env.SMTP_PASS || '').replace(/\s+/g, '').trim();
-  let host = String(process.env.SMTP_HOST || '').trim();
+  const pass = String((useDb && db.smtpPassOverride) || process.env.SMTP_PASS || '')
+    .replace(/\s+/g, '')
+    .trim();
+  let host = String((useDb && db.smtpHostOverride) || process.env.SMTP_HOST || '').trim();
   if (!host && user.toLowerCase().endsWith('@gmail.com')) {
     host = 'smtp.gmail.com';
   }
-  const port = Number(process.env.SMTP_PORT || (host === 'smtp.gmail.com' ? 465 : 587));
+  const dbPort = useDb && Number(db.smtpPortOverride) > 0 ? Number(db.smtpPortOverride) : 0;
+  const port = dbPort || Number(process.env.SMTP_PORT || (host === 'smtp.gmail.com' ? 465 : 587));
   const secure =
-    process.env.SMTP_SECURE !== undefined
-      ? String(process.env.SMTP_SECURE).toLowerCase() === 'true'
-      : port === 465;
+    dbPort > 0
+      ? dbPort === 465
+      : process.env.SMTP_SECURE !== undefined
+        ? String(process.env.SMTP_SECURE).toLowerCase() === 'true'
+        : port === 465;
+
   const from =
-    String(process.env.SMTP_FROM || '').trim() ||
+    String((useDb && db.smtpFromOverride) || process.env.SMTP_FROM || '').trim() ||
     (user ? `Avenor Campus Events <${user}>` : 'Avenor Campus Events <no-reply@avenor.campus>');
 
+  const brevoApiKey = String((useDb && db.brevoApiKey) || process.env.BREVO_API_KEY || '').trim();
+  const resendApiKey = String((useDb && db.resendApiKey) || process.env.RESEND_API_KEY || '').trim();
+  const webhookUrl = String((useDb && db.emailWebhookUrl) || process.env.EMAIL_WEBHOOK_URL || '').trim();
+  const webhookSecret = String(
+    (useDb && db.emailWebhookSecret) || process.env.EMAIL_WEBHOOK_SECRET || ''
+  ).trim();
+  const relayProviderRaw = String(
+    (useDb && db.emailRelayProvider) || process.env.EMAIL_RELAY_PROVIDER || 'auto'
+  )
+    .trim()
+    .toLowerCase();
+  const relayProvider = ['auto', 'brevo', 'resend', 'webhook', 'smtp'].includes(relayProviderRaw)
+    ? relayProviderRaw
+    : 'auto';
+
+  const smtpConfigured = Boolean(host && user && pass);
+  const httpConfigured = Boolean(brevoApiKey || resendApiKey || webhookUrl);
+
   return {
-    configured: Boolean(host && user && pass),
+    configured: smtpConfigured || httpConfigured,
+    smtpConfigured,
+    httpConfigured,
     host,
     port,
     secure,
     user,
     pass,
-    from
+    from,
+    brevoApiKey,
+    resendApiKey,
+    webhookUrl,
+    webhookSecret,
+    relayProvider,
+    lastEmailStatus: (useDb && db.lastEmailStatus) || lastRecordedEmailStatus || null
   };
+}
+
+function getSmtpConfig() {
+  return buildEffectiveConfigFromDb(cachedDbSettings || {});
+}
+
+async function getEffectiveEmailConfig(force = false) {
+  const db = await loadDbEmailSettings(force);
+  return buildEffectiveConfigFromDb(db || {});
 }
 
 function isSmtpConfigured() {
   return getSmtpConfig().configured;
 }
 
-function getTransporter() {
-  const cfg = getSmtpConfig();
-  if (!cfg.configured) return null;
+async function isEmailDeliveryConfigured() {
+  const cfg = await getEffectiveEmailConfig();
+  return cfg.configured;
+}
 
+function createNodemailerTransport({ host, port, secure, user, pass }) {
+  const nodemailer = require('nodemailer');
+  return nodemailer.createTransport({
+    host,
+    port,
+    secure,
+    family: 4, // Force IPv4 so cloud hosts (Render/Heroku/Docker) do not stall on unreachable IPv6 MX/SMTP records
+    connectionTimeout: 7000,
+    greetingTimeout: 7000,
+    socketTimeout: 10000,
+    auth: { user, pass }
+  });
+}
+
+function getTransporterFromConfig(cfg) {
+  if (!cfg.smtpConfigured) return null;
   const key = `${cfg.host}:${cfg.port}:${cfg.secure}:${cfg.user}:${cfg.pass.length}`;
   if (cachedTransporter && cachedConfigKey === key) {
     return cachedTransporter;
   }
-
-  // Lazy load so tests without SMTP run cleanly
-  const nodemailer = require('nodemailer');
-  cachedTransporter = nodemailer.createTransport({
-    host: cfg.host,
-    port: cfg.port,
-    secure: cfg.secure,
-    auth: {
-      user: cfg.user,
-      pass: cfg.pass
-    }
-  });
+  cachedTransporter = createNodemailerTransport(cfg);
   cachedConfigKey = key;
   return cachedTransporter;
+}
+
+function classifyDeliveryError(err) {
+  const msg = String(err?.message || err || '');
+  const code = String(err?.code || '').toUpperCase();
+  if (
+    code === 'ETIMEDOUT' ||
+    code === 'ESOCKET' ||
+    code === 'TIMEOUT' ||
+    /timeout|timed out|aborted/i.test(msg)
+  ) {
+    return 'EMAIL_TIMEOUT';
+  }
+  if (code === 'EAUTH' || /535|Username and Password not accepted|Invalid login/i.test(msg)) {
+    return 'SMTP_AUTH_FAILED';
+  }
+  if (code === 'ECONNREFUSED' || code === 'ENETUNREACH' || code === 'EHOSTUNREACH') {
+    return 'SMTP_NETWORK_BLOCKED';
+  }
+  return 'EMAIL_DELIVERY_FAILED';
+}
+
+async function recordEmailStatus(statusObj) {
+  lastRecordedEmailStatus = statusObj;
+  if (
+    process.env.DISABLE_DB_EMAIL_SETTINGS === 'true' ||
+    mongoose.connection.readyState !== 1
+  ) {
+    return;
+  }
+  try {
+    const SystemSetting = require('../../models/system/SystemSetting');
+    await SystemSetting.findOneAndUpdate(
+      { key: 'global' },
+      { $set: { lastEmailStatus: statusObj } },
+      { upsert: true }
+    );
+    if (cachedDbSettings) {
+      cachedDbSettings.lastEmailStatus = statusObj;
+    }
+  } catch {
+    // Non-critical diagnostic persistence
+  }
+}
+
+async function sendViaBrevo({ cfg, to, subject, text, html }) {
+  const sender = parseFromHeader(cfg.from, cfg.user);
+  const res = await fetch('https://api.brevo.com/v3/smtp/email', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Accept: 'application/json',
+      'api-key': cfg.brevoApiKey
+    },
+    body: JSON.stringify({
+      sender,
+      to: [{ email: to }],
+      subject,
+      textContent: text || '',
+      htmlContent: html || text || ''
+    }),
+    signal: AbortSignal.timeout(9000)
+  });
+
+  if (!res.ok) {
+    const bodyText = await res.text().catch(() => '');
+    const err = new Error(`Brevo API error (${res.status}): ${bodyText.slice(0, 180) || res.statusText}`);
+    err.code = `BREVO_${res.status}`;
+    throw err;
+  }
+
+  const data = await res.json().catch(() => ({}));
+  return {
+    delivered: true,
+    provider: 'brevo',
+    messageId: data.messageId || ''
+  };
+}
+
+async function sendViaResend({ cfg, to, subject, text, html }) {
+  const sender = parseFromHeader(cfg.from, cfg.user);
+  const fromEmail =
+    process.env.RESEND_FROM ||
+    (sender.email.endsWith('@gmail.com') ? 'Avenor Campus Events <onboarding@resend.dev>' : `${sender.name} <${sender.email}>`);
+
+  const res = await fetch('https://api.resend.com/emails', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${cfg.resendApiKey}`
+    },
+    body: JSON.stringify({
+      from: fromEmail,
+      to: [to],
+      ...(sender.email ? { reply_to: sender.email } : {}),
+      subject,
+      text: text || '',
+      html: html || text || ''
+    }),
+    signal: AbortSignal.timeout(9000)
+  });
+
+  if (!res.ok) {
+    const bodyText = await res.text().catch(() => '');
+    const err = new Error(`Resend API error (${res.status}): ${bodyText.slice(0, 180) || res.statusText}`);
+    err.code = `RESEND_${res.status}`;
+    throw err;
+  }
+
+  const data = await res.json().catch(() => ({}));
+  return {
+    delivered: true,
+    provider: 'resend',
+    messageId: data.id || ''
+  };
+}
+
+async function sendViaWebhook({ cfg, to, subject, text, html }) {
+  const sender = parseFromHeader(cfg.from, cfg.user);
+  const headers = {
+    'Content-Type': 'application/json',
+    Accept: 'application/json'
+  };
+  if (cfg.webhookSecret) {
+    headers['X-Email-Webhook-Secret'] = cfg.webhookSecret;
+    headers['Authorization'] = `Bearer ${cfg.webhookSecret}`;
+  }
+
+  const payload = {
+    to,
+    from: `${sender.name} <${sender.email}>`,
+    replyTo: sender.email,
+    subject,
+    text: text || '',
+    html: html || text || '',
+    secret: cfg.webhookSecret || undefined
+  };
+
+  const res = await fetch(cfg.webhookUrl, {
+    method: 'POST',
+    headers,
+    body: JSON.stringify(payload),
+    redirect: 'follow',
+    signal: AbortSignal.timeout(10000)
+  });
+
+  if (res.url && res.url.includes('accounts.google.com')) {
+    const err = new Error(
+      'Google Apps Script webhook requires authentication (redeploy Web App with access = "Anyone").'
+    );
+    err.code = 'WEBHOOK_AUTH_REQUIRED';
+    throw err;
+  }
+
+  const rawText = await res.text().catch(() => '');
+  let parsedJson = null;
+  try {
+    parsedJson = JSON.parse(rawText);
+  } catch {
+    parsedJson = null;
+  }
+
+  if (!res.ok || parsedJson?.ok === false || parsedJson?.delivered === false || parsedJson?.error) {
+    const reason = parsedJson?.error || parsedJson?.message || rawText.slice(0, 160) || res.statusText;
+    const err = new Error(`Email webhook error (${res.status}): ${reason}`);
+    err.code = 'WEBHOOK_FAILED';
+    throw err;
+  }
+
+  return {
+    delivered: true,
+    provider: 'webhook',
+    messageId: parsedJson?.messageId || ''
+  };
+}
+
+async function sendViaSmtp({ cfg, to, subject, text, html }) {
+  const primaryTransporter = getTransporterFromConfig(cfg);
+  try {
+    const info = await primaryTransporter.sendMail({
+      from: cfg.from,
+      to,
+      subject,
+      text,
+      html
+    });
+    return {
+      delivered: true,
+      provider: `smtp:${cfg.port}`,
+      messageId: info.messageId || ''
+    };
+  } catch (primaryErr) {
+    const canRetry587 =
+      cfg.port === 465 &&
+      ['ETIMEDOUT', 'ESOCKET', 'ECONNREFUSED', 'ENETUNREACH', 'EHOSTUNREACH', 'TIMEOUT'].includes(
+        String(primaryErr?.code || '').toUpperCase()
+      ) || (cfg.port === 465 && /timeout|timed out|ECONNREFUSED|ETIMEDOUT/i.test(primaryErr?.message || ''));
+
+    if (!canRetry587) {
+      throw primaryErr;
+    }
+
+    const fallbackTransporter = createNodemailerTransport({
+      host: cfg.host,
+      port: 587,
+      secure: false,
+      user: cfg.user,
+      pass: cfg.pass
+    });
+    const info = await fallbackTransporter.sendMail({
+      from: cfg.from,
+      to,
+      subject,
+      text,
+      html
+    });
+    return {
+      delivered: true,
+      provider: 'smtp:587',
+      messageId: info.messageId || ''
+    };
+  }
+}
+
+function buildTransportOrder(cfg) {
+  const attempts = [];
+  const addHttp = () => {
+    if (cfg.brevoApiKey) attempts.push({ id: 'brevo', fn: sendViaBrevo });
+    if (cfg.webhookUrl) attempts.push({ id: 'webhook', fn: sendViaWebhook });
+    if (cfg.resendApiKey) attempts.push({ id: 'resend', fn: sendViaResend });
+  };
+  const addSmtp = () => {
+    if (cfg.smtpConfigured) attempts.push({ id: 'smtp', fn: sendViaSmtp });
+  };
+
+  if (cfg.relayProvider === 'brevo') {
+    if (cfg.brevoApiKey) attempts.push({ id: 'brevo', fn: sendViaBrevo });
+    if (cfg.webhookUrl) attempts.push({ id: 'webhook', fn: sendViaWebhook });
+    if (cfg.resendApiKey) attempts.push({ id: 'resend', fn: sendViaResend });
+    addSmtp();
+    return attempts;
+  }
+  if (cfg.relayProvider === 'resend') {
+    if (cfg.resendApiKey) attempts.push({ id: 'resend', fn: sendViaResend });
+    if (cfg.brevoApiKey) attempts.push({ id: 'brevo', fn: sendViaBrevo });
+    if (cfg.webhookUrl) attempts.push({ id: 'webhook', fn: sendViaWebhook });
+    addSmtp();
+    return attempts;
+  }
+  if (cfg.relayProvider === 'webhook') {
+    if (cfg.webhookUrl) attempts.push({ id: 'webhook', fn: sendViaWebhook });
+    if (cfg.brevoApiKey) attempts.push({ id: 'brevo', fn: sendViaBrevo });
+    if (cfg.resendApiKey) attempts.push({ id: 'resend', fn: sendViaResend });
+    addSmtp();
+    return attempts;
+  }
+  if (cfg.relayProvider === 'smtp') {
+    addSmtp();
+    addHttp();
+    return attempts;
+  }
+
+  // 'auto': in production (e.g., Render free where outbound SMTP 465/587 often stalls), try HTTPS port 443 relays first if present!
+  const isProd = process.env.NODE_ENV === 'production' || process.env.EMAIL_PREFER_HTTPS === 'true';
+  if (isProd && cfg.httpConfigured) {
+    addHttp();
+    addSmtp();
+  } else {
+    addSmtp();
+    addHttp();
+  }
+  return attempts;
 }
 
 function escapeHtml(value) {
@@ -102,41 +491,120 @@ function buildBrandedShell({ preheader = '', heading = '', bodyHtml = '' }) {
 async function sendEmail({ to, subject, text, html }) {
   const cleanTo = sanitizeEmailAddress(to);
   if (!cleanTo) {
-    return { delivered: false, provider: 'skipped', reason: 'Invalid or empty recipient email' };
+    return {
+      delivered: false,
+      provider: 'skipped',
+      code: 'INVALID_RECIPIENT',
+      reason: 'Invalid or empty recipient email'
+    };
   }
 
-  const cfg = getSmtpConfig();
+  const startedAt = Date.now();
+  const cfg = await getEffectiveEmailConfig();
   if (!cfg.configured) {
     console.log(`[EmailService:console] To=${cleanTo} | Subject="${subject}"`);
     return {
       delivered: false,
       provider: 'console',
-      reason: 'SMTP_HOST / SMTP_USER / SMTP_PASS not configured'
+      code: 'EMAIL_NOT_CONFIGURED',
+      reason: 'No SMTP credentials or HTTPS Email Relay (Brevo / Resend / Webhook) configured.'
     };
   }
 
-  try {
-    const transporter = getTransporter();
-    const info = await transporter.sendMail({
-      from: cfg.from,
-      to: cleanTo,
-      subject,
-      text,
-      html
-    });
-    return {
-      delivered: true,
-      provider: 'smtp',
-      messageId: info.messageId || ''
-    };
-  } catch (err) {
-    console.error(`[EmailService] SMTP send failed for ${cleanTo}:`, err.message);
-    return {
-      delivered: false,
-      provider: 'smtp_error',
-      reason: err.message
-    };
+  const attempts = buildTransportOrder(cfg);
+  const errors = [];
+
+  for (const attempt of attempts) {
+    try {
+      const res = await attempt.fn({ cfg, to: cleanTo, subject, text, html });
+      const latencyMs = Date.now() - startedAt;
+      await recordEmailStatus({
+        delivered: true,
+        provider: res.provider,
+        toMasked: maskEmail(cleanTo),
+        subject: sanitizePlainText(subject, 120),
+        latencyMs,
+        at: new Date().toISOString()
+      });
+      return {
+        ...res,
+        latencyMs
+      };
+    } catch (err) {
+      const errCode = classifyDeliveryError(err);
+      console.error(`[EmailService] ${attempt.id} failed for ${cleanTo}:`, err.message);
+      errors.push({
+        provider: attempt.id,
+        code: errCode,
+        message: err.message
+      });
+    }
   }
+
+  const latencyMs = Date.now() - startedAt;
+  const primaryError = errors[errors.length - 1] || {
+    provider: 'none',
+    code: 'EMAIL_DELIVERY_FAILED',
+    message: 'All configured email delivery transports failed.'
+  };
+  const summaryReason = errors.map(e => `${e.provider}: ${e.message}`).join(' | ');
+
+  await recordEmailStatus({
+    delivered: false,
+    provider: `${primaryError.provider}_error`,
+    code: primaryError.code,
+    reason: summaryReason.slice(0, 320),
+    toMasked: maskEmail(cleanTo),
+    subject: sanitizePlainText(subject, 120),
+    latencyMs,
+    at: new Date().toISOString()
+  });
+
+  return {
+    delivered: false,
+    provider: `${primaryError.provider}_error`,
+    code: primaryError.code,
+    reason: summaryReason,
+    latencyMs
+  };
+}
+
+async function getEmailDiagnostics({ mask = true } = {}) {
+  const cfg = await getEffectiveEmailConfig(true);
+  const activeChannels = [];
+  if (cfg.brevoApiKey) activeChannels.push('brevo-https');
+  if (cfg.webhookUrl) activeChannels.push('webhook-https');
+  if (cfg.resendApiKey) activeChannels.push('resend-https');
+  if (cfg.smtpConfigured) activeChannels.push(`smtp-${cfg.port}`);
+
+  let webhookUrlHost = '';
+  if (cfg.webhookUrl) {
+    try {
+      webhookUrlHost = new URL(cfg.webhookUrl).host;
+    } catch {
+      webhookUrlHost = 'invalid-url';
+    }
+  }
+
+  return {
+    configured: cfg.configured,
+    smtpConfigured: cfg.smtpConfigured,
+    httpConfigured: cfg.httpConfigured,
+    smtpHost: cfg.host || '',
+    smtpPort: cfg.port || 465,
+    smtpFrom: cfg.from || '',
+    smtpUserMasked: mask ? maskEmail(cfg.user) : cfg.user,
+    relayProvider: cfg.relayProvider,
+    brevoConfigured: Boolean(cfg.brevoApiKey),
+    resendConfigured: Boolean(cfg.resendApiKey),
+    webhookConfigured: Boolean(cfg.webhookUrl),
+    webhookUrl: mask ? '' : cfg.webhookUrl,
+    webhookUrlHost,
+    webhookSecretConfigured: Boolean(cfg.webhookSecret),
+    activeChannels,
+    preferHttpsInProd: process.env.NODE_ENV === 'production',
+    lastEmailStatus: cfg.lastEmailStatus || lastRecordedEmailStatus || null
+  };
 }
 
 async function sendOtpEmail({ to, name = '', otp, expiresMinutes = 10, purpose = 'register' }) {
@@ -351,10 +819,13 @@ async function sendPaymentUnderReviewEmail({ to, attendeeName, event, session })
 
 module.exports = {
   getSmtpConfig,
+  getEffectiveEmailConfig,
   isSmtpConfigured,
+  isEmailDeliveryConfigured,
+  invalidateEmailSettingsCache,
+  getEmailDiagnostics,
   sendEmail,
   sendOtpEmail,
   sendEventRegistrationEmail,
   sendPaymentUnderReviewEmail
 };
-

@@ -5,7 +5,10 @@ const { body, validationResult } = require('express-validator');
 const User = require('../../models/auth/User');
 const EmailOtp = require('../../models/auth/EmailOtp');
 const { auth } = require('../../middleware/auth');
-const { sendOtpEmail, isSmtpConfigured } = require('../../services/email/emailService');
+const {
+  sendOtpEmail,
+  isEmailDeliveryConfigured
+} = require('../../services/email/emailService');
 const { resolveActiveDepartmentName } = require('../../services/system/departmentService');
 const { sanitizePlainText } = require('../../utils/sanitize');
 
@@ -189,9 +192,11 @@ router.post('/send-otp', [
 
     const allowDevPreview =
       process.env.NODE_ENV !== 'production' || process.env.ALLOW_DEV_OTP_PREVIEW === 'true';
-    if (!isSmtpConfigured() && !allowDevPreview) {
+    const emailConfigured = await isEmailDeliveryConfigured();
+    if (!emailConfigured && !allowDevPreview) {
       return res.status(503).json({
-        message: 'Email OTP delivery is temporarily unavailable. Please contact the campus administrator.'
+        code: 'EMAIL_NOT_CONFIGURED',
+        message: 'Email delivery is not configured on the server yet. Ask Admin to configure Brevo / Webhook / SMTP.'
       });
     }
 
@@ -245,8 +250,15 @@ router.post('/send-otp', [
       } else {
         await EmailOtp.deleteOne({ email, purpose }).catch(() => {});
       }
+      const isTimeoutOrBlocked = ['EMAIL_TIMEOUT', 'SMTP_NETWORK_BLOCKED'].includes(deliveryRes.code);
       return res.status(502).json({
-        message: 'Failed to send verification email. Please verify the email address or try again.'
+        code: deliveryRes.code || 'EMAIL_DELIVERY_FAILED',
+        provider: deliveryRes.provider || 'unknown',
+        message: isTimeoutOrBlocked
+          ? 'Email server connection timed out or blocked (Render free tier blocks SMTP ports 465/587). Ask Admin to enable an HTTPS Email Relay (Brevo / Apps Script Webhook) in Admin Dashboard.'
+          : deliveryRes.code === 'SMTP_AUTH_FAILED'
+            ? 'Email server authentication failed. Ask Admin to verify SMTP/Relay credentials.'
+            : `Failed to send verification email (${deliveryRes.reason || 'delivery error'}). Please try again.`
       });
     }
 
@@ -254,7 +266,7 @@ router.post('/send-otp', [
       sent: true,
       email,
       purpose,
-      delivery: deliveryRes.delivered ? 'smtp' : 'console',
+      delivery: deliveryRes.delivered ? deliveryRes.provider || 'smtp' : 'console',
       expiresInSeconds: OTP_TTL_MINUTES * 60,
       message: deliveryRes.delivered
         ? `A 6-digit verification code has been sent to ${email}.`

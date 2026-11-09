@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { useParams, useNavigate, useSearchParams, Link } from 'react-router-dom';
+import { useParams, useNavigate, Link } from 'react-router-dom';
 import { useAuth } from '../../contexts/AuthContext';
 import axios from 'axios';
 import { format } from 'date-fns';
@@ -21,7 +21,8 @@ import {
   LockClosedIcon,
   ChatBubbleLeftRightIcon,
   ClipboardDocumentCheckIcon,
-  MagnifyingGlassIcon
+  MagnifyingGlassIcon,
+  EnvelopeIcon
 } from '@heroicons/react/24/outline';
 import {
   HeartIcon as HeartSolidIcon,
@@ -36,7 +37,6 @@ import { getEventLifecycle, formatCount, resolveMediaUrl } from '../../utils/eve
 const EventDetails = () => {
   const { id } = useParams();
   const navigate = useNavigate();
-  const [searchParams, setSearchParams] = useSearchParams();
   const { user, isAuthenticated } = useAuth();
   const [event, setEvent] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -47,7 +47,6 @@ const EventDetails = () => {
   const [copiedShare, setCopiedShare] = useState(false);
   const [bookingBusy, setBookingBusy] = useState(false);
   const [showRegisterModal, setShowRegisterModal] = useState(false);
-  const [resumedSession, setResumedSession] = useState(null);
   const [roster, setRoster] = useState([]);
   const [attendanceSummary, setAttendanceSummary] = useState({
     total: 0,
@@ -61,6 +60,8 @@ const EventDetails = () => {
   const [attendanceFilter, setAttendanceFilter] = useState('all');
   const [attendanceSearch, setAttendanceSearch] = useState('');
   const [markingRegId, setMarkingRegId] = useState('');
+  const [resendingRegId, setResendingRegId] = useState('');
+  const [resendNotice, setResendNotice] = useState('');
   const [bulkMarking, setBulkMarking] = useState(false);
   const backendUrl = getBackendUrl();
 
@@ -132,51 +133,6 @@ const EventDetails = () => {
     fetchFeedMeta();
   }, [fetchEventDetails, fetchEventCompetitions, fetchFeedMeta]);
 
-  const returnedYoupiOrder = searchParams.get('youpiOrder') || '';
-
-  useEffect(() => {
-    if (!returnedYoupiOrder || !isAuthenticated) return undefined;
-    const token = localStorage.getItem('token');
-    if (!token) return undefined;
-
-    let active = true;
-    axios
-      .get(`${backendUrl}/api/payments/youpi/orders/${encodeURIComponent(returnedYoupiOrder)}`, {
-        headers: { Authorization: `Bearer ${token}` }
-      })
-      .then((res) => {
-        if (!active || !res.data?.session) return;
-        setResumedSession(res.data.session);
-        setShowRegisterModal(true);
-        Promise.all([fetchEventDetails(true), fetchEventCompetitions(), fetchFeedMeta()]);
-      })
-      .catch((err) => {
-        if (!active) return;
-        setActionError(
-          err.response?.data?.message || 'Unable to sync returned YouPI payment order.'
-        );
-      })
-      .finally(() => {
-        if (!active) return;
-        const nextParams = new URLSearchParams(searchParams);
-        nextParams.delete('youpiOrder');
-        setSearchParams(nextParams, { replace: true });
-      });
-
-    return () => {
-      active = false;
-    };
-  }, [
-    backendUrl,
-    fetchEventCompetitions,
-    fetchEventDetails,
-    fetchFeedMeta,
-    isAuthenticated,
-    returnedYoupiOrder,
-    searchParams,
-    setSearchParams
-  ]);
-
   const canManageEvent = Boolean(
     event &&
       user &&
@@ -235,12 +191,35 @@ const EventDetails = () => {
     }
   };
 
+  const handleResendEmail = async (registrationId) => {
+    try {
+      setActionError('');
+      setResendNotice('');
+      setResendingRegId(registrationId);
+      const token = localStorage.getItem('token');
+      const res = await axios.post(
+        `${backendUrl}/api/registrations/${registrationId}/resend-email`,
+        {},
+        { headers: { Authorization: `Bearer ${token}` } }
+      );
+      setResendNotice(res.data?.message || 'Confirmation email dispatched.');
+    } catch (err) {
+      setActionError(err.response?.data?.message || 'Failed to resend confirmation email.');
+    } finally {
+      setResendingRegId('');
+    }
+  };
+
   const handleOpenRegistrationModal = () => {
     if (!isAuthenticated) {
       navigate('/login');
       return;
     }
     setActionError('');
+    if (event?.myRegistration?.youpiPaymentId && event?.myRegistration?.paymentStatus !== 'paid') {
+      navigate(`/payment/${event.myRegistration.youpiPaymentId}`);
+      return;
+    }
     setShowRegisterModal(true);
   };
 
@@ -1000,6 +979,12 @@ const EventDetails = () => {
               </div>
             </div>
 
+            {resendNotice && (
+              <div className="px-4 py-2.5 rounded-[8px] bg-[#4cc38a]/12 border border-[#4cc38a]/30 text-[#4cc38a] text-[12px]">
+                {resendNotice}
+              </div>
+            )}
+
             {rosterLoading ? (
               <div className="p-6 text-center text-[13px] text-[#8a847a]">Loading attendance roster...</div>
             ) : (
@@ -1115,6 +1100,16 @@ const EventDetails = () => {
                                       Reset
                                     </button>
                                   )}
+                                  <button
+                                    type="button"
+                                    disabled={resendingRegId === reg._id}
+                                    onClick={() => handleResendEmail(reg._id)}
+                                    title="Resend registration confirmation email"
+                                    className="inline-flex items-center gap-1 h-7 px-2 rounded-[6px] text-[11px] text-[#ebb05d] bg-[#262421] hover:bg-[#302d29] border border-[#efe9de]/[0.08] disabled:opacity-50"
+                                  >
+                                    <EnvelopeIcon className="h-3.5 w-3.5" />
+                                    <span>{resendingRegId === reg._id ? 'Sending...' : 'Email'}</span>
+                                  </button>
                                 </div>
                               </td>
                             </tr>
@@ -1220,11 +1215,7 @@ const EventDetails = () => {
       {showRegisterModal && (
         <EventRegistration
           event={event}
-          initialSession={resumedSession}
-          onClose={() => {
-            setShowRegisterModal(false);
-            setResumedSession(null);
-          }}
+          onClose={() => setShowRegisterModal(false)}
           onRegistered={() => {
             Promise.all([
               fetchEventDetails(true),

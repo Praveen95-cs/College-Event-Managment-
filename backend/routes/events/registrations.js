@@ -324,6 +324,60 @@ router.post('/event/:eventId/attendance/bulk', auth, authorize('admin', 'organiz
   }
 });
 
+router.post('/:registrationId/resend-email', auth, authorize('admin', 'organizer'), async (req, res) => {
+  try {
+    if (!mongoose.Types.ObjectId.isValid(req.params.registrationId)) {
+      return res.status(404).json({ message: 'Registration not found' });
+    }
+    const reg = await Registration.findById(req.params.registrationId).populate('user', 'email name');
+    if (!reg) {
+      return res.status(404).json({ message: 'Registration not found' });
+    }
+    const eventDoc = await Event.findById(reg.event);
+    if (!eventDoc) {
+      return res.status(404).json({ message: 'Associated event not found' });
+    }
+    if (req.user.role !== 'admin' && eventDoc.organizer.toString() !== req.user._id.toString()) {
+      return res.status(403).json({ message: 'Not authorized to resend confirmation emails for this event' });
+    }
+
+    const targetEmail = sanitizeEmailAddress(reg.email || reg.user?.email);
+    if (!targetEmail) {
+      return res.status(400).json({ message: 'No valid student email address is recorded for this registration.' });
+    }
+
+    const isPaidEvent = Boolean(eventDoc.isPaid && Number(eventDoc.registrationFee || 0) > 0);
+    const result = await sendEventRegistrationEmail({
+      to: targetEmail,
+      attendeeName: reg.name || reg.user?.name,
+      event: eventDoc,
+      registration: reg,
+      isPaidEvent,
+      whatsappGroupLink: eventDoc.whatsappGroupLink || ''
+    });
+
+    if (!result.delivered) {
+      return res.status(502).json({
+        delivered: false,
+        code: result.code || 'EMAIL_DELIVERY_FAILED',
+        provider: result.provider,
+        message: result.reason || 'Email delivery failed. Check Admin Email Relay / SMTP settings.'
+      });
+    }
+
+    res.json({
+      delivered: true,
+      provider: result.provider,
+      latencyMs: result.latencyMs,
+      to: targetEmail,
+      message: `Confirmation email resent to ${targetEmail} via ${result.provider}.`
+    });
+  } catch (err) {
+    console.error('Resend registration email error:', err);
+    res.status(500).json({ message: err.message || 'Failed to resend registration confirmation email' });
+  }
+});
+
 router.get('/event/:eventId/export', auth, authorize('admin', 'organizer'), async (req, res) => {
   const e = await Event.findById(req.params.eventId);
   if (!e) return res.status(404).json({ message: 'Event not found' });
