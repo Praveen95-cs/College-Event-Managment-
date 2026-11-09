@@ -17,14 +17,26 @@ services:
         value: "true"
       - key: GENERATE_SOURCEMAP
         value: "false"
+      - key: ESLINT_NO_DEV_ERRORS
+        value: "true"
+      - key: REACT_APP_API_URL
+        value: ""
+      - key: REACT_APP_BACKEND_URL
+        value: ""
+      - key: FRONTEND_URL
+        value: https://college-event-manager-cxf4.onrender.com
       - key: GEMINI_MODEL
         value: gemini-3.5-flash
       - key: AI_PROVIDER
         value: gemini
+      - key: GROQ_MODEL
+        value: llama-3.3-70b-versatile
       - key: GROQ_API_KEY
         sync: false
       - key: JUDGE0_API_URL
         value: https://ce.judge0.com
+      - key: JUDGE0_API_KEY
+        sync: false
       - key: MONGODB_URI
         value: mongodb://praveensumathi11_db_user:x498jO6IPY0HaglU@ac-5ejedd5-shard-00-00.2uaavye.mongodb.net:27017,ac-5ejedd5-shard-00-01.2uaavye.mongodb.net:27017,ac-5ejedd5-shard-00-02.2uaavye.mongodb.net:27017/college-event-manager?ssl=true&replicaSet=atlas-a0lohh-shard-0&authSource=admin&retryWrites=true&w=majority
       - key: JWT_SECRET
