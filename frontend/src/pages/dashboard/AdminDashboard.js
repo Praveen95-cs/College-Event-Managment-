@@ -1049,17 +1049,41 @@ const AdminDashboard = () => {
               </div>
 
               {showAppsScriptCode && (
-                <pre className="p-3 rounded-[10px] bg-[#12110f] border border-[#efe9de]/[0.08] text-[11px] font-mono text-[#d9ceb8] overflow-x-auto leading-relaxed">
-{`// Deploy at script.google.com -> New project -> Deploy as Web App (Execute as: Me, Access: Anyone)
-function doPost(e) {
+                <div className="rounded-[10px] bg-[#12110f] border border-[#efe9de]/[0.08] p-3 space-y-2">
+                  <div className="flex flex-wrap items-center justify-between gap-2 text-[11px] text-[#aaa398]">
+                    <span>
+                      1. Open <strong className="text-[#efe9de]">script.google.com</strong> → New project → paste below → Deploy as <strong className="text-[#efe9de]">Web App</strong> (Execute as: <strong className="text-[#ebb05d]">Me</strong>, Who has access: <strong className="text-[#ebb05d]">Anyone</strong>) → paste the <code className="text-[#ebb05d]">/exec</code> URL above.
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const snippet = `function doPost(e) {\n  var body = JSON.parse(e.postData.contents);\n  var expectedSecret = ''; // Optional: set same Webhook Secret Token here\n  if (expectedSecret && body.secret !== expectedSecret) {\n    return ContentService.createTextOutput(JSON.stringify({ ok: false, error: 'Unauthorized' })).setMimeType(ContentService.MimeType.JSON);\n  }\n  GmailApp.sendEmail(body.to, body.subject, body.text || '', {\n    htmlBody: body.html || undefined,\n    name: body.fromName || 'Avenor Campus Events'\n  });\n  return ContentService.createTextOutput(JSON.stringify({ ok: true })).setMimeType(ContentService.MimeType.JSON);\n}`;
+                        if (navigator.clipboard?.writeText) {
+                          navigator.clipboard.writeText(snippet).then(() => {
+                            setSuccess('Google Apps Script bridge copied to clipboard.');
+                          });
+                        }
+                      }}
+                      className="btn-secondary h-7 px-2.5 text-[11px] shrink-0"
+                    >
+                      Copy Script
+                    </button>
+                  </div>
+                  <pre className="text-[11px] font-mono text-[#d9ceb8] overflow-x-auto leading-relaxed">
+{`function doPost(e) {
   var body = JSON.parse(e.postData.contents);
+  var expectedSecret = ''; // Optional: set same Webhook Secret Token here
+  if (expectedSecret && body.secret !== expectedSecret) {
+    return ContentService.createTextOutput(JSON.stringify({ ok: false, error: 'Unauthorized' })).setMimeType(ContentService.MimeType.JSON);
+  }
   GmailApp.sendEmail(body.to, body.subject, body.text || '', {
     htmlBody: body.html || undefined,
     name: body.fromName || 'Avenor Campus Events'
   });
   return ContentService.createTextOutput(JSON.stringify({ ok: true })).setMimeType(ContentService.MimeType.JSON);
 }`}
-                </pre>
+                  </pre>
+                </div>
               )}
             </form>
           </div>

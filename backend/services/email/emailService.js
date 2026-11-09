@@ -305,6 +305,7 @@ async function sendViaWebhook({ cfg, to, subject, text, html }) {
   const payload = {
     to,
     from: `${sender.name} <${sender.email}>`,
+    fromName: sender.name,
     replyTo: sender.email,
     subject,
     text: text || '',
@@ -322,7 +323,7 @@ async function sendViaWebhook({ cfg, to, subject, text, html }) {
 
   if (res.url && res.url.includes('accounts.google.com')) {
     const err = new Error(
-      'Google Apps Script webhook requires authentication (redeploy Web App with access = "Anyone").'
+      'Google Apps Script webhook requires authentication (redeploy Web App with Access = "Anyone").'
     );
     err.code = 'WEBHOOK_AUTH_REQUIRED';
     throw err;
@@ -336,8 +337,20 @@ async function sendViaWebhook({ cfg, to, subject, text, html }) {
     parsedJson = null;
   }
 
-  if (!res.ok || parsedJson?.ok === false || parsedJson?.delivered === false || parsedJson?.error) {
-    const reason = parsedJson?.error || parsedJson?.message || rawText.slice(0, 160) || res.statusText;
+  if (
+    !res.ok ||
+    parsedJson?.ok === false ||
+    parsedJson?.delivered === false ||
+    parsedJson?.error ||
+    (!parsedJson && /^\s*(?:<!doctype|<html|<head|<body)/i.test(rawText))
+  ) {
+    const isHtmlPage = !parsedJson && /^\s*(?:<!doctype|<html|<head|<body)/i.test(rawText);
+    const reason =
+      parsedJson?.error ||
+      parsedJson?.message ||
+      (isHtmlPage
+        ? 'Webhook returned an HTML error/login page instead of JSON. Re-authorize & redeploy Google Apps Script with "Execute as: Me" and "Who has access: Anyone".'
+        : rawText.slice(0, 160) || res.statusText);
     const err = new Error(`Email webhook error (${res.status}): ${reason}`);
     err.code = 'WEBHOOK_FAILED';
     throw err;

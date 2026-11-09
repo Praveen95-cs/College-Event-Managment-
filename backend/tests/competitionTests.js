@@ -1900,6 +1900,21 @@ if input_data:
       assert.strictEqual(calledUrl, 'https://script.google.com/macros/s/test-bridge/exec');
       assert.strictEqual(calledHeaders['X-Email-Webhook-Secret'], 'sec_bridge_123');
       assert.strictEqual(calledBody.to, 'student@example.com');
+      assert.strictEqual(calledBody.fromName, 'Avenor Campus Events');
+
+      // 2b. Misconfigured webhook returning an HTML error page (HTTP 200) must fail loudly instead of false-positive
+      global.fetch = async (url) => ({
+        ok: true,
+        status: 200,
+        url,
+        text: async () => '<!DOCTYPE html><html><body>Exception: Authorization required</body></html>'
+      });
+      const badWebhookRes = await emailService.sendEmail({
+        to: 'student@example.com',
+        subject: 'Avenor Test OTP',
+        text: '123456'
+      });
+      assert.strictEqual(badWebhookRes.delivered, false, 'HTML error page from webhook must never report delivered=true');
 
       // 3. Brevo REST API fallback works cleanly on HTTP 201
       global.fetch = async (url, init = {}) => {
