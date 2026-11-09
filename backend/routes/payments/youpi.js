@@ -8,6 +8,7 @@ const {
   getYoupiConfig,
   createYoupiPaymentSession,
   syncAndGetYoupiSession,
+  syncAndGetYoupiSessionByOrderId,
   submitUtrAndProcessSession,
   cancelYoupiSession,
   reconcileSessionByAdmin,
@@ -31,6 +32,7 @@ router.get('/config', (req, res) => {
   res.json({
     gateway: 'YouPI-PG V2',
     gatewayMode: cfg.gatewayMode,
+    externalConfigured: cfg.externalConfigured,
     verificationMode: cfg.verificationMode,
     fulfillOnObserved: cfg.fulfillOnObserved,
     allowDemoUtr: cfg.allowDemoUtr,
@@ -219,6 +221,21 @@ router.post('/sessions', auth, async (req, res) => {
   }
 });
 
+router.get('/orders/:orderId', auth, async (req, res) => {
+  try {
+    const session = await syncAndGetYoupiSessionByOrderId({
+      orderId: req.params.orderId,
+      user: req.user
+    });
+    res.json({ session });
+  } catch (err) {
+    res.status(err.status || 400).json({
+      code: err.code || 'YOUPI_ORDER_STATUS_ERROR',
+      message: err.message || 'Unable to fetch payment status for this order.'
+    });
+  }
+});
+
 router.get('/sessions/:paymentId', auth, async (req, res) => {
   try {
     const session = await syncAndGetYoupiSession({
@@ -267,15 +284,63 @@ router.post('/sessions/:paymentId/cancel', auth, async (req, res) => {
 
 router.get('/admin/sessions', auth, authorize('admin', 'organizer'), async (req, res) => {
   try {
+    const cfg = getYoupiConfig();
     const sessions = await listAdminYoupiSessions({
       user: req.user,
       statusFilter: req.query.status || ''
     });
-    res.json({ sessions });
+    res.json({
+      sessions,
+      gatewayInfo: {
+        gatewayMode: cfg.gatewayMode,
+        externalConfigured: cfg.externalConfigured,
+        apiUrlOrigin: cfg.apiUrlOrigin,
+        merchantIdConfigured: Boolean(cfg.merchantId),
+        merchantKeyConfigured: Boolean(cfg.merchantKey),
+        webhookSecretConfigured: Boolean(cfg.webhookSecret),
+        defaultMethod: cfg.defaultMethod,
+        verificationMode: cfg.verificationMode,
+        webhookCallbackPath: '/api/payments/youpi/webhook'
+      }
+    });
   } catch (err) {
     res.status(err.status || 500).json({
       code: err.code || 'YOUPI_ADMIN_LIST_ERROR',
       message: err.message || 'Failed to load YouPI payment ledger.'
+    });
+  }
+});
+
+router.post('/admin/sessions/:paymentId/sync', auth, authorize('admin', 'organizer'), async (req, res) => {
+  try {
+    if (req.user.role !== 'admin') {
+      const targetSession = await YoupiPaymentSession.findOne({ paymentId: req.params.paymentId }).populate(
+        'event',
+        'organizer'
+      );
+      if (!targetSession) {
+        return res.status(404).json({
+          code: 'SESSION_NOT_FOUND',
+          message: 'YouPI payment session not found.'
+        });
+      }
+      const isEventOwner = targetSession.event?.organizer?.toString() === req.user._id.toString();
+      if (!isEventOwner) {
+        return res.status(403).json({
+          code: 'FORBIDDEN',
+          message: 'Not authorized to sync payment sessions for this event.'
+        });
+      }
+    }
+    const session = await syncAndGetYoupiSession({
+      paymentId: req.params.paymentId,
+      user: req.user
+    });
+    res.json({ session });
+  } catch (err) {
+    res.status(err.status || 400).json({
+      code: err.code || 'YOUPI_ADMIN_SYNC_ERROR',
+      message: err.message || 'Failed to sync YouPI session.'
     });
   }
 });

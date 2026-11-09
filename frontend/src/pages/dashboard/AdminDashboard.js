@@ -13,9 +13,11 @@ const AdminDashboard = () => {
   const [departments, setDepartments] = useState([]);
   const [competitions, setCompetitions] = useState([]);
   const [youpiSessions, setYoupiSessions] = useState([]);
+  const [youpiGatewayInfo, setYoupiGatewayInfo] = useState(null);
   const [systemStatus, setSystemStatus] = useState({ smtpConfigured: false, smtpHost: '', smtpFrom: '' });
   const [loading, setLoading] = useState(true);
   const [reconcilingId, setReconcilingId] = useState('');
+  const [syncingPaymentId, setSyncingPaymentId] = useState('');
   const [deletingUserId, setDeletingUserId] = useState('');
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
@@ -74,6 +76,7 @@ const AdminDashboard = () => {
       setUsers(usersRes.data || []);
       setCompetitions(compsRes.data || []);
       setYoupiSessions(paymentsRes.data?.sessions || []);
+      setYoupiGatewayInfo(paymentsRes.data?.gatewayInfo || null);
       setDepartments(Array.isArray(deptsList) ? deptsList : []);
 
       const activeDeptNames = (deptsList || [])
@@ -349,6 +352,31 @@ const AdminDashboard = () => {
       setError(err.response?.data?.message || 'Failed to reconcile YouPI payment');
     } finally {
       setReconcilingId('');
+    }
+  };
+
+  const handleSyncYoupiSession = async (paymentId) => {
+    try {
+      setError('');
+      setSuccess('');
+      setSyncingPaymentId(paymentId);
+      const token = localStorage.getItem('token');
+      const res = await axios.post(
+        `${backendUrl}/api/payments/youpi/admin/sessions/${paymentId}/sync`,
+        {},
+        { headers: { Authorization: `Bearer ${token}` } }
+      );
+      const updated = res.data?.session;
+      if (updated) {
+        setYoupiSessions((prev) =>
+          prev.map((item) => (item.paymentId === paymentId ? { ...item, ...updated } : item))
+        );
+        setSuccess(`Synced order ${updated.orderId}: status is now ${updated.status}.`);
+      }
+    } catch (err) {
+      setError(err.response?.data?.message || 'Failed to sync session from external YouPI-PG gateway');
+    } finally {
+      setSyncingPaymentId('');
     }
   };
 
@@ -1108,90 +1136,171 @@ const AdminDashboard = () => {
             </div>
           </div>
         ) : (
-          <div className="overflow-x-auto">
-            <table className="min-w-full divide-y divide-[#efe9de]/[0.06]">
-              <thead className="bg-[#12110f]/50">
-                <tr>
-                  <th className="px-5 py-3 text-left text-[12px] font-medium text-[#8a847a]">Order &amp; UTR</th>
-                  <th className="px-5 py-3 text-left text-[12px] font-medium text-[#8a847a]">Event</th>
-                  <th className="px-5 py-3 text-left text-[12px] font-medium text-[#8a847a]">Student</th>
-                  <th className="px-5 py-3 text-left text-[12px] font-medium text-[#8a847a]">Amount</th>
-                  <th className="px-5 py-3 text-left text-[12px] font-medium text-[#8a847a]">Status</th>
-                  <th className="px-5 py-3 text-left text-[12px] font-medium text-[#8a847a]">Actions</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-[#efe9de]/[0.06]">
-                {youpiSessions.length === 0 ? (
-                  <tr>
-                    <td colSpan="6" className="px-5 py-10 text-center text-[14px] text-[#8a847a]">
-                      No YouPI-PG payment sessions recorded yet.
-                    </td>
-                  </tr>
-                ) : (
-                  youpiSessions.map((ps) => {
-                    const canReconcile = ['MANUAL_REVIEW', 'ACTIVE', 'OBSERVED_SUCCESS'].includes(ps.status);
-                    const busy = reconcilingId === ps.paymentId;
-                    return (
-                      <tr key={ps.paymentId} className="hover:bg-[#262421]/40 transition-colors duration-150">
-                        <td className="px-5 py-3.5 whitespace-nowrap text-[12px] font-mono">
-                          <div className="text-[#efe9de]">{ps.orderId}</div>
-                          <div className="text-[#8a847a] mt-0.5">
-                            {ps.utr ? `UTR: ${ps.utr}` : ps.gatewayMode.toUpperCase()}
-                          </div>
-                        </td>
-                        <td className="px-5 py-3.5 whitespace-nowrap text-[13px] text-[#efe9de]">
-                          {ps.eventTitle}
-                        </td>
-                        <td className="px-5 py-3.5 whitespace-nowrap text-[13px] text-[#aaa398]">
-                          <div>{ps.student?.name || ps.customerName || '—'}</div>
-                          <div className="text-[11px] font-mono text-[#8a847a]">
-                            {ps.customerRegNo || ps.student?.email || ''}
-                          </div>
-                        </td>
-                        <td className="px-5 py-3.5 whitespace-nowrap text-[13px] font-mono text-[#ebb05d] tabular-nums">
-                          {ps.currency} {ps.amountDisplay}
-                        </td>
-                        <td className="px-5 py-3.5 whitespace-nowrap">
-                          <span
-                            className={`inline-flex px-2 py-0.5 rounded-[6px] text-[11px] font-mono ${statusBadgeClass(
-                              ps.status
-                            )}`}
-                          >
-                            {ps.status}
-                          </span>
-                        </td>
-                        <td className="px-5 py-3.5 whitespace-nowrap text-[12px]">
-                          {canReconcile ? (
-                            <div className="flex items-center gap-2">
-                              <button
-                                type="button"
-                                disabled={busy}
-                                onClick={() => handleReconcileYoupi(ps.paymentId, 'approve')}
-                                className="h-8 px-2.5 rounded-[6px] font-medium text-[#4cc38a] bg-[#4cc38a]/10 border border-[#4cc38a]/25 hover:bg-[#4cc38a]/20 transition-colors"
-                              >
-                                Approve &amp; Unlock
-                              </button>
-                              <button
-                                type="button"
-                                disabled={busy}
-                                onClick={() => handleReconcileYoupi(ps.paymentId, 'reject')}
-                                className="h-8 px-2.5 rounded-[6px] font-medium text-[#e5484d] bg-[#e5484d]/10 border border-[#e5484d]/25 hover:bg-[#e5484d]/20 transition-colors"
-                              >
-                                Reject
-                              </button>
-                            </div>
-                          ) : (
-                            <span className="text-[11px] font-mono text-[#8a847a]">
-                              {ps.settlementState}
-                            </span>
-                          )}
-                        </td>
-                      </tr>
-                    );
-                  })
+          <div>
+            {youpiGatewayInfo && (
+              <div className="px-5 py-4 border-b border-[#efe9de]/[0.08] bg-[#161513]/70 flex flex-col lg:flex-row lg:items-center justify-between gap-4">
+                <div className="space-y-1.5">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <span className="text-[13px] font-medium text-[#efe9de]">
+                      {youpiGatewayInfo.gatewayMode === 'external'
+                        ? 'Option 2 · Separate External YouPI-PG V2 Gateway'
+                        : 'Option 1 · Embedded YouPI-PG Mode'}
+                    </span>
+                    <span
+                      className={`px-2 py-0.5 rounded-[5px] text-[11px] font-mono border ${
+                        youpiGatewayInfo.gatewayMode === 'external'
+                          ? youpiGatewayInfo.externalConfigured
+                            ? 'bg-[#4cc38a]/10 text-[#4cc38a] border-[#4cc38a]/25'
+                            : 'bg-[#e09132]/12 text-[#ebb05d] border-[#e09132]/30'
+                          : 'bg-[#262421] text-[#aaa398] border-[#efe9de]/[0.08]'
+                      }`}
+                    >
+                      Method: {youpiGatewayInfo.defaultMethod} ({youpiGatewayInfo.verificationMode})
+                    </span>
+                    {youpiGatewayInfo.apiUrlOrigin && (
+                      <span className="px-2 py-0.5 rounded-[5px] text-[11px] font-mono bg-[#12110f] text-[#ebb05d] border border-[#efe9de]/[0.08]">
+                        {youpiGatewayInfo.apiUrlOrigin}
+                      </span>
+                    )}
+                  </div>
+                  <p className="text-[12px] text-[#8a847a]">
+                    Webhook callback:{' '}
+                    <code className="font-mono text-[#aaa398]">
+                      {(backendUrl || window.location.origin).replace(/\/+$/, '')}
+                      {youpiGatewayInfo.webhookCallbackPath || '/api/payments/youpi/webhook'}
+                    </code>
+                    {' · '}Configure a non-Google Pay UPI VPA (PhonePe @ybl, Paytm, BHIM @upi, SBI @sbi) inside your external YouPI-PG Admin with <code className="font-mono text-[#aaa398]">MANUAL_UPI</code>.
+                  </p>
+                </div>
+
+                {youpiGatewayInfo.gatewayMode === 'external' && (
+                  <div className="flex flex-wrap items-center gap-1.5 shrink-0 text-[11px] font-mono">
+                    {[
+                      { label: 'API URL', ok: Boolean(youpiGatewayInfo.apiUrlOrigin) },
+                      { label: 'Merchant ID', ok: Boolean(youpiGatewayInfo.merchantIdConfigured) },
+                      { label: 'Merchant Key', ok: Boolean(youpiGatewayInfo.merchantKeyConfigured) },
+                      { label: 'Webhook Secret', ok: Boolean(youpiGatewayInfo.webhookSecretConfigured) }
+                    ].map((badge) => (
+                      <span
+                        key={badge.label}
+                        className={`px-2 py-0.5 rounded-[5px] border ${
+                          badge.ok
+                            ? 'bg-[#4cc38a]/10 text-[#4cc38a] border-[#4cc38a]/25'
+                            : 'bg-[#e5484d]/10 text-[#e5484d] border-[#e5484d]/25'
+                        }`}
+                      >
+                        {badge.ok ? '✓' : '✕'} {badge.label}
+                      </span>
+                    ))}
+                  </div>
                 )}
-              </tbody>
-            </table>
+              </div>
+            )}
+
+            <div className="overflow-x-auto">
+              <table className="min-w-full divide-y divide-[#efe9de]/[0.06]">
+                <thead className="bg-[#12110f]/50">
+                  <tr>
+                    <th className="px-5 py-3 text-left text-[12px] font-medium text-[#8a847a]">Order &amp; UTR</th>
+                    <th className="px-5 py-3 text-left text-[12px] font-medium text-[#8a847a]">Event</th>
+                    <th className="px-5 py-3 text-left text-[12px] font-medium text-[#8a847a]">Student</th>
+                    <th className="px-5 py-3 text-left text-[12px] font-medium text-[#8a847a]">Amount</th>
+                    <th className="px-5 py-3 text-left text-[12px] font-medium text-[#8a847a]">Status</th>
+                    <th className="px-5 py-3 text-left text-[12px] font-medium text-[#8a847a]">Actions</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-[#efe9de]/[0.06]">
+                  {youpiSessions.length === 0 ? (
+                    <tr>
+                      <td colSpan="6" className="px-5 py-10 text-center text-[14px] text-[#8a847a]">
+                        No YouPI-PG payment sessions recorded yet.
+                      </td>
+                    </tr>
+                  ) : (
+                    youpiSessions.map((ps) => {
+                      const canReconcile = ['MANUAL_REVIEW', 'ACTIVE', 'OBSERVED_SUCCESS'].includes(ps.status);
+                      const canSyncExternal =
+                        ps.gatewayMode === 'external' &&
+                        !['RECONCILED', 'SUCCESS', 'CANCELLED', 'EXPIRED', 'FAILED'].includes(ps.status);
+                      const busy = reconcilingId === ps.paymentId;
+                      const syncing = syncingPaymentId === ps.paymentId;
+                      return (
+                        <tr key={ps.paymentId} className="hover:bg-[#262421]/40 transition-colors duration-150">
+                          <td className="px-5 py-3.5 whitespace-nowrap text-[12px] font-mono">
+                            <div className="text-[#efe9de]">{ps.orderId}</div>
+                            <div className="text-[#8a847a] mt-0.5">
+                              {ps.utr ? `UTR: ${ps.utr}` : `${ps.gatewayMode.toUpperCase()} · ${ps.method || 'UPI'}`}
+                            </div>
+                          </td>
+                          <td className="px-5 py-3.5 whitespace-nowrap text-[13px] text-[#efe9de]">
+                            {ps.eventTitle}
+                          </td>
+                          <td className="px-5 py-3.5 whitespace-nowrap text-[13px] text-[#aaa398]">
+                            <div>{ps.student?.name || ps.customerName || '—'}</div>
+                            <div className="text-[11px] font-mono text-[#8a847a]">
+                              {ps.customerRegNo || ps.student?.email || ''}
+                            </div>
+                          </td>
+                          <td className="px-5 py-3.5 whitespace-nowrap text-[13px] font-mono text-[#ebb05d] tabular-nums">
+                            {ps.currency} {ps.amountDisplay}
+                          </td>
+                          <td className="px-5 py-3.5 whitespace-nowrap">
+                            <span
+                              className={`inline-flex px-2 py-0.5 rounded-[6px] text-[11px] font-mono ${statusBadgeClass(
+                                ps.status
+                              )}`}
+                            >
+                              {ps.status}
+                            </span>
+                          </td>
+                          <td className="px-5 py-3.5 whitespace-nowrap text-[12px]">
+                            <div className="flex flex-wrap items-center gap-2">
+                              {canSyncExternal && (
+                                <button
+                                  type="button"
+                                  disabled={syncing || busy}
+                                  onClick={() => handleSyncYoupiSession(ps.paymentId)}
+                                  className="h-8 px-2.5 rounded-[6px] font-medium text-[#ebb05d] bg-[#e09132]/12 border border-[#e09132]/30 hover:bg-[#e09132]/20 transition-colors"
+                                  title="Poll latest status from external YouPI-PG gateway"
+                                >
+                                  {syncing ? 'Syncing...' : 'Sync'}
+                                </button>
+                              )}
+                              {canReconcile ? (
+                                <>
+                                  <button
+                                    type="button"
+                                    disabled={busy || syncing}
+                                    onClick={() => handleReconcileYoupi(ps.paymentId, 'approve')}
+                                    className="h-8 px-2.5 rounded-[6px] font-medium text-[#4cc38a] bg-[#4cc38a]/10 border border-[#4cc38a]/25 hover:bg-[#4cc38a]/20 transition-colors"
+                                  >
+                                    Approve &amp; Unlock
+                                  </button>
+                                  <button
+                                    type="button"
+                                    disabled={busy || syncing}
+                                    onClick={() => handleReconcileYoupi(ps.paymentId, 'reject')}
+                                    className="h-8 px-2.5 rounded-[6px] font-medium text-[#e5484d] bg-[#e5484d]/10 border border-[#e5484d]/25 hover:bg-[#e5484d]/20 transition-colors"
+                                  >
+                                    Reject
+                                  </button>
+                                </>
+                              ) : (
+                                !canSyncExternal && (
+                                  <span className="text-[11px] font-mono text-[#8a847a]">
+                                    {ps.settlementState}
+                                  </span>
+                                )
+                              )}
+                            </div>
+                          </td>
+                        </tr>
+                      );
+                    })
+                  )}
+                </tbody>
+              </table>
+            </div>
           </div>
         )}
       </div>

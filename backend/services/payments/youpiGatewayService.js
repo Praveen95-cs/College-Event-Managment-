@@ -96,9 +96,19 @@ function buildUpiAppIntents(upiUri) {
   }));
 }
 
+function parseApiOrigin(apiUrl) {
+  if (!apiUrl) return '';
+  try {
+    return new URL(apiUrl).origin;
+  } catch {
+    return '';
+  }
+}
+
 function getYoupiConfig() {
   const isProduction = process.env.NODE_ENV === 'production';
   const apiUrl = (process.env.YOUPI_API_URL || '').trim().replace(/\/+$/, '');
+  const apiUrlOrigin = parseApiOrigin(apiUrl);
   const gatewayMode = apiUrl ? 'external' : 'embedded';
   const merchantId = (process.env.YOUPI_MERCHANT_ID || (isProduction ? '' : 'avenor-events')).trim();
   const merchantKey = (process.env.YOUPI_MERCHANT_KEY || '').trim();
@@ -118,15 +128,19 @@ function getYoupiConfig() {
   const verificationMode = rawMode === 'instant' && !isProduction ? 'instant' : 'manual';
   const fulfillOnObserved = String(process.env.YOUPI_FULFILL_ON_OBSERVED || 'false').trim().toLowerCase() === 'true';
   const allowDemoUtr = !isProduction && String(process.env.YOUPI_ALLOW_DEMO_UTR || 'false').trim().toLowerCase() === 'true';
-  const defaultMethod = String(process.env.YOUPI_DEFAULT_METHOD || 'UPI').trim().toUpperCase() === 'MANUAL_UPI'
-    ? 'MANUAL_UPI'
-    : 'UPI';
+  const rawMethod = String(process.env.YOUPI_DEFAULT_METHOD || '').trim().toUpperCase();
+  const defaultMethod = rawMethod
+    ? (rawMethod === 'MANUAL_UPI' ? 'MANUAL_UPI' : 'UPI')
+    : (gatewayMode === 'external' ? 'MANUAL_UPI' : 'UPI');
   const ttlSecondsRaw = Number(process.env.YOUPI_SESSION_TTL_SECONDS || 300);
   const sessionTtlMs = (Number.isFinite(ttlSecondsRaw) && ttlSecondsRaw >= 30 ? ttlSecondsRaw : 300) * 1000;
+  const externalConfigured = Boolean(apiUrl && merchantId && merchantKey && webhookSecret);
 
   return {
     isProduction,
     apiUrl,
+    apiUrlOrigin,
+    externalConfigured,
     gatewayMode,
     merchantId,
     merchantKey,
@@ -412,6 +426,96 @@ async function finalizePaidRegistrationFromSession(sessionDoc, opts = {}) {
   return { session: sessionDoc, registration: reg };
 }
 
+async function applySessionOutcomeSideEffects(sessionDoc, opts = {}) {
+  const config = opts.config || getYoupiConfig();
+  const utr = opts.utr !== undefined ? opts.utr : sessionDoc.utr;
+
+  if (isSettledStatus(sessionDoc.status, config)) {
+    const fulfilled = await finalizePaidRegistrationFromSession(sessionDoc, { utr });
+    return fulfilled.registration;
+  }
+
+  if (sessionDoc.status === 'MANUAL_REVIEW') {
+    const [eventDoc, existingReg, userDoc] = await Promise.all([
+      Event.findById(sessionDoc.event).select(
+        'title currency whatsappGroupLink date time location registrationFee'
+      ),
+      Registration.findOne({ event: sessionDoc.event, user: sessionDoc.user }),
+      User.findById(sessionDoc.user).select('email role').lean()
+    ]);
+
+    const wasManualReview = existingReg?.youpiStatus === 'MANUAL_REVIEW';
+    const userAccountEmail = sanitizeEmailAddress(userDoc?.email) || '';
+    const attendeeEmail =
+      userDoc?.role === 'student' && userAccountEmail
+        ? userAccountEmail
+        : sanitizeEmailAddress(sessionDoc.customerEmail) ||
+          sanitizeEmailAddress(existingReg?.email) ||
+          userAccountEmail ||
+          '';
+
+    const registration = await Registration.findOneAndUpdate(
+      { event: sessionDoc.event, user: sessionDoc.user },
+      {
+        event: sessionDoc.event,
+        user: sessionDoc.user,
+        name: sessionDoc.customerName || existingReg?.name || 'Student Attendee',
+        regNo:
+          sessionDoc.customerRegNo ||
+          existingReg?.regNo ||
+          sessionDoc.user.toString().slice(-8).toUpperCase(),
+        email: attendeeEmail,
+        needsAccommodation: Boolean(sessionDoc.needsAccommodation),
+        status: existingReg?.paymentStatus === 'paid' ? existingReg.status : 'pending',
+        paymentStatus: existingReg?.paymentStatus === 'paid' ? 'paid' : 'pending',
+        amountPaid: existingReg?.paymentStatus === 'paid' ? existingReg.amountPaid : 0,
+        currency: sessionDoc.currency || eventDoc?.currency || 'INR',
+        paymentMethod: 'youpi',
+        transactionId: utr || sessionDoc.orderId,
+        youpiPaymentId: sessionDoc.paymentId,
+        youpiOrderId: sessionDoc.orderId,
+        youpiStatus: 'MANUAL_REVIEW',
+        settlementState: 'MANUAL_REVIEW'
+      },
+      { upsert: true, new: true, setDefaultsOnInsert: true }
+    );
+    sessionDoc.registration = registration._id;
+    if (attendeeEmail && !sessionDoc.customerEmail) {
+      sessionDoc.customerEmail = attendeeEmail;
+    }
+    await sessionDoc.save();
+
+    if (opts.sendManualEmail && attendeeEmail && !wasManualReview) {
+      await sendPaymentUnderReviewEmail({
+        to: attendeeEmail,
+        attendeeName: sessionDoc.customerName,
+        event: eventDoc,
+        session: sessionDoc
+      }).catch(err => console.warn('Manual review email warning:', err.message));
+    }
+
+    return registration;
+  }
+
+  if (TERMINAL_FAILURE_STATUSES.includes(sessionDoc.status) && sessionDoc.registration) {
+    const existingReg = await Registration.findById(sessionDoc.registration);
+    if (existingReg && existingReg.paymentStatus !== 'paid') {
+      return Registration.findByIdAndUpdate(
+        sessionDoc.registration,
+        {
+          paymentStatus: 'failed',
+          youpiStatus: sessionDoc.status,
+          settlementState: sessionDoc.settlementState
+        },
+        { new: true }
+      );
+    }
+    return existingReg;
+  }
+
+  return null;
+}
+
 /**
  * Processes an incoming or self-dispatched YouPI-PG webhook payload through
  * cryptographic HMAC-SHA256 verification and deliveryId deduplication.
@@ -504,12 +608,13 @@ async function processIncomingWebhook({
     throw createHttpError('Cash-on-delivery SUCCESS event cannot fulfill a UPI event pass.', 400, 'METHOD_MISMATCH');
   }
 
-  const incomingUtr = normalizeUtr(payload.utr || payload.bankRef || payload.reference || session.utr);
+  const incomingUtr = normalizeUtr(payload.utr || payload.customerUtr || payload.bankRef || payload.reference || session.utr);
   if (incomingUtr) {
     session.utr = incomingUtr;
     if (!session.submittedAt) session.submittedAt = new Date();
   }
 
+  const prevStatus = session.status;
   if (nextStatus) {
     session.status = nextStatus;
     session.settlementState = settlementStateFor(nextStatus);
@@ -548,47 +653,11 @@ async function processIncomingWebhook({
     });
   }
 
-  let registration = null;
-  if (isSettledStatus(session.status, config)) {
-    const fulfilled = await finalizePaidRegistrationFromSession(session, { utr: incomingUtr });
-    registration = fulfilled.registration;
-  } else if (session.status === 'MANUAL_REVIEW') {
-    const eventDoc = await Event.findById(session.event).select('title currency');
-    registration = await Registration.findOneAndUpdate(
-      { event: session.event, user: session.user },
-      {
-        event: session.event,
-        user: session.user,
-        name: session.customerName || 'Student Attendee',
-        regNo: session.customerRegNo || session.user.toString().slice(-8).toUpperCase(),
-        email: session.customerEmail || '',
-        needsAccommodation: Boolean(session.needsAccommodation),
-        status: 'pending',
-        paymentStatus: 'pending',
-        amountPaid: 0,
-        currency: session.currency || eventDoc?.currency || 'INR',
-        paymentMethod: 'youpi',
-        transactionId: incomingUtr || session.orderId,
-        youpiPaymentId: session.paymentId,
-        youpiOrderId: session.orderId,
-        youpiStatus: 'MANUAL_REVIEW',
-        settlementState: 'MANUAL_REVIEW'
-      },
-      { upsert: true, new: true, setDefaultsOnInsert: true }
-    );
-    session.registration = registration._id;
-    await session.save();
-  } else if (TERMINAL_FAILURE_STATUSES.includes(session.status) && session.registration) {
-    registration = await Registration.findByIdAndUpdate(
-      session.registration,
-      {
-        paymentStatus: 'failed',
-        youpiStatus: session.status,
-        settlementState: session.settlementState
-      },
-      { new: true }
-    );
-  }
+  const registration = await applySessionOutcomeSideEffects(session, {
+    config,
+    utr: incomingUtr,
+    sendManualEmail: session.gatewayMode === 'external' && prevStatus !== 'MANUAL_REVIEW' && session.status === 'MANUAL_REVIEW'
+  });
 
   return {
     duplicate: false,
@@ -611,6 +680,105 @@ function buildPublicOrigin(req) {
     if (host) return `${proto}://${host}`;
   }
   return frontendUrl || `http://localhost:${process.env.PORT || 5000}`;
+}
+
+function isAllowedReturnOrigin(origin) {
+  try {
+    const u = new URL(origin);
+    if (u.protocol !== 'http:' && u.protocol !== 'https:') return false;
+    const configured = (process.env.FRONTEND_URL || '')
+      .split(',')
+      .map(v => v.trim().replace(/\/+$/, ''))
+      .filter(Boolean);
+    if (configured.includes(u.origin)) return true;
+    if (['localhost', '127.0.0.1'].includes(u.hostname)) return true;
+    if (u.hostname.endsWith('.onrender.com')) return true;
+    return false;
+  } catch {
+    return false;
+  }
+}
+
+function buildReturnBaseOrigin(req) {
+  const reqOrigin = req?.get?.('origin');
+  if (reqOrigin && isAllowedReturnOrigin(reqOrigin)) {
+    return new URL(reqOrigin).origin;
+  }
+  const frontendUrl = (process.env.FRONTEND_URL || '')
+    .split(',')
+    .map(v => v.trim().replace(/\/+$/, ''))
+    .filter(Boolean)[0];
+  if (frontendUrl && isAllowedReturnOrigin(frontendUrl)) {
+    return new URL(frontendUrl).origin;
+  }
+  return buildPublicOrigin(req);
+}
+
+async function syncExternalSessionDoc(session, config = getYoupiConfig()) {
+  if (
+    !session ||
+    session.gatewayMode !== 'external' ||
+    !config.apiUrl ||
+    isSettledStatus(session.status, config) ||
+    TERMINAL_FAILURE_STATUSES.includes(session.status)
+  ) {
+    return session;
+  }
+
+  try {
+    const response = await fetch(
+      `${config.apiUrl}/api/v1/payments/${encodeURIComponent(session.externalPaymentId || session.paymentId)}`,
+      {
+        headers: {
+          'X-Merchant-Id': config.merchantId,
+          'X-Merchant-Key': config.merchantKey
+        },
+        signal: AbortSignal.timeout(8000)
+      }
+    );
+    if (!response.ok) return session;
+
+    const gw = await response.json();
+    const prevStatus = session.status;
+    const gwStatus = String(gw.internalStatus || gw.status || session.status).toUpperCase();
+    const incomingUtr = normalizeUtr(
+      gw.bankRef ||
+        gw.utr ||
+        gw.customerUtr ||
+        gw.metadata?.customerUtr ||
+        gw.reference ||
+        session.utr
+    );
+
+    session.status = gwStatus;
+    session.settlementState = gw.settlementState || settlementStateFor(gwStatus);
+    if (incomingUtr) {
+      session.utr = incomingUtr;
+      if (!session.submittedAt) session.submittedAt = new Date();
+    }
+    if (gw.verificationTag) session.verificationTag = sanitizePlainText(gw.verificationTag, 80);
+    if (gw.verificationLevel !== undefined && Number.isFinite(Number(gw.verificationLevel))) {
+      session.verificationLevel = Number(gw.verificationLevel);
+    }
+    if (gw.expiresAt) session.expiresAt = new Date(gw.expiresAt);
+    if (gw.completedAt) session.completedAt = new Date(gw.completedAt);
+    if (gw.reason || gw.failureReason) {
+      session.failureReason = sanitizePlainText(gw.reason || gw.failureReason, 240);
+    }
+    if (gw.method === 'MANUAL_UPI' || gw.method === 'UPI') {
+      session.method = gw.method;
+    }
+    await session.save();
+
+    await applySessionOutcomeSideEffects(session, {
+      config,
+      utr: incomingUtr,
+      sendManualEmail: prevStatus !== 'MANUAL_REVIEW' && gwStatus === 'MANUAL_REVIEW'
+    });
+  } catch (err) {
+    console.warn('External YouPI poll skipped:', err.message);
+  }
+  return session;
 }
 
 function serializeSessionDto(sessionDoc, eventDoc = null, registrationDoc = null) {
@@ -771,11 +939,28 @@ async function createYoupiPaymentSession({ eventId, user, body = {}, req = null 
     }).sort({ createdAt: -1 });
 
     if (activeExisting) {
+      if (activeExisting.gatewayMode === 'external' && config.gatewayMode === 'external') {
+        await syncExternalSessionDoc(activeExisting, config);
+        if (isSettledStatus(activeExisting.status, config)) {
+          const settledReg =
+            (activeExisting.registration && (await Registration.findById(activeExisting.registration))) ||
+            (await Registration.findOne({ event: eventDoc._id, user: user._id }));
+          return {
+            isPaidEvent: true,
+            reused: true,
+            session: serializeSessionDto(activeExisting, eventDoc, settledReg)
+          };
+        }
+      }
+
       const stillValid =
+        ['ACTIVE', 'INITIATED', 'QUEUED', 'MANUAL_REVIEW'].includes(activeExisting.status) &&
         activeExisting.amountPaise === amountPaise &&
         activeExisting.payeeVpa === payeeVpa &&
         activeExisting.gatewayMode === config.gatewayMode &&
-        (!activeExisting.expiresAt || activeExisting.expiresAt.getTime() > Date.now() || activeExisting.status === 'MANUAL_REVIEW');
+        (!activeExisting.expiresAt ||
+          activeExisting.expiresAt.getTime() > Date.now() ||
+          activeExisting.status === 'MANUAL_REVIEW');
 
       if (stillValid) {
         activeExisting.customerName = customerName;
@@ -786,10 +971,13 @@ async function createYoupiPaymentSession({ eventId, user, body = {}, req = null 
           activeExisting.qrSvg = await generateQrSvg(activeExisting.upiUri, { boxSize: 220 });
         }
         await activeExisting.save();
+        const latestReg =
+          (activeExisting.registration && (await Registration.findById(activeExisting.registration))) ||
+          existingReg;
         return {
           isPaidEvent: true,
           reused: true,
-          session: serializeSessionDto(activeExisting, eventDoc, existingReg)
+          session: serializeSessionDto(activeExisting, eventDoc, latestReg)
         };
       }
 
@@ -812,50 +1000,70 @@ async function createYoupiPaymentSession({ eventId, user, body = {}, req = null 
       ? 'MANUAL_UPI'
       : 'UPI'
     : config.defaultMethod;
-  const baseUrl = buildPublicOrigin(req);
 
   if (config.gatewayMode === 'external') {
-    const returnUrl = `${baseUrl}/events/${eventDoc._id}?youpiOrder=${encodeURIComponent(orderId)}`;
-    const response = await fetch(`${config.apiUrl}/api/v1/payments`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'X-Merchant-Id': config.merchantId,
-        'X-Merchant-Key': config.merchantKey,
-        'Idempotency-Key': orderId
-      },
-      body: JSON.stringify({
-        orderId,
-        amount: toRupeesString(amountPaise),
-        currency,
-        method,
-        returnUrl,
-        customer: {
-          fullName: customerName,
-          name: customerName,
-          email: customerEmail || user.email || ''
+    const returnBaseUrl = buildReturnBaseOrigin(req);
+    const returnUrl = `${returnBaseUrl}/events/${eventDoc._id}?youpiOrder=${encodeURIComponent(orderId)}`;
+    let response;
+    try {
+      response = await fetch(`${config.apiUrl}/api/v1/payments`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-Merchant-Id': config.merchantId,
+          'X-Merchant-Key': config.merchantKey,
+          'Idempotency-Key': orderId
         },
-        metadata: {
-          eventId: eventDoc._id.toString(),
-          eventTitle: eventDoc.title,
-          userId: user._id.toString(),
-          regNo: customerRegNo,
-          needsAccommodation
-        }
-      }),
-      signal: AbortSignal.timeout(12000)
-    });
+        body: JSON.stringify({
+          orderId,
+          amount: toRupeesString(amountPaise),
+          currency,
+          method,
+          returnUrl,
+          customer: {
+            fullName: customerName,
+            name: customerName,
+            email: customerEmail || user.email || ''
+          },
+          metadata: {
+            eventId: eventDoc._id.toString(),
+            eventTitle: eventDoc.title,
+            userId: user._id.toString(),
+            regNo: customerRegNo,
+            needsAccommodation
+          }
+        }),
+        signal: AbortSignal.timeout(12000)
+      });
+    } catch (fetchErr) {
+      throw createHttpError(
+        `Unable to reach external YouPI-PG gateway (${fetchErr.message || 'connection failed'}).`,
+        502,
+        'YOUPI_GATEWAY_UNREACHABLE'
+      );
+    }
 
     if (!response.ok) {
       const errText = await response.text().catch(() => '');
+      let parsedErr = null;
+      try {
+        parsedErr = errText ? JSON.parse(errText) : null;
+      } catch {
+        parsedErr = null;
+      }
+      const errDetail = parsedErr?.message || parsedErr?.error || errText || response.statusText;
       throw createHttpError(
-        `External YouPI-PG gateway error (${response.status}): ${errText || response.statusText}`,
+        `External YouPI-PG gateway error (${response.status}): ${errDetail}`,
         502,
-        'YOUPI_EXTERNAL_ERROR'
+        'YOUPI_EXTERNAL_ERROR',
+        { upstreamCode: parsedErr?.code || '', upstreamStatus: response.status }
       );
     }
 
     const gwData = await response.json();
+    const externalExpiry = gwData.expiresAt
+      ? new Date(gwData.expiresAt)
+      : new Date(Date.now() + Math.max(config.sessionTtlMs, 15 * 60 * 1000));
     const session = await YoupiPaymentSession.create({
       paymentId: gwData.paymentId || paymentId,
       externalPaymentId: gwData.paymentId || '',
@@ -870,7 +1078,7 @@ async function createYoupiPaymentSession({ eventId, user, body = {}, req = null 
       currency,
       method,
       status: String(gwData.status || 'INITIATED').toUpperCase(),
-      settlementState: 'PENDING',
+      settlementState: settlementStateFor(String(gwData.status || 'INITIATED').toUpperCase()),
       queuePosition: Number(gwData.queuePosition || 0),
       payeeVpa,
       payeeName,
@@ -879,7 +1087,7 @@ async function createYoupiPaymentSession({ eventId, user, body = {}, req = null 
       customerRegNo,
       customerEmail: customerEmail || user.email || '',
       needsAccommodation,
-      expiresAt: new Date(Date.now() + config.sessionTtlMs),
+      expiresAt: externalExpiry,
       metadata: {
         eventTitle: eventDoc.title,
         paymentInstructions: eventDoc.paymentInstructions || ''
@@ -894,6 +1102,7 @@ async function createYoupiPaymentSession({ eventId, user, body = {}, req = null 
   }
 
   // Embedded YouPI-PG V2 Engine
+  const baseUrl = buildPublicOrigin(req);
   const activePeers = await YoupiPaymentSession.countDocuments({
     payeeVpa,
     status: { $in: ['ACTIVE', 'PROCESSING'] },
@@ -974,37 +1183,11 @@ async function syncAndGetYoupiSession({ paymentId, user }) {
     session.settlementState = 'EXPIRED';
     session.failureReason = 'Payment session expired before UTR verification.';
     await session.save();
+    await applySessionOutcomeSideEffects(session, { config });
   }
 
-  if (session.gatewayMode === 'external' && config.apiUrl && !isSettledStatus(session.status, config)) {
-    try {
-      const response = await fetch(
-        `${config.apiUrl}/api/v1/payments/${session.externalPaymentId || session.paymentId}`,
-        {
-          headers: {
-            'X-Merchant-Id': config.merchantId,
-            'X-Merchant-Key': config.merchantKey
-          },
-          signal: AbortSignal.timeout(8000)
-        }
-      );
-      if (response.ok) {
-        const gw = await response.json();
-        const gwStatus = String(gw.status || session.status).toUpperCase();
-        session.status = gwStatus;
-        session.settlementState = gw.settlementState || settlementStateFor(gwStatus);
-        if (gw.verificationTag) session.verificationTag = gw.verificationTag;
-        if (gw.verificationLevel !== undefined) session.verificationLevel = Number(gw.verificationLevel);
-        if (gw.completedAt) session.completedAt = new Date(gw.completedAt);
-        await session.save();
-
-        if (isSettledStatus(session.status, config)) {
-          await finalizePaidRegistrationFromSession(session, { utr: gw.bankRef || gw.utr || session.utr });
-        }
-      }
-    } catch (err) {
-      console.warn('External YouPI poll skipped:', err.message);
-    }
+  if (session.gatewayMode === 'external' && config.apiUrl) {
+    await syncExternalSessionDoc(session, config);
   }
 
   const [eventDoc, regDoc] = await Promise.all([
@@ -1015,6 +1198,21 @@ async function syncAndGetYoupiSession({ paymentId, user }) {
   ]);
 
   return serializeSessionDto(session, eventDoc, regDoc);
+}
+
+/**
+ * Resolves and synchronizes a payment session by merchant orderId (for external returnUrl callbacks).
+ */
+async function syncAndGetYoupiSessionByOrderId({ orderId, user }) {
+  const cleanOrderId = sanitizePlainText(orderId, 120);
+  if (!cleanOrderId) {
+    throw createHttpError('Valid orderId is required.', 400, 'INVALID_ORDER_ID');
+  }
+  const session = await YoupiPaymentSession.findOne({ orderId: cleanOrderId });
+  if (!session) {
+    throw createHttpError(`No YouPI payment session found for order ${cleanOrderId}.`, 404, 'SESSION_NOT_FOUND');
+  }
+  return syncAndGetYoupiSession({ paymentId: session.paymentId, user });
 }
 
 /**
@@ -1029,6 +1227,14 @@ async function submitUtrAndProcessSession({ paymentId, user, body = {} }) {
 
   if (session.user.toString() !== user._id.toString() && !['admin', 'organizer'].includes(user.role)) {
     throw createHttpError('Not authorized to verify this payment session.', 403, 'FORBIDDEN');
+  }
+
+  if (session.gatewayMode === 'external') {
+    throw createHttpError(
+      'Complete payment and submit your UTR inside the hosted external YouPI-PG checkout portal.',
+      400,
+      'EXTERNAL_CHECKOUT_REQUIRED'
+    );
   }
 
   const config = getYoupiConfig();
@@ -1177,16 +1383,35 @@ async function cancelYoupiSession({ paymentId, user }) {
   if (session.user.toString() !== user._id.toString() && !['admin', 'organizer'].includes(user.role)) {
     throw createHttpError('Not authorized to cancel this session.', 403, 'FORBIDDEN');
   }
-  if (isSettledStatus(session.status)) {
+  const config = getYoupiConfig();
+  if (isSettledStatus(session.status, config)) {
     throw createHttpError('Cannot cancel a settled payment session.', 400, 'ALREADY_SETTLED');
+  }
+
+  if (session.gatewayMode === 'external' && config.apiUrl) {
+    try {
+      const targetExternalId = encodeURIComponent(session.externalPaymentId || session.paymentId);
+      await fetch(`${config.apiUrl}/api/v1/checkout/${targetExternalId}/cancel`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-Merchant-Id': config.merchantId,
+          'X-Merchant-Key': config.merchantKey
+        },
+        signal: AbortSignal.timeout(5000)
+      }).catch(() => {});
+    } catch {
+      // Best-effort cancel sync with external YouPI-PG
+    }
   }
 
   session.status = 'CANCELLED';
   session.settlementState = 'CANCELLED';
   session.failureReason = 'Cancelled by student before completion.';
   await session.save();
+  await applySessionOutcomeSideEffects(session, { config });
 
-  const eventDoc = await Event.findById(session.event).select('title paymentInstructions');
+  const eventDoc = await Event.findById(session.event).select('title paymentInstructions whatsappGroupLink');
   return serializeSessionDto(session, eventDoc, null);
 }
 
@@ -1311,6 +1536,7 @@ module.exports = {
   finalizePaidRegistrationFromSession,
   createYoupiPaymentSession,
   syncAndGetYoupiSession,
+  syncAndGetYoupiSessionByOrderId,
   submitUtrAndProcessSession,
   cancelYoupiSession,
   reconcileSessionByAdmin,

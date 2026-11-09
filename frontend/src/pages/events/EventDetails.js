@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { useParams, useNavigate, Link } from 'react-router-dom';
+import { useParams, useNavigate, useSearchParams, Link } from 'react-router-dom';
 import { useAuth } from '../../contexts/AuthContext';
 import axios from 'axios';
 import { format } from 'date-fns';
@@ -36,6 +36,7 @@ import { getEventLifecycle, formatCount, resolveMediaUrl } from '../../utils/eve
 const EventDetails = () => {
   const { id } = useParams();
   const navigate = useNavigate();
+  const [searchParams, setSearchParams] = useSearchParams();
   const { user, isAuthenticated } = useAuth();
   const [event, setEvent] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -46,6 +47,7 @@ const EventDetails = () => {
   const [copiedShare, setCopiedShare] = useState(false);
   const [bookingBusy, setBookingBusy] = useState(false);
   const [showRegisterModal, setShowRegisterModal] = useState(false);
+  const [resumedSession, setResumedSession] = useState(null);
   const [roster, setRoster] = useState([]);
   const [attendanceSummary, setAttendanceSummary] = useState({
     total: 0,
@@ -129,6 +131,51 @@ const EventDetails = () => {
     fetchEventCompetitions();
     fetchFeedMeta();
   }, [fetchEventDetails, fetchEventCompetitions, fetchFeedMeta]);
+
+  const returnedYoupiOrder = searchParams.get('youpiOrder') || '';
+
+  useEffect(() => {
+    if (!returnedYoupiOrder || !isAuthenticated) return undefined;
+    const token = localStorage.getItem('token');
+    if (!token) return undefined;
+
+    let active = true;
+    axios
+      .get(`${backendUrl}/api/payments/youpi/orders/${encodeURIComponent(returnedYoupiOrder)}`, {
+        headers: { Authorization: `Bearer ${token}` }
+      })
+      .then((res) => {
+        if (!active || !res.data?.session) return;
+        setResumedSession(res.data.session);
+        setShowRegisterModal(true);
+        Promise.all([fetchEventDetails(true), fetchEventCompetitions(), fetchFeedMeta()]);
+      })
+      .catch((err) => {
+        if (!active) return;
+        setActionError(
+          err.response?.data?.message || 'Unable to sync returned YouPI payment order.'
+        );
+      })
+      .finally(() => {
+        if (!active) return;
+        const nextParams = new URLSearchParams(searchParams);
+        nextParams.delete('youpiOrder');
+        setSearchParams(nextParams, { replace: true });
+      });
+
+    return () => {
+      active = false;
+    };
+  }, [
+    backendUrl,
+    fetchEventCompetitions,
+    fetchEventDetails,
+    fetchFeedMeta,
+    isAuthenticated,
+    returnedYoupiOrder,
+    searchParams,
+    setSearchParams
+  ]);
 
   const canManageEvent = Boolean(
     event &&
@@ -1173,7 +1220,11 @@ const EventDetails = () => {
       {showRegisterModal && (
         <EventRegistration
           event={event}
-          onClose={() => setShowRegisterModal(false)}
+          initialSession={resumedSession}
+          onClose={() => {
+            setShowRegisterModal(false);
+            setResumedSession(null);
+          }}
           onRegistered={() => {
             Promise.all([
               fetchEventDetails(true),

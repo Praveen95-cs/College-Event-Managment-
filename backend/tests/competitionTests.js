@@ -25,6 +25,7 @@ const {
 } = require('../utils/sanitize');
 const { generateQrSvg } = require('../utils/qrGenerator');
 const crypto = require('crypto');
+const http = require('http');
 const Notification = require('../models/community/Notification');
 const EmailOtp = require('../models/auth/EmailOtp');
 const SystemSetting = require('../models/system/SystemSetting');
@@ -48,7 +49,10 @@ const {
   signWebhookPayload,
   verifyYoupiWebhook,
   createYoupiPaymentSession,
+  syncAndGetYoupiSession,
+  syncAndGetYoupiSessionByOrderId,
   submitUtrAndProcessSession,
+  cancelYoupiSession,
   reconcileSessionByAdmin,
   processIncomingWebhook
 } = require('../services/payments/youpiGatewayService');
@@ -740,6 +744,8 @@ if input_data:
 
   // TEST 20: Strict Production YouPI-PG Checkout -> Missing VPA Guard -> MANUAL_REVIEW -> Admin Reconcile -> Unlock & Amount Guard
   await test('YouPI-PG E2E Service - Strict VPA check, manual reconciliation, amount guard & competition unlock', async () => {
+    const prevExternalUrl20 = process.env.YOUPI_API_URL;
+    process.env.YOUPI_API_URL = '';
     const orgId = new mongoose.Types.ObjectId();
     const adminActor = { _id: orgId, role: 'admin', email: 'admin@collegeevents.com' };
     const cfg = getYoupiConfig();
@@ -950,6 +956,8 @@ if input_data:
       await Competition.deleteOne({ _id: comp._id });
       await Event.deleteMany({ _id: { $in: [paidEvent._id, missingVpaEvent._id] } });
       await User.deleteMany({ _id: { $in: [studentA._id, studentB._id] } });
+      if (prevExternalUrl20 !== undefined) process.env.YOUPI_API_URL = prevExternalUrl20;
+      else delete process.env.YOUPI_API_URL;
     }
   });
 
@@ -967,6 +975,8 @@ if input_data:
 
   // TEST 22: Paid Event WhatsApp Link Gating, Email Tracking & Cloud Auto-Cleanup Cascade
   await test('Features - Conditional WhatsApp link reveal, email tracking, and cloud cascade cleanup', async () => {
+    const prevExternalUrl22 = process.env.YOUPI_API_URL;
+    process.env.YOUPI_API_URL = '';
     const uniqueSuffix = Date.now();
     const adminActor = (await User.findOne({ role: 'admin' })) || (await User.findOne({}));
     const student = await User.create({
@@ -994,7 +1004,7 @@ if input_data:
       isPaid: true,
       registrationFee: 199,
       currency: 'INR',
-      paymentUpiId: 'praveensumathi12-1@okaxis',
+      paymentUpiId: 'avenorcampus@ybl',
       whatsappGroupLink: 'https://chat.whatsapp.com/AvenorTestGroupLink99',
       autoDeleteWhenExpired: 'always'
     });
@@ -1119,6 +1129,8 @@ if input_data:
       await Notification.deleteMany({ relatedEvent: expiredPaidEvent._id });
       await Event.deleteMany({ _id: expiredPaidEvent._id });
       await User.deleteMany({ _id: student._id });
+      if (prevExternalUrl22 !== undefined) process.env.YOUPI_API_URL = prevExternalUrl22;
+      else delete process.env.YOUPI_API_URL;
     }
   });
 
@@ -1412,6 +1424,277 @@ if input_data:
       if (prevSecret !== undefined) process.env.JWT_SECRET = prevSecret;
       else delete process.env.JWT_SECRET;
       await EmailOtp.deleteMany({ email: dottedEmail });
+    }
+  });
+
+  // TEST 27: Option 2 External Dedicated YouPI-PG Gateway E2E (MANUAL_UPI, Return URL, Order Sync, Webhook Unlock & Cancel)
+  await test('27. Option 2 External YouPI-PG Gateway - MANUAL_UPI creation, order sync, webhook unlock & cancel', async () => {
+    const prevEnv = {
+      YOUPI_API_URL: process.env.YOUPI_API_URL,
+      YOUPI_MERCHANT_ID: process.env.YOUPI_MERCHANT_ID,
+      YOUPI_MERCHANT_KEY: process.env.YOUPI_MERCHANT_KEY,
+      YOUPI_WEBHOOK_SECRET: process.env.YOUPI_WEBHOOK_SECRET,
+      YOUPI_DEFAULT_METHOD: process.env.YOUPI_DEFAULT_METHOD,
+      FRONTEND_URL: process.env.FRONTEND_URL
+    };
+
+    const gatewaySessions = new Map();
+    const receivedCreates = [];
+    const receivedCancels = [];
+
+    const mockGateway = http.createServer((req, res) => {
+      let bodyChunks = '';
+      req.on('data', chunk => {
+        bodyChunks += chunk;
+      });
+      req.on('end', () => {
+        const hdrMerchant = req.headers['x-merchant-id'];
+        const hdrKey = req.headers['x-merchant-key'];
+        if (hdrMerchant !== 'ext-merch-27' || hdrKey !== 'ext-key-27') {
+          res.writeHead(401, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ error: 'Unauthorized merchant credentials' }));
+          return;
+        }
+
+        if (req.method === 'POST' && req.url === '/api/v1/payments') {
+          const parsed = JSON.parse(bodyChunks || '{}');
+          receivedCreates.push(parsed);
+          const extId = `ext-pay-${receivedCreates.length}`;
+          const rec = {
+            paymentId: extId,
+            orderId: parsed.orderId,
+            amount: parsed.amount,
+            amountPaise: '19900',
+            currency: parsed.currency || 'INR',
+            method: parsed.method,
+            status: 'INITIATED',
+            internalStatus: 'INITIATED',
+            settlementState: 'PENDING',
+            utr: ''
+          };
+          gatewaySessions.set(extId, rec);
+          res.writeHead(201, { 'Content-Type': 'application/json' });
+          res.end(
+            JSON.stringify({
+              ...rec,
+              checkoutUrl: `${process.env.YOUPI_API_URL}/checkout/${extId}`
+            })
+          );
+          return;
+        }
+
+        const getMatch = req.url.match(/^\/api\/v1\/payments\/([^/?]+)$/);
+        if (req.method === 'GET' && getMatch) {
+          const extId = decodeURIComponent(getMatch[1]);
+          const rec = gatewaySessions.get(extId);
+          if (!rec) {
+            res.writeHead(404, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({ error: 'Not found' }));
+            return;
+          }
+          res.writeHead(200, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify(rec));
+          return;
+        }
+
+        const cancelMatch = req.url.match(/^\/api\/v1\/checkout\/([^/?]+)\/cancel$/);
+        if (req.method === 'POST' && cancelMatch) {
+          const extId = decodeURIComponent(cancelMatch[1]);
+          receivedCancels.push(extId);
+          const rec = gatewaySessions.get(extId);
+          if (rec) {
+            rec.status = 'CANCELLED';
+            rec.internalStatus = 'CANCELLED';
+            rec.settlementState = 'NOT_APPLICABLE';
+          }
+          res.writeHead(200, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ paymentId: extId, status: 'CANCELLED' }));
+          return;
+        }
+
+        res.writeHead(404, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: 'Route not found' }));
+      });
+    });
+
+    await new Promise(resolve => mockGateway.listen(0, '127.0.0.1', resolve));
+    const { port } = mockGateway.address();
+    const mockBaseUrl = `http://127.0.0.1:${port}`;
+
+    process.env.YOUPI_API_URL = mockBaseUrl;
+    process.env.YOUPI_MERCHANT_ID = 'ext-merch-27';
+    process.env.YOUPI_MERCHANT_KEY = 'ext-key-27';
+    process.env.YOUPI_WEBHOOK_SECRET = 'ext-webhook-secret-27';
+    delete process.env.YOUPI_DEFAULT_METHOD;
+    process.env.FRONTEND_URL = 'https://avenor-portal.onrender.com';
+
+    const suffix = Date.now();
+    const orgId = new mongoose.Types.ObjectId();
+    const student = await User.create({
+      name: `External GW Student ${suffix}`,
+      email: `ext_student_${suffix}@example.com`,
+      password: 'Password123!',
+      role: 'student',
+      department: 'Computer Science',
+      emailVerified: true
+    });
+    const studentCancel = await User.create({
+      name: `External Cancel Student ${suffix}`,
+      email: `ext_cancel_${suffix}@example.com`,
+      password: 'Password123!',
+      role: 'student',
+      department: 'Computer Science',
+      emailVerified: true
+    });
+    const paidEvent = await Event.create({
+      title: `Option 2 External GW Event ${suffix}`,
+      description: 'Testing external dedicated YouPI-PG V2 gateway',
+      date: new Date(Date.now() + 2 * 86400000),
+      time: '02:00 PM',
+      location: 'Main Auditorium',
+      department: 'Computer Science',
+      type: 'tech',
+      status: 'approved',
+      capacity: 50,
+      isPaid: true,
+      registrationFee: 199,
+      currency: 'INR',
+      paymentUpiId: '',
+      whatsappGroupLink: 'https://chat.whatsapp.com/ExtOption2TestGroup',
+      organizer: orgId
+    });
+    const gatedComp = await Competition.create({
+      title: `Option 2 Gated Comp ${suffix}`,
+      description: 'Competition unlocked by external YouPI-PG webhook',
+      event: paidEvent._id,
+      requireEventRegistration: true,
+      organizer: orgId,
+      status: 'published',
+      startTime: new Date(Date.now() - 60000),
+      endTime: new Date(Date.now() + 3600000)
+    });
+
+    let createdOrderId = '';
+    try {
+      const cfg = getYoupiConfig();
+      assert.strictEqual(cfg.gatewayMode, 'external');
+      assert.strictEqual(cfg.externalConfigured, true);
+      assert.strictEqual(cfg.defaultMethod, 'MANUAL_UPI', 'External gateway must default to MANUAL_UPI');
+
+      const fakeReq = {
+        get: name => (String(name).toLowerCase() === 'host' ? 'api-internal.local:5000' : ''),
+        protocol: 'http'
+      };
+      const created = await createYoupiPaymentSession({
+        eventId: paidEvent._id.toString(),
+        user: student,
+        body: { name: student.name, regNo: '27EXT01' },
+        req: fakeReq
+      });
+      createdOrderId = created.session.orderId;
+      assert.strictEqual(created.session.gatewayMode, 'external');
+      assert.strictEqual(created.session.method, 'MANUAL_UPI');
+      assert.strictEqual(created.session.externalPaymentId, 'ext-pay-1');
+      assert.strictEqual(created.session.checkoutUrl, `${mockBaseUrl}/checkout/ext-pay-1`);
+      assert.strictEqual(receivedCreates.length, 1);
+      assert.strictEqual(receivedCreates[0].method, 'MANUAL_UPI');
+      assert(
+        receivedCreates[0].returnUrl.startsWith(
+          `https://avenor-portal.onrender.com/events/${paidEvent._id}?youpiOrder=`
+        ),
+        'returnUrl must use FRONTEND_URL origin rather than backend host'
+      );
+
+      // Local submit-utr must be rejected in external mode
+      let externalRejected = false;
+      try {
+        await submitUtrAndProcessSession({
+          paymentId: created.session.paymentId,
+          user: student,
+          body: { utr: '998877665544' }
+        });
+      } catch (err) {
+        externalRejected = err.status === 400 && err.code === 'EXTERNAL_CHECKOUT_REQUIRED';
+      }
+      assert.strictEqual(externalRejected, true, 'External mode must require hosted checkout UTR submission');
+
+      // External gateway transitions to MANUAL_REVIEW with customerUtr
+      const extRec = gatewaySessions.get('ext-pay-1');
+      extRec.status = 'MANUAL_REVIEW';
+      extRec.internalStatus = 'MANUAL_REVIEW';
+      extRec.settlementState = 'MANUAL_REVIEW';
+      extRec.customerUtr = '998877665544';
+
+      const syncedManual = await syncAndGetYoupiSessionByOrderId({
+        orderId: createdOrderId,
+        user: student
+      });
+      assert.strictEqual(syncedManual.status, 'MANUAL_REVIEW');
+      assert.strictEqual(syncedManual.utr, '998877665544');
+      assert.strictEqual(syncedManual.settled, false);
+      assert.strictEqual(syncedManual.whatsappGroupLink, '', 'WhatsApp link must remain hidden until settled');
+      assert(syncedManual.registration && syncedManual.registration.paymentStatus === 'pending');
+
+      const stillLocked = await competitionsRouter.evaluateCompetitionAccess(gatedComp, student);
+      assert.strictEqual(stillLocked.allowed, false);
+
+      // External YouPI-PG sends signed webhook PAYMENT.RECONCILED
+      extRec.status = 'RECONCILED';
+      extRec.internalStatus = 'RECONCILED';
+      extRec.settlementState = 'RECONCILED';
+      const signedReconcile = signWebhookPayload(
+        {
+          event: 'PAYMENT.RECONCILED',
+          status: 'RECONCILED',
+          paymentId: 'ext-pay-1',
+          orderId: createdOrderId,
+          amountPaise: '19900',
+          method: 'MANUAL_UPI',
+          customerUtr: '998877665544',
+          verificationTag: 'ADMIN_RECONCILED'
+        },
+        'ext-webhook-secret-27'
+      );
+      const webhookRes = await processIncomingWebhook({
+        rawBody: signedReconcile.rawBody,
+        signatureHeader: signedReconcile.signatureHeader,
+        timestampHeader: signedReconcile.timestamp,
+        deliveryIdHeader: signedReconcile.deliveryId
+      });
+      assert.strictEqual(webhookRes.session.status, 'RECONCILED');
+      assert.strictEqual(webhookRes.registration.paymentStatus, 'paid');
+      assert.strictEqual(webhookRes.registration.transactionId, '998877665544');
+
+      const unlocked = await competitionsRouter.evaluateCompetitionAccess(gatedComp, student);
+      assert.strictEqual(unlocked.allowed, true, 'External PAYMENT.RECONCILED webhook must unlock competition');
+
+      // Test external cancel forwarding
+      const cancelSession = await createYoupiPaymentSession({
+        eventId: paidEvent._id.toString(),
+        user: studentCancel,
+        body: { name: studentCancel.name, regNo: '27EXT02' },
+        req: fakeReq
+      });
+      const cancelled = await cancelYoupiSession({
+        paymentId: cancelSession.session.paymentId,
+        user: studentCancel
+      });
+      assert.strictEqual(cancelled.status, 'CANCELLED');
+      assert(receivedCancels.includes('ext-pay-2'), 'Cancel must be forwarded to external YouPI-PG checkout');
+    } finally {
+      await new Promise(resolve => mockGateway.close(resolve));
+      for (const [k, v] of Object.entries(prevEnv)) {
+        if (v !== undefined) process.env[k] = v;
+        else delete process.env[k];
+      }
+      if (createdOrderId) {
+        await YoupiWebhookReceipt.deleteMany({ orderId: createdOrderId });
+      }
+      await YoupiPaymentSession.deleteMany({ event: paidEvent._id });
+      await Registration.deleteMany({ event: paidEvent._id });
+      await Competition.deleteOne({ _id: gatedComp._id });
+      await Event.deleteMany({ _id: paidEvent._id });
+      await User.deleteMany({ _id: { $in: [student._id, studentCancel._id] } });
     }
   });
 

@@ -118,7 +118,7 @@ function parsePaymentInputs(body, existing = null) {
       : existing?.paymentUpiId || '';
 
   if (cleanVpa && !isValidVpa(cleanVpa)) {
-    const err = new Error('Please enter a valid UPI VPA (for example, clubtreasury@okicici).');
+    const err = new Error('Please enter a valid UPI VPA (for example, clubtreasury@ybl).');
     err.status = 400;
     throw err;
   }

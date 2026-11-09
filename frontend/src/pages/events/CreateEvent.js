@@ -78,8 +78,10 @@ const CreateEvent = () => {
   const [loading, setLoading] = useState(false);
   const [youpiConfig, setYoupiConfig] = useState({
     gatewayMode: 'embedded',
+    externalConfigured: false,
     vpaConfigured: false,
     defaultPayeeVpa: '',
+    defaultMethod: 'UPI',
     verificationMode: 'manual'
   });
 
@@ -665,7 +667,7 @@ const CreateEvent = () => {
                       ? '*'
                       : youpiConfig.defaultPayeeVpa
                         ? `(optional — defaults to ${youpiConfig.defaultPayeeVpa})`
-                        : '(managed by external YouPI-PG merchant account)'}
+                        : '(optional — managed in external YouPI-PG Admin)'}
                   </label>
                   <input
                     type="text"
@@ -674,9 +676,14 @@ const CreateEvent = () => {
                     required={formData.isPaid && youpiConfig.gatewayMode === 'embedded' && !youpiConfig.vpaConfigured}
                     value={formData.paymentUpiId}
                     onChange={handleChange}
-                    placeholder="your-club-or-college@bank"
+                    placeholder="clubtreasury@ybl"
                     className="input-field font-mono"
                   />
+                  {youpiConfig.gatewayMode === 'external' && (
+                    <p className="text-[11px] text-[#8a847a] mt-1">
+                      Option 2 external gateway active: receiving UPI ID (use a non-Google Pay PSP such as PhonePe @ybl, Paytm, or BHIM @upi) is controlled in YouPI-PG Merchant Admin.
+                    </p>
+                  )}
                 </div>
                 <div className="md:col-span-2">
                   <label htmlFor="paymentInstructions" className="block text-[12px] font-medium text-[#aaa398] mb-1">

@@ -38,9 +38,9 @@ services:
       - key: JUDGE0_API_KEY
         sync: false
       - key: YOUPI_PAYEE_VPA
-        value: praveensumathi12-1@okaxis
+        value: ""
       - key: YOUPI_PAYEE_NAME
-        value: Praveen S
+        value: Avenor Campus Events
       - key: YOUPI_VERIFICATION_MODE
         value: manual
       - key: YOUPI_FULFILL_ON_OBSERVED
@@ -48,13 +48,13 @@ services:
       - key: YOUPI_ALLOW_DEMO_UTR
         value: "false"
       - key: YOUPI_DEFAULT_METHOD
-        value: UPI
+        value: MANUAL_UPI
       - key: YOUPI_SESSION_TTL_SECONDS
         value: "300"
       - key: YOUPI_MERCHANT_ID
-        value: avenor-campus
+        sync: false
       - key: YOUPI_WEBHOOK_SECRET
-        generateValue: true
+        sync: false
       - key: YOUPI_API_URL
         sync: false
       - key: YOUPI_MERCHANT_KEY
