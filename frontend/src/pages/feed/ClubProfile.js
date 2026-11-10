@@ -5,6 +5,8 @@ import { useAuth } from '../../contexts/AuthContext';
 import {
   ArrowLeftIcon,
   CheckBadgeIcon,
+  CheckIcon,
+  PlusIcon,
   MegaphoneIcon,
   CalendarIcon,
   ClockIcon,
@@ -16,6 +18,7 @@ import AnnouncementModal from '../../components/feed/AnnouncementModal';
 import CreateClubModal from '../../components/feed/CreateClubModal';
 import ClubLogo from '../../components/feed/ClubLogo';
 import EventRegistration from '../../components/events/EventRegistration';
+import AvenorLoader from '../../components/common/AvenorLoader';
 import { formatCount } from '../../utils/eventLifecycle';
 
 const ClubProfile = () => {
@@ -166,7 +169,7 @@ const ClubProfile = () => {
   if (loading) {
     return (
       <div className="flex justify-center items-center py-24">
-        <div className="w-7 h-7 border-2 border-[#e09132] border-t-transparent rounded-full animate-spin" />
+        <AvenorLoader variant="section" label="Loading club profile..." />
       </div>
     );
   }
@@ -202,7 +205,7 @@ const ClubProfile = () => {
       </button>
 
       {/* Club Header Card */}
-      <div className="rounded-[16px] bg-[#1c1a18] border border-[#efe9de]/[0.08] p-6 sm:p-8 space-y-5">
+      <div className="rounded-[14px] bg-[#1c1a18] border border-[#efe9de]/[0.08] p-6 sm:p-8 space-y-5">
         <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-5">
           <div className="flex items-start gap-4">
             <ClubLogo club={club} size="lg" />
@@ -212,7 +215,7 @@ const ClubProfile = () => {
                   {club.name}
                 </h1>
                 {club.verified && (
-                  <CheckBadgeIcon className="h-5 w-5 text-[#ebb05d]" strokeWidth={1.75} title="Verified club" />
+                  <CheckBadgeIcon className="h-5 w-5 text-[#ebb05d]" strokeWidth={1.5} title="Verified club" />
                 )}
               </div>
               <div className="mt-1.5 flex flex-wrap items-center gap-2.5 text-[13px] text-[#aaa398]">
@@ -234,11 +237,21 @@ const ClubProfile = () => {
               onClick={handleToggleFollow}
               className={
                 club.isFollowing
-                  ? 'h-9 px-4 rounded-[8px] text-[13px] font-medium bg-[#4cc38a]/12 text-[#4cc38a] border border-[#4cc38a]/30 hover:bg-[#4cc38a]/20 transition-colors'
+                  ? 'inline-flex items-center gap-1.5 h-9 px-4 rounded-[8px] text-[13px] font-medium bg-[#4cc38a]/12 text-[#4cc38a] border border-[#4cc38a]/30 hover:bg-[#4cc38a]/20 transition-colors'
                   : 'btn-primary h-9 px-4 text-[13px]'
               }
             >
-              {club.isFollowing ? 'Following ✓' : '+ Follow'}
+              {club.isFollowing ? (
+                <>
+                  <CheckIcon className="h-4 w-4" strokeWidth={1.5} />
+                  <span>Following</span>
+                </>
+              ) : (
+                <>
+                  <PlusIcon className="h-4 w-4" strokeWidth={1.5} />
+                  <span>Follow</span>
+                </>
+              )}
             </button>
 
             {club.canManage && (

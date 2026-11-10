@@ -3,6 +3,7 @@ import { Link } from 'react-router-dom';
 import axios from 'axios';
 import { useAuth } from '../../contexts/AuthContext';
 import { ChatBubbleLeftRightIcon, TrashIcon } from '@heroicons/react/24/outline';
+import AvenorLoader from '../common/AvenorLoader';
 
 const CommunityMessage = () => {
   const [messages, setMessages] = useState([]);
@@ -64,7 +65,7 @@ const CommunityMessage = () => {
   if (!user) {
     return (
       <div className="max-w-2xl mx-auto py-8">
-        <div className="rounded-[16px] bg-[#1c1a18] border border-[#efe9de]/[0.08] p-8 text-center space-y-4">
+        <div className="rounded-[14px] bg-[#1c1a18] border border-[#efe9de]/[0.08] p-8 text-center space-y-4">
           <ChatBubbleLeftRightIcon className="h-8 w-8 text-[#8a847a] mx-auto" strokeWidth={1.5} />
           <div>
             <h1 className="text-[20px] font-medium text-[#efe9de]">Campus board</h1>
@@ -99,9 +100,11 @@ const CommunityMessage = () => {
         </div>
       )}
 
-      <div className="rounded-[16px] bg-[#1c1a18] border border-[#efe9de]/[0.08] p-6 space-y-6">
+      <div className="rounded-[14px] bg-[#1c1a18] border border-[#efe9de]/[0.08] p-6 space-y-6">
         {loading ? (
-          <div className="py-10 text-center text-[14px] text-[#8a847a]">Loading messages...</div>
+          <div className="py-10 flex justify-center">
+            <AvenorLoader variant="section" label="Loading messages..." />
+          </div>
         ) : messages.length === 0 ? (
           <div className="py-10 text-center">
             <ChatBubbleLeftRightIcon className="h-7 w-7 text-[#8a847a] mx-auto mb-2.5" strokeWidth={1.5} />

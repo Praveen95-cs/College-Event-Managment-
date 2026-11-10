@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
 import { useAuth } from '../../contexts/AuthContext';
 import { AvenorMark } from '../../components/layout/AvenorLogo';
+import AvenorLoader from '../../components/common/AvenorLoader';
 import {
   CheckBadgeIcon,
   EnvelopeIcon,
@@ -146,7 +147,7 @@ const ForgotPassword = () => {
 
   return (
     <div className="flex items-center justify-center py-8 sm:py-12">
-      <div className="w-full max-w-[440px] rounded-[16px] bg-[#1c1a18] border border-[#efe9de]/[0.08] p-8 space-y-6">
+      <div className="w-full max-w-[440px] rounded-[14px] bg-[#1c1a18] border border-[#efe9de]/[0.08] p-6 sm:p-8 space-y-6">
         <div className="space-y-4">
           <AvenorMark size="md" />
           <div>
@@ -154,7 +155,7 @@ const ForgotPassword = () => {
               to="/login"
               className="inline-flex items-center gap-1.5 text-[12px] font-medium text-[#aaa398] hover:text-[#efe9de] mb-2 transition-colors"
             >
-              <ArrowLeftIcon className="h-3.5 w-3.5" strokeWidth={1.75} />
+              <ArrowLeftIcon className="h-3.5 w-3.5" strokeWidth={1.5} />
               <span>Back to sign in</span>
             </Link>
             <h1 className="text-[24px] font-medium tracking-[-0.02em] text-[#efe9de] leading-tight">
@@ -180,8 +181,8 @@ const ForgotPassword = () => {
 
         {resetComplete ? (
           <div className="space-y-5 pt-2">
-            <div className="p-4 rounded-[12px] bg-[#4cc38a]/10 border border-[#4cc38a]/30 flex items-start gap-3">
-              <CheckBadgeIcon className="h-6 w-6 text-[#4cc38a] shrink-0 mt-0.5" strokeWidth={1.75} />
+            <div className="p-4 rounded-[10px] bg-[#4cc38a]/10 border border-[#4cc38a]/30 flex items-start gap-3">
+              <CheckBadgeIcon className="h-6 w-6 text-[#4cc38a] shrink-0 mt-0.5" strokeWidth={1.5} />
               <div>
                 <h2 className="text-[15px] font-medium text-[#efe9de]">Password updated</h2>
                 <p className="text-[13px] text-[#aaa398] mt-1">
@@ -201,14 +202,14 @@ const ForgotPassword = () => {
                   Registered email *
                 </label>
                 {isOtpVerified && (
-                  <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-[5px] text-[11px] font-medium bg-[#4cc38a]/15 text-[#4cc38a] border border-[#4cc38a]/30">
-                    <CheckBadgeIcon className="h-3.5 w-3.5" strokeWidth={1.75} />
+                  <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-[6px] text-[12px] font-medium bg-[#4cc38a]/15 text-[#4cc38a] border border-[#4cc38a]/30">
+                    <CheckBadgeIcon className="h-3.5 w-3.5" strokeWidth={1.5} />
                     <span>Verified</span>
                   </span>
                 )}
               </div>
 
-              <div className="flex gap-2">
+              <div className="flex flex-col sm:flex-row gap-2">
                 <input
                   id="reset-email"
                   name="email"
@@ -217,7 +218,7 @@ const ForgotPassword = () => {
                   required
                   value={email}
                   onChange={handleEmailChange}
-                  className="input-field flex-1"
+                  className="input-field flex-1 min-w-0"
                   placeholder="student@college.edu"
                 />
                 {!isOtpVerified && (
@@ -227,22 +228,29 @@ const ForgotPassword = () => {
                     disabled={sendingOtp || resendCooldown > 0}
                     className="btn-secondary h-10 px-3.5 text-[12px] whitespace-nowrap shrink-0"
                   >
-                    <EnvelopeIcon className="h-4 w-4 text-[#ebb05d]" strokeWidth={1.5} />
-                    <span>
-                      {sendingOtp
-                        ? 'Sending...'
-                        : resendCooldown > 0
-                          ? `Resend (${resendCooldown}s)`
-                          : hasActiveOtp
-                            ? 'Resend OTP'
-                            : 'Send OTP'}
-                    </span>
+                    {sendingOtp ? (
+                      <>
+                        <AvenorLoader variant="inline" tone="light" />
+                        <span>Sending...</span>
+                      </>
+                    ) : (
+                      <>
+                        <EnvelopeIcon className="h-4 w-4 text-[#ebb05d]" strokeWidth={1.5} />
+                        <span>
+                          {resendCooldown > 0
+                            ? `Resend (${resendCooldown}s)`
+                            : hasActiveOtp
+                              ? 'Resend OTP'
+                              : 'Send OTP'}
+                        </span>
+                      </>
+                    )}
                   </button>
                 )}
               </div>
 
               {!isOtpVerified && (
-                <div className="flex items-center justify-between gap-2 text-[11px] text-[#8a847a]">
+                <div className="flex flex-wrap items-center justify-between gap-2 text-[12px] text-[#8a847a]">
                   <span>Check Spam/Promotions if the email does not arrive immediately.</span>
                   {!hasActiveOtp && (
                     <button
@@ -267,13 +275,13 @@ const ForgotPassword = () => {
                 <div className="p-3.5 rounded-[10px] bg-[#161513] border border-[#e09132]/30 space-y-2.5">
                   <div className="flex items-center justify-between gap-2">
                     <span className="inline-flex items-center gap-1.5 text-[12px] font-medium text-[#efe9de]">
-                      <ShieldCheckIcon className="h-4 w-4 text-[#ebb05d]" strokeWidth={1.75} />
+                      <ShieldCheckIcon className="h-4 w-4 text-[#ebb05d]" strokeWidth={1.5} />
                       <span>Enter 6-digit reset OTP</span>
                     </span>
-                    <span className="text-[11px] font-mono text-[#8a847a]">Valid 10 min</span>
+                    <span className="text-[12px] font-mono text-[#8a847a]">Valid 10 min</span>
                   </div>
 
-                  <div className="flex gap-2">
+                  <div className="flex flex-col sm:flex-row gap-2">
                     <input
                       id="reset-otp"
                       type="text"
@@ -282,7 +290,7 @@ const ForgotPassword = () => {
                       value={otpInput}
                       onChange={(e) => setOtpInput(e.target.value.replace(/\D/g, '').slice(0, 6))}
                       placeholder="123456"
-                      className="input-field flex-1 font-mono tracking-[0.25em] text-center"
+                      className="input-field flex-1 min-w-0 font-mono tracking-[0.25em] text-center"
                     />
                     <button
                       type="button"
@@ -290,12 +298,19 @@ const ForgotPassword = () => {
                       disabled={verifyingOtp || otpInput.trim().length !== 6}
                       className="btn-primary h-10 px-4 text-[12px] shrink-0"
                     >
-                      {verifyingOtp ? 'Verifying...' : 'Verify OTP'}
+                      {verifyingOtp ? (
+                        <>
+                          <AvenorLoader variant="inline" tone="dark" />
+                          <span>Verifying...</span>
+                        </>
+                      ) : (
+                        'Verify OTP'
+                      )}
                     </button>
                   </div>
 
                   {devOtpHint && (
-                    <div className="flex items-center justify-between gap-2 px-2.5 py-1.5 rounded-[6px] bg-[#262421] border border-[#efe9de]/[0.08] text-[11px] text-[#aaa398]">
+                    <div className="flex items-center justify-between gap-2 px-2.5 py-1.5 rounded-[6px] bg-[#262421] border border-[#efe9de]/[0.08] text-[12px] text-[#aaa398]">
                       <span>
                         Dev OTP preview: <strong className="font-mono text-[#ebb05d]">{devOtpHint}</strong>
                       </span>
@@ -354,8 +369,17 @@ const ForgotPassword = () => {
                     disabled={submitting}
                     className="btn-primary w-full h-10 text-[14px]"
                   >
-                    <KeyIcon className="h-4 w-4" strokeWidth={1.75} />
-                    <span>{submitting ? 'Updating password...' : 'Reset password'}</span>
+                    {submitting ? (
+                      <>
+                        <AvenorLoader variant="inline" tone="dark" />
+                        <span>Updating password...</span>
+                      </>
+                    ) : (
+                      <>
+                        <KeyIcon className="h-4 w-4" strokeWidth={1.5} />
+                        <span>Reset password</span>
+                      </>
+                    )}
                   </button>
                 </div>
               </>

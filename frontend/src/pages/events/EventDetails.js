@@ -22,7 +22,10 @@ import {
   ChatBubbleLeftRightIcon,
   ClipboardDocumentCheckIcon,
   MagnifyingGlassIcon,
-  EnvelopeIcon
+  EnvelopeIcon,
+  CheckIcon,
+  PlusIcon,
+  CheckCircleIcon
 } from '@heroicons/react/24/outline';
 import {
   HeartIcon as HeartSolidIcon,
@@ -32,6 +35,7 @@ import { getBackendUrl } from '../../utils/apiConfig';
 import CommentsSection from '../../components/feed/CommentsSection';
 import ClubLogo from '../../components/feed/ClubLogo';
 import EventRegistration from '../../components/events/EventRegistration';
+import AvenorLoader from '../../components/common/AvenorLoader';
 import { getEventLifecycle, formatCount, resolveMediaUrl } from '../../utils/eventLifecycle';
 
 const EventDetails = () => {
@@ -411,11 +415,7 @@ const EventDetails = () => {
   };
 
   if (loading) {
-    return (
-      <div className="flex justify-center items-center py-24">
-        <div className="w-7 h-7 border-2 border-[#e09132] border-t-transparent rounded-full animate-spin" />
-      </div>
-    );
+    return <AvenorLoader variant="section" label="Loading event details..." />;
   }
 
   if (error || !event) {
@@ -482,7 +482,7 @@ const EventDetails = () => {
         </Link>
       </div>
 
-      <div className="rounded-[16px] bg-[#1c1a18] border border-[#efe9de]/[0.08] overflow-hidden">
+      <div className="rounded-[14px] bg-[#1c1a18] border border-[#efe9de]/[0.08] overflow-hidden">
         {photoSrc && (
           <div className="aspect-[21/9] bg-[#12110f] border-b border-[#efe9de]/[0.08] overflow-hidden">
             <img
@@ -514,7 +514,7 @@ const EventDetails = () => {
                     : 'bg-[#4cc38a]/10 text-[#4cc38a] border-[#4cc38a]/25'
                 }`}
               >
-                {isPaidEvent && <CurrencyRupeeIcon className="h-3.5 w-3.5" strokeWidth={1.75} />}
+                {isPaidEvent && <CurrencyRupeeIcon className="h-3.5 w-3.5" strokeWidth={1.5} />}
                 <span>{feeLabel}</span>
               </span>
             </div>
@@ -531,19 +531,29 @@ const EventDetails = () => {
                     <ClubLogo club={clubInfo} size="sm" />
                     <span>{clubInfo.name}</span>
                     {clubInfo.verified !== false && (
-                      <CheckBadgeIcon className="h-4 w-4 text-[#ebb05d]" strokeWidth={1.75} />
+                      <CheckBadgeIcon className="h-4 w-4 text-[#ebb05d]" strokeWidth={1.5} />
                     )}
                   </Link>
                   <button
                     type="button"
                     onClick={handleToggleFollowClub}
-                    className={`px-2 py-0.5 rounded-[6px] text-[11px] font-medium transition-colors ${
+                    className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-[6px] text-[12px] font-medium transition-colors ${
                       clubInfo.isFollowing
                         ? 'bg-[#262421] text-[#4cc38a] border border-[#4cc38a]/25'
                         : 'bg-[#262421] text-[#ebb05d] border border-[#efe9de]/[0.1]'
                     }`}
                   >
-                    {clubInfo.isFollowing ? 'Following ✓' : '+ Follow'}
+                    {clubInfo.isFollowing ? (
+                      <>
+                        <CheckIcon className="h-3.5 w-3.5" strokeWidth={1.5} />
+                        <span>Following</span>
+                      </>
+                    ) : (
+                      <>
+                        <PlusIcon className="h-3.5 w-3.5" strokeWidth={1.5} />
+                        <span>Follow</span>
+                      </>
+                    )}
                   </button>
                 </span>
               )}
@@ -585,7 +595,7 @@ const EventDetails = () => {
                   ) : (
                     <BookmarkIcon className="h-4 w-4" strokeWidth={1.5} />
                   )}
-                  <span>{feedMeta.isSaved ? 'Saved ✓' : 'Save'}</span>
+                  <span>{feedMeta.isSaved ? 'Saved' : 'Save'}</span>
                 </button>
               </>
             )}
@@ -845,12 +855,13 @@ const EventDetails = () => {
                       {requiresGate && (
                         <div className="mt-3">
                           {accessAllowed ? (
-                            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-[6px] text-[11px] bg-[#4cc38a]/10 text-[#4cc38a] border border-[#4cc38a]/25">
-                              Unlocked ✓
+                            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-[6px] text-[12px] bg-[#4cc38a]/10 text-[#4cc38a] border border-[#4cc38a]/25">
+                              <CheckCircleIcon className="h-3.5 w-3.5 shrink-0" strokeWidth={1.5} />
+                              <span>Unlocked</span>
                             </span>
                           ) : (
-                            <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-[6px] text-[11px] bg-[#e09132]/10 text-[#ebb05d] border border-[#e09132]/25">
-                              <LockClosedIcon className="h-3.5 w-3.5 shrink-0" strokeWidth={1.75} />
+                            <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-[6px] text-[12px] bg-[#e09132]/10 text-[#ebb05d] border border-[#e09132]/25">
+                              <LockClosedIcon className="h-3.5 w-3.5 shrink-0" strokeWidth={1.5} />
                               <span>
                                 {isPaidEvent
                                   ? `Locked · Register & pay ${feeLabel} for event to attend`
@@ -912,7 +923,7 @@ const EventDetails = () => {
             <div className="flex flex-wrap items-center justify-between gap-3">
               <div>
                 <div className="flex items-center gap-2">
-                  <ClipboardDocumentCheckIcon className="h-[18px] w-[18px] text-[#ebb05d]" strokeWidth={1.6} />
+                  <ClipboardDocumentCheckIcon className="h-[18px] w-[18px] text-[#ebb05d]" strokeWidth={1.5} />
                   <h2 className="text-[16px] font-medium text-[#efe9de]">Event Attendance Roster</h2>
                 </div>
                 <p className="text-[12px] text-[#8a847a] mt-0.5">
@@ -941,25 +952,25 @@ const EventDetails = () => {
 
             <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
               <div className="p-3 rounded-[10px] bg-[#161513] border border-[#efe9de]/[0.08]">
-                <span className="text-[11px] text-[#8a847a]">Registered</span>
+                <span className="text-[12px] text-[#8a847a]">Registered</span>
                 <p className="text-[20px] font-mono font-medium text-[#efe9de] mt-0.5 tabular-nums">
                   {attendanceSummary.total}
                 </p>
               </div>
               <div className="p-3 rounded-[10px] bg-[#161513] border border-[#4cc38a]/25">
-                <span className="text-[11px] text-[#8a847a]">Present</span>
+                <span className="text-[12px] text-[#8a847a]">Present</span>
                 <p className="text-[20px] font-mono font-medium text-[#4cc38a] mt-0.5 tabular-nums">
                   {attendanceSummary.present}
                 </p>
               </div>
               <div className="p-3 rounded-[10px] bg-[#161513] border border-[#e5484d]/25">
-                <span className="text-[11px] text-[#8a847a]">Absent</span>
+                <span className="text-[12px] text-[#8a847a]">Absent</span>
                 <p className="text-[20px] font-mono font-medium text-[#e5484d] mt-0.5 tabular-nums">
                   {attendanceSummary.absent}
                 </p>
               </div>
               <div className="p-3 rounded-[10px] bg-[#161513] border border-[#efe9de]/[0.08]">
-                <span className="text-[11px] text-[#8a847a]">Attendance rate</span>
+                <span className="text-[12px] text-[#8a847a]">Attendance rate</span>
                 <p className="text-[20px] font-mono font-medium text-[#ebb05d] mt-0.5 tabular-nums">
                   {attendanceSummary.attendanceRate}%
                 </p>
@@ -967,7 +978,7 @@ const EventDetails = () => {
             </div>
 
             <div className="flex flex-wrap items-center justify-between gap-3">
-              <div className="relative flex-1 min-w-[220px] max-w-sm">
+              <div className="relative flex-1 min-w-[200px] w-full sm:w-auto max-w-sm">
                 <MagnifyingGlassIcon className="h-4 w-4 text-[#8a847a] absolute left-3 top-1/2 -translate-y-1/2" strokeWidth={1.5} />
                 <input
                   type="text"
@@ -978,13 +989,13 @@ const EventDetails = () => {
                 />
               </div>
 
-              <div className="inline-flex p-1 rounded-[8px] bg-[#161513] border border-[#efe9de]/[0.08] gap-1">
+              <div className="inline-flex max-w-full overflow-x-auto p-1 rounded-[8px] bg-[#161513] border border-[#efe9de]/[0.08] gap-1">
                 {['all', 'present', 'absent', 'unmarked'].map((tab) => (
                   <button
                     key={tab}
                     type="button"
                     onClick={() => setAttendanceFilter(tab)}
-                    className={`h-7 px-2.5 rounded-[5px] text-[12px] capitalize transition-colors ${
+                    className={`h-7 px-2.5 rounded-[6px] text-[12px] capitalize whitespace-nowrap shrink-0 transition-colors ${
                       attendanceFilter === tab
                         ? 'bg-[#262421] text-[#efe9de]'
                         : 'text-[#8a847a] hover:text-[#efe9de]'
@@ -1003,7 +1014,9 @@ const EventDetails = () => {
             )}
 
             {rosterLoading ? (
-              <div className="p-6 text-center text-[13px] text-[#8a847a]">Loading attendance roster...</div>
+              <div className="py-6 flex justify-center">
+                <AvenorLoader variant="compact" label="Loading attendance roster..." />
+              </div>
             ) : (
               (() => {
                 const q = attendanceSearch.trim().toLowerCase();

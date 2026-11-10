@@ -15,6 +15,7 @@ import {
 } from '@heroicons/react/24/outline';
 import { getBackendUrl } from '../../utils/apiConfig';
 import EventRegistration from '../../components/events/EventRegistration';
+import AvenorLoader from '../../components/common/AvenorLoader';
 
 const LANGUAGE_OPTIONS = [
   { key: 'python', label: 'Python 3', monaco: 'python' },
@@ -282,9 +283,8 @@ const CodingArena = () => {
 
   if (loading) {
     return (
-      <div className="flex flex-col items-center justify-center min-h-[60vh] space-y-4">
-        <div className="w-8 h-8 border-2 border-[#e09132] border-t-transparent rounded-full animate-spin" />
-        <p className="text-[14px] text-[#aaa398]">Loading coding arena...</p>
+      <div className="min-h-[60vh] flex items-center justify-center">
+        <AvenorLoader variant="page" label="Loading coding arena..." />
       </div>
     );
   }
@@ -364,13 +364,13 @@ const CodingArena = () => {
   return (
     <div className="flex flex-col lg:h-[calc(100vh-7rem)] lg:min-h-[580px] space-y-3">
       {/* Top Header Bar */}
-      <div className="flex flex-wrap items-center justify-between gap-3 px-4 py-2.5 rounded-[12px] bg-[#1c1a18] border border-[#efe9de]/[0.08] shrink-0">
+      <div className="flex flex-wrap items-center justify-between gap-3 px-4 py-2.5 rounded-[14px] bg-[#1c1a18] border border-[#efe9de]/[0.08] shrink-0">
         <div className="flex items-center gap-3 min-w-0">
           <div className="w-8 h-8 rounded-[8px] bg-[#262421] border border-[#efe9de]/[0.08] flex items-center justify-center shrink-0">
             <CodeBracketIcon className="h-4 w-4 text-[#ebb05d]" strokeWidth={1.5} />
           </div>
           <div className="min-w-0">
-            <span className="block text-[11px] font-mono text-[#8a847a] truncate">
+            <span className="block text-[12px] font-mono text-[#8a847a] truncate">
               {competition?.title || 'Coding arena'}
             </span>
             <div className="flex items-center gap-2 mt-0.5">
@@ -419,7 +419,7 @@ const CodingArena = () => {
       {/* Split Pane */}
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-3 flex-1 min-h-0">
         {/* Left Pane: Problem Details */}
-        <div className="lg:col-span-5 flex flex-col rounded-[12px] bg-[#1c1a18] border border-[#efe9de]/[0.08] p-5 overflow-y-auto space-y-5">
+        <div className="lg:col-span-5 flex flex-col rounded-[14px] bg-[#1c1a18] border border-[#efe9de]/[0.08] p-5 overflow-y-auto space-y-5">
           <div className="flex items-start justify-between gap-3 pb-3.5 border-b border-[#efe9de]/[0.08]">
             <h1 className="text-[17px] font-medium text-[#efe9de] leading-snug">{currentProblem.title}</h1>
             <span className="px-2 py-0.5 rounded-[6px] text-[12px] font-mono bg-[#262421] text-[#ebb05d] border border-[#efe9de]/[0.08] capitalize shrink-0 tabular-nums">
@@ -492,7 +492,7 @@ const CodingArena = () => {
         </div>
 
         {/* Right Pane: Monaco Editor + Evaluation Console */}
-        <div className="lg:col-span-7 flex flex-col rounded-[12px] bg-[#1c1a18] border border-[#efe9de]/[0.08] overflow-hidden min-h-[520px] lg:min-h-0">
+        <div className="lg:col-span-7 flex flex-col rounded-[14px] bg-[#1c1a18] border border-[#efe9de]/[0.08] overflow-hidden min-h-[520px] lg:min-h-0">
           {/* Editor Header Controls */}
           <div className="flex flex-wrap items-center justify-between gap-2 px-4 py-2 bg-[#12110f] border-b border-[#efe9de]/[0.08] shrink-0">
             <div className="flex items-center gap-3">
@@ -528,7 +528,7 @@ const CodingArena = () => {
               >
                 {runningSample ? (
                   <>
-                    <div className="w-3 h-3 border-2 border-[#efe9de] border-t-transparent rounded-full animate-spin" />
+                    <AvenorLoader variant="inline" tone="light" />
                     <span>Running...</span>
                   </>
                 ) : (
@@ -547,7 +547,7 @@ const CodingArena = () => {
               >
                 {submittingCode ? (
                   <>
-                    <div className="w-3 h-3 border-2 border-[#12110f] border-t-transparent rounded-full animate-spin" />
+                    <AvenorLoader variant="inline" tone="dark" />
                     <span>Evaluating...</span>
                   </>
                 ) : (
@@ -581,7 +581,7 @@ const CodingArena = () => {
 
           {/* Bottom Execution Console */}
           <div className="h-52 bg-[#12110f] border-t border-[#efe9de]/[0.08] flex flex-col shrink-0">
-            <div className="flex items-center justify-between px-4 py-1.5 bg-[#1c1a18] border-b border-[#efe9de]/[0.08] text-[12px]">
+            <div className="flex flex-wrap items-center justify-between gap-2 px-4 py-1.5 bg-[#1c1a18] border-b border-[#efe9de]/[0.08] text-[12px]">
               <div className="flex items-center gap-1.5">
                 <button
                   type="button"
@@ -603,7 +603,7 @@ const CodingArena = () => {
                 </button>
               </div>
 
-              <span className="text-[11px] text-[#8a847a] font-mono">Judge0 isolated runner</span>
+              <span className="text-[12px] text-[#8a847a] font-mono">Judge0 isolated runner</span>
             </div>
 
             <div className="flex-1 p-3.5 overflow-y-auto font-mono text-[12px] text-[#aaa398]">
@@ -634,13 +634,13 @@ const CodingArena = () => {
                               : 'bg-[#e5484d]/[0.06] border-[#e5484d]/25'
                           }`}
                         >
-                          <div className="flex justify-between items-center text-[11px] text-[#8a847a] mb-1.5 tabular-nums">
+                          <div className="flex justify-between items-center text-[12px] text-[#8a847a] mb-1.5 tabular-nums">
                             <span>Case {r.testCaseIndex || i + 1}</span>
                             <span className={r.passed ? 'text-[#4cc38a]' : 'text-[#e5484d]'}>
                               {r.status || (r.passed ? 'Passed' : 'Failed')} ({r.time || 0}s)
                             </span>
                           </div>
-                          <div className="grid grid-cols-2 gap-3 text-[11px]">
+                          <div className="grid grid-cols-2 gap-3 text-[12px]">
                             <div>
                               <span className="text-[#8a847a]">Expected:</span>
                               <pre className="text-[#efe9de] mt-0.5">{r.expectedOutput || '(empty)'}</pre>
@@ -667,7 +667,7 @@ const CodingArena = () => {
                   <div className="space-y-3">
                     <div className="grid grid-cols-3 gap-4 p-3 rounded-[8px] bg-[#1c1a18] border border-[#efe9de]/[0.08] tabular-nums">
                       <div>
-                        <span className="text-[11px] font-sans text-[#8a847a]">Status</span>
+                        <span className="text-[12px] font-sans text-[#8a847a]">Status</span>
                         <p
                           className={`text-[15px] font-medium mt-0.5 ${
                             evalResult.status === 'Accepted' ? 'text-[#4cc38a]' : 'text-[#ebb05d]'
@@ -678,14 +678,14 @@ const CodingArena = () => {
                       </div>
 
                       <div>
-                        <span className="text-[11px] font-sans text-[#8a847a]">Test cases</span>
+                        <span className="text-[12px] font-sans text-[#8a847a]">Test cases</span>
                         <p className="text-[15px] font-medium text-[#efe9de] mt-0.5">
                           {evalResult.passedTestCases} / {evalResult.totalTestCases}
                         </p>
                       </div>
 
                       <div className="text-right">
-                        <span className="text-[11px] font-sans text-[#8a847a]">Score awarded</span>
+                        <span className="text-[12px] font-sans text-[#8a847a]">Score awarded</span>
                         <p className="text-[15px] font-medium text-[#ebb05d] mt-0.5">+{evalResult.score} marks</p>
                       </div>
                     </div>

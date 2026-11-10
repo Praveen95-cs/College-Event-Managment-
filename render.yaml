@@ -11,6 +11,10 @@ services:
     envVars:
       - key: NODE_ENV
         value: production
+      - key: NODE_VERSION
+        value: "20.18.1"
+      - key: PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD
+        value: "1"
       - key: CI
         value: "false"
       - key: DISABLE_ESLINT_PLUGIN
@@ -99,10 +103,16 @@ services:
         value: "false"
       - key: EMAIL_RELAY_PROVIDER
         value: auto
+      - key: EMAIL_PREFER_HTTPS
+        value: "true"
+      - key: DISABLE_DB_EMAIL_SETTINGS
+        value: "false"
       - key: BREVO_API_KEY
         sync: false
       - key: RESEND_API_KEY
         sync: false
+      - key: RESEND_FROM
+        value: "Avenor Campus Events <onboarding@resend.dev>"
       - key: EMAIL_WEBHOOK_URL
         sync: false
       - key: EMAIL_WEBHOOK_SECRET

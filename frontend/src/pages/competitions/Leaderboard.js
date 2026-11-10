@@ -20,6 +20,7 @@ import {
   FunnelIcon
 } from '@heroicons/react/24/outline';
 import { getBackendUrl } from '../../utils/apiConfig';
+import AvenorLoader from '../../components/common/AvenorLoader';
 
 const Leaderboard = () => {
   const { id } = useParams();
@@ -213,7 +214,7 @@ const Leaderboard = () => {
 
       {/* Participant Performance Summary */}
       {myResult && (
-        <div className="rounded-[16px] bg-[#1c1a18] border border-[#efe9de]/[0.08] p-6 space-y-5">
+        <div className="rounded-[14px] bg-[#1c1a18] border border-[#efe9de]/[0.08] p-6 space-y-5">
           <div className="flex items-center justify-between gap-4">
             <div className="flex items-center gap-2">
               <TrophyIcon className="h-4 w-4 text-[#ebb05d]" strokeWidth={1.5} />
@@ -225,25 +226,25 @@ const Leaderboard = () => {
           </div>
 
           <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
-            <div className="p-4 rounded-[12px] bg-[#12110f] border border-[#efe9de]/[0.06]">
+            <div className="p-4 rounded-[10px] bg-[#12110f] border border-[#efe9de]/[0.06]">
               <span className="text-[12px] text-[#8a847a]">Score</span>
               <p className="text-[22px] font-medium text-[#efe9de] font-mono tabular-nums mt-1 leading-none">
                 {myResult.score} / {myResult.totalPossibleScore}
               </p>
             </div>
-            <div className="p-4 rounded-[12px] bg-[#12110f] border border-[#efe9de]/[0.06]">
+            <div className="p-4 rounded-[10px] bg-[#12110f] border border-[#efe9de]/[0.06]">
               <span className="text-[12px] text-[#8a847a]">Accuracy</span>
               <p className="text-[22px] font-medium text-[#4cc38a] font-mono tabular-nums mt-1 leading-none">
                 {myResult.percentage}%
               </p>
             </div>
-            <div className="p-4 rounded-[12px] bg-[#12110f] border border-[#efe9de]/[0.06]">
+            <div className="p-4 rounded-[10px] bg-[#12110f] border border-[#efe9de]/[0.06]">
               <span className="text-[12px] text-[#8a847a]">Rank</span>
               <p className="text-[22px] font-medium text-[#ebb05d] font-mono tabular-nums mt-1 leading-none">
                 #{myResult.rank || '—'}
               </p>
             </div>
-            <div className="p-4 rounded-[12px] bg-[#12110f] border border-[#efe9de]/[0.06]">
+            <div className="p-4 rounded-[10px] bg-[#12110f] border border-[#efe9de]/[0.06]">
               <span className="text-[12px] text-[#8a847a]">Time taken</span>
               <p className="text-[22px] font-medium text-[#efe9de] font-mono tabular-nums mt-1 leading-none">
                 {Math.floor(myResult.timeTakenSeconds / 60)}m {myResult.timeTakenSeconds % 60}s
@@ -309,7 +310,7 @@ const Leaderboard = () => {
       {/* Answer Preview & Solution Review */}
       {myResult && totalQuestions > 0 && showAnswerPreview && (
         <div id="answer-preview-section" className="space-y-5">
-          <div className="rounded-[16px] bg-[#1c1a18] border border-[#efe9de]/[0.08] p-6 space-y-5">
+          <div className="rounded-[14px] bg-[#1c1a18] border border-[#efe9de]/[0.08] p-6 space-y-5">
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
               <div>
                 <h2 className="text-[18px] font-medium text-[#efe9de]">Answer review and solutions</h2>
@@ -321,43 +322,39 @@ const Leaderboard = () => {
               <div className="inline-flex flex-wrap p-1 rounded-[10px] bg-[#12110f] border border-[#efe9de]/[0.08] gap-1 self-start sm:self-auto">
                 <button
                   onClick={() => setAnswerFilter('all')}
-                  className={`h-8 px-3 rounded-[6px] text-[12px] font-medium transition-colors duration-150 tabular-nums ${
-                    answerFilter === 'all'
-                      ? 'bg-[#262421] text-[#efe9de] border border-[#efe9de]/[0.08]'
-                      : 'text-[#8a847a] hover:text-[#efe9de] border border-transparent'
-                  }`}
+                  className={`h-8 px-3 rounded-[6px] text-[12px] font-medium transition-colors duration-150 tabular-nums ${answerFilter === 'all'
+                    ? 'bg-[#262421] text-[#efe9de] border border-[#efe9de]/[0.08]'
+                    : 'text-[#8a847a] hover:text-[#efe9de] border border-transparent'
+                    }`}
                 >
                   All ({totalQuestions})
                 </button>
                 <button
                   onClick={() => setAnswerFilter('correct')}
-                  className={`h-8 px-3 rounded-[6px] text-[12px] font-medium transition-colors duration-150 inline-flex items-center gap-1.5 tabular-nums ${
-                    answerFilter === 'correct'
-                      ? 'bg-[#262421] text-[#efe9de] border border-[#efe9de]/[0.08]'
-                      : 'text-[#8a847a] hover:text-[#efe9de] border border-transparent'
-                  }`}
+                  className={`h-8 px-3 rounded-[6px] text-[12px] font-medium transition-colors duration-150 inline-flex items-center gap-1.5 tabular-nums ${answerFilter === 'correct'
+                    ? 'bg-[#262421] text-[#efe9de] border border-[#efe9de]/[0.08]'
+                    : 'text-[#8a847a] hover:text-[#efe9de] border border-transparent'
+                    }`}
                 >
                   <span className="w-1.5 h-1.5 rounded-full bg-[#4cc38a]" />
                   <span>Correct ({correctCount})</span>
                 </button>
                 <button
                   onClick={() => setAnswerFilter('incorrect')}
-                  className={`h-8 px-3 rounded-[6px] text-[12px] font-medium transition-colors duration-150 inline-flex items-center gap-1.5 tabular-nums ${
-                    answerFilter === 'incorrect'
-                      ? 'bg-[#262421] text-[#efe9de] border border-[#efe9de]/[0.08]'
-                      : 'text-[#8a847a] hover:text-[#efe9de] border border-transparent'
-                  }`}
+                  className={`h-8 px-3 rounded-[6px] text-[12px] font-medium transition-colors duration-150 inline-flex items-center gap-1.5 tabular-nums ${answerFilter === 'incorrect'
+                    ? 'bg-[#262421] text-[#efe9de] border border-[#efe9de]/[0.08]'
+                    : 'text-[#8a847a] hover:text-[#efe9de] border border-transparent'
+                    }`}
                 >
                   <span className="w-1.5 h-1.5 rounded-full bg-[#e5484d]" />
                   <span>Incorrect ({incorrectCount})</span>
                 </button>
                 <button
                   onClick={() => setAnswerFilter('skipped')}
-                  className={`h-8 px-3 rounded-[6px] text-[12px] font-medium transition-colors duration-150 inline-flex items-center gap-1.5 tabular-nums ${
-                    answerFilter === 'skipped'
-                      ? 'bg-[#262421] text-[#efe9de] border border-[#efe9de]/[0.08]'
-                      : 'text-[#8a847a] hover:text-[#efe9de] border border-transparent'
-                  }`}
+                  className={`h-8 px-3 rounded-[6px] text-[12px] font-medium transition-colors duration-150 inline-flex items-center gap-1.5 tabular-nums ${answerFilter === 'skipped'
+                    ? 'bg-[#262421] text-[#efe9de] border border-[#efe9de]/[0.08]'
+                    : 'text-[#8a847a] hover:text-[#efe9de] border border-transparent'
+                    }`}
                 >
                   <span className="w-1.5 h-1.5 rounded-full bg-[#8a847a]" />
                   <span>Skipped ({skippedCount})</span>
@@ -386,7 +383,7 @@ const Leaderboard = () => {
                 <p className="text-[18px] font-medium text-[#efe9de] font-mono tabular-nums mt-1">
                   {incorrectCount}
                   {myResult.negativeMarking > 0 && (
-                    <span className="text-[11px] text-[#e5484d] font-normal ml-1.5">
+                    <span className="text-[12px] text-[#e5484d] font-normal ml-1.5">
                       (-{myResult.negativeMarking} ea)
                     </span>
                   )}
@@ -630,15 +627,13 @@ const Leaderboard = () => {
             return (
               <div
                 key={p.userId || idx}
-                className={`p-5 rounded-[14px] bg-[#1c1a18] border flex flex-col justify-between ${
-                  isFirst ? 'border-[#e09132]/40' : 'border-[#efe9de]/[0.08]'
-                }`}
+                className={`p-5 rounded-[14px] bg-[#1c1a18] border flex flex-col justify-between ${isFirst ? 'border-[#e09132]/40' : 'border-[#efe9de]/[0.08]'
+                  }`}
               >
                 <div>
                   <span
-                    className={`text-[12px] font-mono tabular-nums ${
-                      isFirst ? 'text-[#ebb05d]' : 'text-[#8a847a]'
-                    }`}
+                    className={`text-[12px] font-mono tabular-nums ${isFirst ? 'text-[#ebb05d]' : 'text-[#8a847a]'
+                      }`}
                   >
                     {labels[idx] || `Rank #${idx + 1}`}
                   </span>
@@ -682,8 +677,8 @@ const Leaderboard = () => {
         </div>
 
         {loading ? (
-          <div className="py-16 flex justify-center">
-            <div className="w-7 h-7 border-2 border-[#e09132] border-t-transparent rounded-full animate-spin" />
+          <div className="py-12 flex justify-center">
+            <AvenorLoader variant="section" label="Loading leaderboard..." />
           </div>
         ) : filteredRankings.length === 0 ? (
           <div className="text-center py-12 text-[#8a847a] text-[14px]">
@@ -710,14 +705,12 @@ const Leaderboard = () => {
                   return (
                     <tr
                       key={r.rank}
-                      className={`hover:bg-[#262421]/40 transition-colors duration-150 ${
-                        isCurrentUser ? 'bg-[#e09132]/[0.08]' : ''
-                      }`}
+                      className={`hover:bg-[#262421]/40 transition-colors duration-150 ${isCurrentUser ? 'bg-[#e09132]/[0.08]' : ''
+                        }`}
                     >
                       <td
-                        className={`px-5 py-3.5 font-mono tabular-nums font-medium ${
-                          r.rank === 1 ? 'text-[#ebb05d]' : 'text-[#aaa398]'
-                        }`}
+                        className={`px-5 py-3.5 font-mono tabular-nums font-medium ${r.rank === 1 ? 'text-[#ebb05d]' : 'text-[#aaa398]'
+                          }`}
                       >
                         #{r.rank}
                       </td>
@@ -728,7 +721,7 @@ const Leaderboard = () => {
                           </span>
                           <span className="truncate">{r.name}</span>
                           {isCurrentUser && (
-                            <span className="text-[11px] font-mono text-[#ebb05d] px-1.5 py-0.5 rounded-[4px] bg-[#e09132]/15 border border-[#e09132]/25">
+                            <span className="text-[12px] font-mono text-[#ebb05d] px-1.5 py-0.5 rounded-[6px] bg-[#e09132]/15 border border-[#e09132]/25">
                               You
                             </span>
                           )}

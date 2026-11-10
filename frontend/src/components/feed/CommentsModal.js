@@ -20,7 +20,7 @@ const CommentsModal = ({ item, onClose, onCommentsCountChange }) => {
         if (e.target === e.currentTarget) onClose();
       }}
     >
-      <div className="bg-[#1c1a18] border border-[#efe9de]/[0.12] rounded-t-[16px] sm:rounded-[16px] w-full max-w-xl max-h-[85vh] flex flex-col shadow-[0_16px_48px_rgba(0,0,0,0.55)]">
+      <div className="bg-[#1c1a18] border border-[#efe9de]/[0.12] rounded-t-[14px] sm:rounded-[14px] w-full max-w-xl max-h-[85vh] flex flex-col shadow-[0_16px_48px_rgba(0,0,0,0.55)]">
         <div className="px-5 py-4 border-b border-[#efe9de]/[0.08] flex items-start justify-between gap-4">
           <div className="min-w-0">
             <span className="text-[12px] font-mono text-[#ebb05d]">

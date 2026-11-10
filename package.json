@@ -3,6 +3,9 @@
   "version": "1.0.0",
   "description": "Avenor — Elevate Every Event. Modern MERN stack platform for college event management, live coding competitions, and quota-resilient AI assessments.",
   "main": "index.js",
+  "engines": {
+    "node": ">=20.0.0"
+  },
   "scripts": {
     "start": "node backend/server.js",
     "dev": "concurrently \"npm run server\" \"npm run client\"",

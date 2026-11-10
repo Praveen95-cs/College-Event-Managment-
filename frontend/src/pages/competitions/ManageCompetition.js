@@ -10,6 +10,7 @@ import {
   ClockIcon
 } from '@heroicons/react/24/outline';
 import { getBackendUrl } from '../../utils/apiConfig';
+import AvenorLoader from '../../components/common/AvenorLoader';
 
 const ManageCompetition = () => {
   const { id } = useParams();
@@ -445,7 +446,7 @@ const ManageCompetition = () => {
   return (
     <div className="max-w-6xl mx-auto space-y-6">
       {/* Studio Header */}
-      <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4 p-6 rounded-[16px] bg-[#1c1a18] border border-[#efe9de]/[0.08]">
+      <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4 p-6 rounded-[14px] bg-[#1c1a18] border border-[#efe9de]/[0.08]">
         <div>
           <div className="flex items-center gap-2">
             <span className="text-[12px] font-mono text-[#ebb05d]">Organizer studio</span>
@@ -535,7 +536,7 @@ const ManageCompetition = () => {
 
       {/* TAB 1: SETUP */}
       {activeTab === 'setup' && (
-        <form onSubmit={handleSaveSetup} className="p-6 sm:p-8 rounded-[16px] bg-[#1c1a18] border border-[#efe9de]/[0.08] space-y-6">
+        <form onSubmit={handleSaveSetup} className="p-6 sm:p-8 rounded-[14px] bg-[#1c1a18] border border-[#efe9de]/[0.08] space-y-6">
           <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
             <div className="md:col-span-2">
               <label className="block text-[13px] font-medium text-[#aaa398] mb-1.5">Competition title *</label>
@@ -592,7 +593,7 @@ const ManageCompetition = () => {
                 return (
                   <div className="mt-2.5 space-y-2">
                     {selectedEv && (
-                      <span className="inline-flex items-center px-2 py-0.5 rounded-[6px] text-[11px] font-mono bg-[#161513] text-[#ebb05d] border border-[#efe9de]/[0.08]">
+                      <span className="inline-flex items-center px-2 py-0.5 rounded-[6px] text-[12px] font-mono bg-[#161513] text-[#ebb05d] border border-[#efe9de]/[0.08]">
                         {evPaid
                           ? `Paid event · ₹${selectedEv.registrationFee} payment required`
                           : 'Free event · Registration gating'}
@@ -730,12 +731,12 @@ const ManageCompetition = () => {
 
       {/* TAB 2: GENERATOR */}
       {activeTab === 'generator' && (
-        <div className="p-6 sm:p-8 rounded-[16px] bg-[#1c1a18] border border-[#efe9de]/[0.08] space-y-6">
-          <div className="flex flex-wrap items-center justify-between gap-4 p-4 rounded-[12px] bg-[#12110f] border border-[#efe9de]/[0.08]">
+        <div className="p-6 sm:p-8 rounded-[14px] bg-[#1c1a18] border border-[#efe9de]/[0.08] space-y-6">
+          <div className="flex flex-wrap items-center justify-between gap-4 p-4 rounded-[10px] bg-[#12110f] border border-[#efe9de]/[0.08]">
             <div>
               <h2 className="text-[14px] font-medium text-[#efe9de]">Gemini question synthesis engine</h2>
               <p className="text-[12px] text-[#8a847a] mt-0.5 font-mono">
-                Model: <span className="text-[#ebb05d]">{geminiStatus?.verifiedModel || 'gemini-3.8-flash'}</span>
+                Model: <span className="text-[#ebb05d]">{geminiStatus?.verifiedModel || 'gemini-3.5-flash'}</span>
               </p>
             </div>
             <span className="px-2.5 py-0.5 rounded-[6px] text-[12px] font-mono bg-[#4cc38a]/10 text-[#4cc38a] border border-[#4cc38a]/25">
@@ -794,7 +795,7 @@ const ManageCompetition = () => {
               </div>
             </div>
 
-            <div className="p-4 rounded-[12px] bg-[#12110f] border border-[#efe9de]/[0.08] space-y-1.5">
+            <div className="p-4 rounded-[10px] bg-[#12110f] border border-[#efe9de]/[0.08] space-y-1.5">
               <label className="inline-flex items-center gap-2.5 cursor-pointer text-[14px] font-medium text-[#efe9de]">
                 <input
                   type="checkbox"
@@ -810,7 +811,7 @@ const ManageCompetition = () => {
             </div>
 
             {quotaCooldown > 0 && (
-              <div className="p-4 rounded-[12px] bg-[#e09132]/10 border border-[#e09132]/30 text-[#ebb05d] text-[13px] space-y-2.5">
+              <div className="p-4 rounded-[10px] bg-[#e09132]/10 border border-[#e09132]/30 text-[#ebb05d] text-[13px] space-y-2.5">
                 <div className="flex items-center gap-2 font-medium">
                   <ClockIcon className="h-4 w-4 shrink-0" strokeWidth={1.5} />
                   <span className="tabular-nums">Rate limit reached — cooldown active ({quotaCooldown}s)</span>
@@ -862,7 +863,7 @@ const ManageCompetition = () => {
                 >
                   {aiGenerating ? (
                     <>
-                      <div className="w-4 h-4 border-2 border-[#12110f] border-t-transparent rounded-full animate-spin" />
+                      <AvenorLoader variant="inline" tone="dark" />
                       <span>Synthesizing...</span>
                     </>
                   ) : quotaCooldown > 0 && !useCache ? (

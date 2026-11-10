@@ -67,7 +67,7 @@ export function getEventLifecycle(event, isRegistered = false) {
 
   if (isRegistered) {
     return {
-      state: 'REGISTERED ✓',
+      state: 'REGISTERED',
       isExpired: event.isExpired || event.status === 'completed',
       isRegistrationOpen: false,
       availableSeats,

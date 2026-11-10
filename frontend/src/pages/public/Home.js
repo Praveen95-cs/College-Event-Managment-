@@ -11,6 +11,7 @@ import {
   MapPinIcon,
   ChatBubbleLeftRightIcon
 } from '@heroicons/react/24/outline';
+import AvenorLoader from '../../components/common/AvenorLoader';
 
 const Home = () => {
   const { user } = useAuth();
@@ -137,7 +138,7 @@ const Home = () => {
             </div>
 
             <div className="lg:col-span-6">
-              <div className="rounded-[16px] overflow-hidden border border-[#efe9de]/[0.1] bg-[#1c1a18]">
+              <div className="rounded-[14px] overflow-hidden border border-[#efe9de]/[0.1] bg-[#1c1a18]">
                 <div className="relative aspect-[16/10] overflow-hidden bg-[#12110f]">
                   <img
                     src="/images/college.png"
@@ -172,15 +173,18 @@ const Home = () => {
                       </div>
                       <Link
                         to={`/events/${nextEvent._id}`}
-                        className="shrink-0 text-[13px] font-medium text-[#ebb05d] hover:text-[#efe9de] transition-colors duration-150"
+                        className="shrink-0 whitespace-nowrap text-[13px] font-medium text-[#ebb05d] hover:text-[#efe9de] transition-colors duration-150"
                       >
                         Details
                       </Link>
                     </>
                   ) : (
-                    <div className="flex items-center justify-between w-full text-[13px] text-[#8a847a]">
-                      <span>Campus computer lab and event schedule</span>
-                      <Link to="/events" className="text-[#ebb05d] hover:text-[#efe9de] font-medium">
+                    <div className="flex items-center justify-between gap-4 w-full text-[13px] text-[#8a847a]">
+                      <span className="min-w-0">Campus computer lab and event schedule</span>
+                      <Link
+                        to="/events"
+                        className="text-[#ebb05d] hover:text-[#efe9de] font-medium shrink-0 whitespace-nowrap transition-colors duration-150"
+                      >
                         View calendar
                       </Link>
                     </div>
@@ -255,7 +259,7 @@ const Home = () => {
         </div>
 
         {loading ? (
-          <div className="py-12 text-[14px] text-[#8a847a]">Loading events...</div>
+          <AvenorLoader variant="section" label="Loading campus events..." className="py-12" />
         ) : events.length === 0 ? (
           <div className="p-8 rounded-[14px] bg-[#1c1a18] border border-[#efe9de]/[0.08] text-center">
             <CalendarIcon className="h-8 w-8 text-[#8a847a] mx-auto mb-3" strokeWidth={1.5} />

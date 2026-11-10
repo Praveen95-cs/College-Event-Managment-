@@ -4,6 +4,7 @@ import axios from 'axios';
 import { useAuth } from '../../contexts/AuthContext';
 import { getBackendUrl } from '../../utils/apiConfig';
 import { DEFAULT_DEPARTMENTS, fetchDepartments } from '../../utils/departments';
+import AvenorLoader from '../../components/common/AvenorLoader';
 
 const AdminDashboard = () => {
   const { user } = useAuth();
@@ -1369,7 +1370,9 @@ const AdminDashboard = () => {
         )}
 
         {loading ? (
-          <div className="p-8 text-[14px] text-[#8a847a]">Loading dashboard records...</div>
+          <div className="py-14 flex justify-center">
+            <AvenorLoader variant="section" label="Loading dashboard records..." />
+          </div>
         ) : activeTab === 'events' ? (
           <div>
             <div className="px-5 py-4 border-b border-[#efe9de]/[0.08] bg-[#161513]/70 flex flex-col lg:flex-row lg:items-center justify-between gap-4">
@@ -1980,7 +1983,7 @@ const AdminDashboard = () => {
                   <div className="grid grid-cols-1 lg:grid-cols-12 gap-4">
                     <form
                       onSubmit={handleSaveYoupiAutomation}
-                      className="lg:col-span-7 rounded-[10px] bg-[#12110f] border border-[#efe9de]/[0.08] p-4 space-y-3.5"
+                      className="lg:col-span-7 min-w-0 rounded-[10px] bg-[#12110f] border border-[#efe9de]/[0.08] p-4 space-y-3.5"
                     >
                       <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                         <div>
@@ -2130,7 +2133,7 @@ const AdminDashboard = () => {
                     </form>
 
                     {/* Bank CSV Bulk Reconciliation */}
-                    <div className="lg:col-span-5 rounded-[10px] bg-[#12110f] border border-[#efe9de]/[0.08] p-4 flex flex-col justify-between space-y-3.5">
+                    <div className="lg:col-span-5 min-w-0 rounded-[10px] bg-[#12110f] border border-[#efe9de]/[0.08] p-4 flex flex-col justify-between space-y-3.5">
                       <div className="space-y-3">
                         <div>
                           <span className="text-[14px] font-medium text-[#efe9de]">
@@ -2440,7 +2443,7 @@ const AdminDashboard = () => {
                     onSubmit={handleGenerateStandQr}
                     className="rounded-[10px] bg-[#12110f] border border-[#efe9de]/[0.08] p-4 grid grid-cols-1 lg:grid-cols-12 gap-4 items-center"
                   >
-                    <div className="lg:col-span-8 space-y-3">
+                    <div className="lg:col-span-8 min-w-0 space-y-3">
                       <div>
                         <h4 className="text-[14px] font-medium text-[#efe9de]">
                           NPCI Desk Stand QR
@@ -2510,7 +2513,7 @@ const AdminDashboard = () => {
                       </div>
                     </div>
 
-                    <div className="lg:col-span-4 flex flex-col items-center justify-center rounded-[10px] bg-[#161513] border border-[#efe9de]/[0.06] p-3.5 min-h-[140px]">
+                    <div className="lg:col-span-4 min-w-0 flex flex-col items-center justify-center rounded-[10px] bg-[#161513] border border-[#efe9de]/[0.06] p-3.5 min-h-[140px]">
                       {standQrResult?.qrSvg ? (
                         <div className="flex flex-col items-center gap-2 w-full">
                           <div className="bg-white p-2 rounded-[8px]">

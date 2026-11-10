@@ -16,6 +16,7 @@ import {
 } from '@heroicons/react/24/outline';
 import EventRegistration from '../../components/events/EventRegistration';
 import ClubLogo from '../../components/feed/ClubLogo';
+import AvenorLoader from '../../components/common/AvenorLoader';
 import { resolveMediaUrl } from '../../utils/eventLifecycle';
 
 const EVENT_TYPES = ['tech', 'non-tech', 'special', 'workshop'];
@@ -132,7 +133,7 @@ const Events = () => {
             </Link>
           )}
 
-          <div className="relative">
+          <div className="relative w-full sm:w-56">
             <MagnifyingGlassIcon
               className="h-4 w-4 text-[#8a847a] absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none"
               strokeWidth={1.5}
@@ -142,7 +143,7 @@ const Events = () => {
               placeholder="Search events"
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
-              className="input-field h-9 py-0 pl-9 pr-3 w-56 text-[13px] leading-tight"
+              className="input-field h-9 py-0 pl-9 pr-3 w-full text-[13px] leading-tight"
             />
           </div>
 
@@ -195,9 +196,7 @@ const Events = () => {
       )}
 
       {loading ? (
-        <div className="flex justify-center items-center py-24">
-          <div className="w-7 h-7 border-2 border-[#e09132] border-t-transparent rounded-full animate-spin" />
-        </div>
+        <AvenorLoader variant="section" label="Loading events..." />
       ) : events.length === 0 ? (
         <div className="py-16 text-center rounded-[14px] bg-[#1c1a18] border border-[#efe9de]/[0.08]">
           <CalendarIcon className="h-8 w-8 text-[#8a847a] mx-auto mb-3" strokeWidth={1.5} />
@@ -256,13 +255,13 @@ const Events = () => {
                       )}
 
                       <span
-                        className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-[6px] text-[11px] font-mono border shrink-0 ${
+                        className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-[6px] text-[12px] font-mono border shrink-0 ${
                           isPaidEvent
                             ? 'bg-[#e09132]/12 text-[#ebb05d] border-[#e09132]/25'
                             : 'bg-[#4cc38a]/10 text-[#4cc38a] border-[#4cc38a]/25'
                         }`}
                       >
-                        {isPaidEvent && <CurrencyRupeeIcon className="h-3 w-3" strokeWidth={1.75} />}
+                        {isPaidEvent && <CurrencyRupeeIcon className="h-3.5 w-3.5" strokeWidth={1.5} />}
                         <span>{feeLabel}</span>
                       </span>
                     </div>

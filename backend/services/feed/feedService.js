@@ -407,7 +407,7 @@ async function hydrateFeedPosts(posts, currentUser = null) {
       const isPaidEvent = Boolean(eventObj.isPaid && Number(eventObj.registrationFee || 0) > 0);
       const isPaidRegistration = !isPaidEvent || Boolean(regDoc && regDoc.paymentStatus === 'paid');
 
-      registrationButtonState = isRegistered ? 'REGISTERED ✓' : lifecycle.registrationState;
+      registrationButtonState = isRegistered ? 'REGISTERED' : lifecycle.registrationState;
       isExpired = lifecycle.isExpired;
       isRegistrationOpen = lifecycle.isRegistrationOpen;
 

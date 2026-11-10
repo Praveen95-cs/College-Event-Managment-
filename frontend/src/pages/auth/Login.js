@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { useAuth } from '../../contexts/AuthContext';
 import { AvenorMark } from '../../components/layout/AvenorLogo';
+import AvenorLoader from '../../components/common/AvenorLoader';
 
 const Login = () => {
   const [formData, setFormData] = useState({
@@ -39,7 +40,7 @@ const Login = () => {
 
   return (
     <div className="flex items-center justify-center py-8 sm:py-12">
-      <div className="w-full max-w-[420px] rounded-[16px] bg-[#1c1a18] border border-[#efe9de]/[0.08] p-8 space-y-6">
+      <div className="w-full max-w-[420px] rounded-[14px] bg-[#1c1a18] border border-[#efe9de]/[0.08] p-6 sm:p-8 space-y-6">
         <div className="space-y-4">
           <AvenorMark size="md" />
           <div>
@@ -110,7 +111,14 @@ const Login = () => {
               disabled={loading}
               className="btn-primary w-full h-10 text-[14px]"
             >
-              {loading ? 'Signing in...' : 'Sign in'}
+              {loading ? (
+                <>
+                  <AvenorLoader variant="inline" tone="dark" />
+                  <span>Signing in...</span>
+                </>
+              ) : (
+                'Sign in'
+              )}
             </button>
           </div>
         </form>

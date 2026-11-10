@@ -118,7 +118,11 @@ const Navbar = () => {
               className="p-2 rounded-[8px] text-[#aaa398] hover:text-[#efe9de] hover:bg-[#1c1a18] transition-colors duration-150"
               aria-label="Toggle menu"
             >
-              {isMobileMenuOpen ? <XMarkIcon className="h-5 w-5" /> : <Bars3Icon className="h-5 w-5" />}
+              {isMobileMenuOpen ? (
+                <XMarkIcon className="h-5 w-5" strokeWidth={1.5} />
+              ) : (
+                <Bars3Icon className="h-5 w-5" strokeWidth={1.5} />
+              )}
             </button>
           </div>
         </div>

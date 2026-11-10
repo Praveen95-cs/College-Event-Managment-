@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { resolveMediaUrl } from '../../utils/eventLifecycle';
 
 const SIZE_CLASSES = {
-  sm: 'h-8 w-8 rounded-[8px] text-[11px]',
+  sm: 'h-8 w-8 rounded-[8px] text-[12px]',
   md: 'h-10 w-10 rounded-[10px] text-[13px]',
   lg: 'h-16 w-16 rounded-[14px] text-[20px]'
 };

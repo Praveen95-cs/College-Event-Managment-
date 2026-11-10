@@ -16,6 +16,7 @@ import {
 
 import { getBackendUrl } from '../../utils/apiConfig';
 import EventRegistration from '../../components/events/EventRegistration';
+import AvenorLoader from '../../components/common/AvenorLoader';
 
 const Competitions = () => {
   const { user } = useAuth();
@@ -197,8 +198,8 @@ const Competitions = () => {
 
       {/* Competitions Grid */}
       {loading ? (
-        <div className="flex justify-center items-center py-24">
-          <div className="w-7 h-7 border-2 border-[#e09132] border-t-transparent rounded-full animate-spin" />
+        <div className="py-20 flex justify-center">
+          <AvenorLoader variant="section" label="Loading competitions..." />
         </div>
       ) : filteredCompetitions.length === 0 ? (
         <div className="py-16 text-center rounded-[14px] bg-[#1c1a18] border border-[#efe9de]/[0.08] px-6">
@@ -266,7 +267,7 @@ const Competitions = () => {
                         Event: {comp.event.title}
                       </Link>
                       <span
-                        className={`px-1.5 py-0.5 rounded-[5px] text-[10px] font-mono shrink-0 border ${
+                        className={`px-2 py-0.5 rounded-[6px] text-[12px] font-mono shrink-0 border ${
                           evIsPaid
                             ? 'bg-[#e09132]/12 text-[#ebb05d] border-[#e09132]/25'
                             : 'bg-[#4cc38a]/10 text-[#4cc38a] border-[#4cc38a]/25'
@@ -278,8 +279,8 @@ const Competitions = () => {
                   )}
 
                   {isLocked && (
-                    <div className="mt-2.5 inline-flex items-center gap-1.5 px-2.5 py-1 rounded-[6px] text-[11px] bg-[#e09132]/10 text-[#ebb05d] border border-[#e09132]/25">
-                      <LockClosedIcon className="h-3.5 w-3.5 shrink-0" strokeWidth={1.75} />
+                    <div className="mt-2.5 inline-flex items-center gap-1.5 px-2.5 py-1 rounded-[6px] text-[12px] bg-[#e09132]/10 text-[#ebb05d] border border-[#e09132]/25">
+                      <LockClosedIcon className="h-3.5 w-3.5 shrink-0" strokeWidth={1.5} />
                       <span>
                         {comp.accessStatus.code === 'EVENT_PAYMENT_REQUIRED'
                           ? `Complete ${evCurrency}${evFee} event payment to attend`
@@ -373,7 +374,7 @@ const Competitions = () => {
                           onClick={() => setUnlockEvent(comp.event)}
                           className="btn-primary h-8 px-3 text-[12px]"
                         >
-                          <LockClosedIcon className="h-3.5 w-3.5" strokeWidth={1.75} />
+                          <LockClosedIcon className="h-3.5 w-3.5" strokeWidth={1.5} />
                           <span>
                             {evIsPaid ? `Pay ${evCurrency}${evFee} & unlock` : 'Register to unlock'}
                           </span>

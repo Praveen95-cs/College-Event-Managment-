@@ -14,6 +14,7 @@ import {
   ChatBubbleLeftRightIcon,
   ArrowUpRightIcon
 } from '@heroicons/react/24/outline';
+import AvenorLoader from '../../components/common/AvenorLoader';
 
 const Profile = () => {
   const { user } = useAuth();
@@ -138,9 +139,9 @@ const Profile = () => {
   return (
     <div className="space-y-8">
       {/* Profile Header Card */}
-      <div className="rounded-[16px] bg-[#1c1a18] border border-[#efe9de]/[0.08] p-6 sm:p-8 flex flex-col lg:flex-row lg:items-center justify-between gap-6">
-        <div className="flex items-center gap-4">
-          <div className="h-14 w-14 rounded-[12px] bg-[#262421] border border-[#efe9de]/[0.12] flex items-center justify-center text-[#ebb05d] font-medium text-[22px] shrink-0">
+      <div className="rounded-[14px] bg-[#1c1a18] border border-[#efe9de]/[0.08] p-6 sm:p-8 flex flex-col lg:flex-row lg:items-center justify-between gap-6">
+        <div className="flex items-center gap-4 min-w-0">
+          <div className="h-14 w-14 rounded-[10px] bg-[#262421] border border-[#efe9de]/[0.12] flex items-center justify-center text-[#ebb05d] font-medium text-[22px] shrink-0">
             {user.name ? user.name.charAt(0).toUpperCase() : 'U'}
           </div>
           <div className="min-w-0">
@@ -159,20 +160,20 @@ const Profile = () => {
           </div>
         </div>
 
-        <div className="grid grid-cols-3 divide-x divide-[#efe9de]/[0.08] rounded-[12px] bg-[#12110f] border border-[#efe9de]/[0.08] py-3 px-2 shrink-0">
-          <div className="px-4 text-center">
+        <div className="grid grid-cols-3 divide-x divide-[#efe9de]/[0.08] rounded-[10px] bg-[#12110f] border border-[#efe9de]/[0.08] py-3 px-2 shrink-0">
+          <div className="px-2.5 sm:px-4 text-center">
             <span className="block text-[22px] font-medium text-[#efe9de] font-mono tabular-nums leading-none">
               {registrations.length}
             </span>
             <span className="block text-[12px] text-[#8a847a] mt-1.5">Events joined</span>
           </div>
-          <div className="px-4 text-center">
+          <div className="px-2.5 sm:px-4 text-center">
             <span className="block text-[22px] font-medium text-[#ebb05d] font-mono tabular-nums leading-none">
               {compCertificates.length}
             </span>
             <span className="block text-[12px] text-[#8a847a] mt-1.5">Contests</span>
           </div>
-          <div className="px-4 text-center">
+          <div className="px-2.5 sm:px-4 text-center">
             <span className="block text-[22px] font-medium text-[#4cc38a] font-mono tabular-nums leading-none">
               {totalCertificates}
             </span>
@@ -199,10 +200,10 @@ const Profile = () => {
             </p>
           </div>
 
-          <div className="inline-flex p-1 rounded-[10px] bg-[#12110f] border border-[#efe9de]/[0.08] gap-1 self-start sm:self-auto">
+          <div className="inline-flex max-w-full overflow-x-auto no-scrollbar p-1 rounded-[10px] bg-[#12110f] border border-[#efe9de]/[0.08] gap-1 self-start sm:self-auto">
             <button
               onClick={() => setActiveTab('all')}
-              className={`h-8 px-3 rounded-[6px] text-[13px] font-medium transition-colors duration-150 tabular-nums ${
+              className={`h-8 px-3 rounded-[6px] text-[13px] font-medium transition-colors duration-150 tabular-nums whitespace-nowrap shrink-0 ${
                 activeTab === 'all'
                   ? 'bg-[#262421] text-[#efe9de] border border-[#efe9de]/[0.08]'
                   : 'text-[#8a847a] hover:text-[#efe9de] border border-transparent'
@@ -212,7 +213,7 @@ const Profile = () => {
             </button>
             <button
               onClick={() => setActiveTab('competitions')}
-              className={`h-8 px-3 rounded-[6px] text-[13px] font-medium transition-colors duration-150 tabular-nums ${
+              className={`h-8 px-3 rounded-[6px] text-[13px] font-medium transition-colors duration-150 tabular-nums whitespace-nowrap shrink-0 ${
                 activeTab === 'competitions'
                   ? 'bg-[#262421] text-[#efe9de] border border-[#efe9de]/[0.08]'
                   : 'text-[#8a847a] hover:text-[#efe9de] border border-transparent'
@@ -222,7 +223,7 @@ const Profile = () => {
             </button>
             <button
               onClick={() => setActiveTab('events')}
-              className={`h-8 px-3 rounded-[6px] text-[13px] font-medium transition-colors duration-150 tabular-nums ${
+              className={`h-8 px-3 rounded-[6px] text-[13px] font-medium transition-colors duration-150 tabular-nums whitespace-nowrap shrink-0 ${
                 activeTab === 'events'
                   ? 'bg-[#262421] text-[#efe9de] border border-[#efe9de]/[0.08]'
                   : 'text-[#8a847a] hover:text-[#efe9de] border border-transparent'
@@ -234,8 +235,8 @@ const Profile = () => {
         </div>
 
         {loading ? (
-          <div className="flex justify-center items-center py-20">
-            <div className="w-7 h-7 border-2 border-[#e09132] border-t-transparent rounded-full animate-spin" />
+          <div className="py-14 flex justify-center">
+            <AvenorLoader variant="section" label="Loading credentials..." />
           </div>
         ) : totalCertificates === 0 ? (
           <div className="text-center py-16 bg-[#1c1a18] rounded-[14px] border border-[#efe9de]/[0.08] px-6">
@@ -302,17 +303,17 @@ const Profile = () => {
 
                           <div className="mt-4 p-3 rounded-[10px] bg-[#12110f] border border-[#efe9de]/[0.06] grid grid-cols-3 divide-x divide-[#efe9de]/[0.06] text-center font-mono tabular-nums">
                             <div>
-                              <span className="block text-[11px] font-sans text-[#8a847a]">Score</span>
+                              <span className="block text-[12px] font-sans text-[#8a847a]">Score</span>
                               <span className="text-[13px] font-medium text-[#efe9de]">
                                 {cert.score}/{cert.totalPossibleScore}
                               </span>
                             </div>
                             <div>
-                              <span className="block text-[11px] font-sans text-[#8a847a]">Accuracy</span>
+                              <span className="block text-[12px] font-sans text-[#8a847a]">Accuracy</span>
                               <span className="text-[13px] font-medium text-[#4cc38a]">{cert.percentage}%</span>
                             </div>
                             <div>
-                              <span className="block text-[11px] font-sans text-[#8a847a]">Rank</span>
+                              <span className="block text-[12px] font-sans text-[#8a847a]">Rank</span>
                               <span className="text-[13px] font-medium text-[#ebb05d]">
                                 {cert.rank ? `#${cert.rank}` : '—'}
                               </span>

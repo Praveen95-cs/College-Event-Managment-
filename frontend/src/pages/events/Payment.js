@@ -8,6 +8,7 @@ import {
 import axios from 'axios';
 import { useAuth } from '../../contexts/AuthContext';
 import { getBackendUrl } from '../../utils/apiConfig';
+import AvenorLoader from '../../components/common/AvenorLoader';
 import {
   ArrowLeftIcon,
   ArrowPathIcon,
@@ -618,14 +619,12 @@ const Payment = () => {
 
   if (loading) {
     return (
-      <div className="min-h-[65vh] flex flex-col items-center justify-center gap-4 text-center px-4">
-        <div className="h-9 w-9 rounded-full border-2 border-[#e09132]/30 border-t-[#ebb05d] animate-spin" />
-        <div>
-          <p className="text-[15px] font-medium text-[#efe9de]">Preparing payment session</p>
-          <p className="text-[12px] text-[#8a847a] mt-1">
-            Locking payee VPA snapshot and live verification stream
-          </p>
-        </div>
+      <div className="min-h-[65vh] flex flex-col items-center justify-center text-center px-4">
+        <AvenorLoader
+          variant="page"
+          label="Preparing payment session"
+          sublabel="Locking payee VPA snapshot and live verification stream"
+        />
       </div>
     );
   }
@@ -684,7 +683,7 @@ const Payment = () => {
         </div>
 
         {/* Stepper */}
-        <div className="flex items-center gap-1.5 overflow-x-auto pb-1 md:pb-0 shrink-0">
+        <div className="flex flex-wrap items-center gap-1.5 shrink-0">
           {STEP_LABELS.map((label, idx) => {
             const done = idx < currentStep || (idx === 3 && session?.settled);
             const active = idx === currentStep && !session?.settled;

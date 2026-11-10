@@ -11,6 +11,7 @@ import {
   PhotoIcon,
   ArrowLeftIcon
 } from '@heroicons/react/24/outline';
+import AvenorLoader from '../../components/common/AvenorLoader';
 
 const toLocalDatetimeInput = (value) => {
   if (!value) return '';
@@ -303,7 +304,7 @@ const CreateEvent = () => {
   if (initialLoading) {
     return (
       <div className="flex justify-center items-center py-24">
-        <div className="w-7 h-7 border-2 border-[#e09132] border-t-transparent rounded-full animate-spin" />
+        <AvenorLoader variant="section" label="Loading event editor..." />
       </div>
     );
   }
@@ -626,10 +627,10 @@ const CreateEvent = () => {
           </div>
 
           {/* Payment Configuration */}
-          <div className="p-4 rounded-[12px] bg-[#161513] border border-[#efe9de]/[0.08] space-y-4">
+          <div className="p-4 rounded-[10px] bg-[#161513] border border-[#efe9de]/[0.08] space-y-4">
             <div className="flex flex-wrap items-center justify-between gap-3">
               <div className="flex items-center gap-2">
-                <CurrencyRupeeIcon className="h-4 w-4 text-[#ebb05d]" strokeWidth={1.75} />
+                <CurrencyRupeeIcon className="h-4 w-4 text-[#ebb05d]" strokeWidth={1.5} />
                 <span className="text-[14px] font-medium text-[#efe9de]">Registration pricing</span>
               </div>
               <label className="inline-flex items-center gap-2.5 cursor-pointer text-[13px] font-medium text-[#efe9de]">
@@ -732,7 +733,7 @@ const CreateEvent = () => {
                   placeholder="https://chat.whatsapp.com/..."
                   className="input-field"
                 />
-                <p className="text-[11px] text-[#8a847a] mt-1">
+                <p className="text-[12px] text-[#8a847a] mt-1">
                   {formData.isPaid
                     ? 'Hidden before checkout — automatically shown & emailed once YouPI payment is confirmed.'
                     : 'Revealed on confirmation screen & emailed to registered students.'}
@@ -754,7 +755,7 @@ const CreateEvent = () => {
                   <option value="always">Auto-delete from MongoDB cloud once expired</option>
                   <option value="never">Keep archived (do not auto-delete)</option>
                 </select>
-                <p className="text-[11px] text-[#8a847a] mt-1">
+                <p className="text-[12px] text-[#8a847a] mt-1">
                   Removes expired event, photos, bookings &amp; posts from Atlas cloud DB automatically.
                 </p>
               </div>
@@ -762,13 +763,13 @@ const CreateEvent = () => {
           </div>
 
           {/* Connected Competitions */}
-          <div className="p-4 rounded-[12px] bg-[#161513] border border-[#efe9de]/[0.08] space-y-3">
+          <div className="p-4 rounded-[10px] bg-[#161513] border border-[#efe9de]/[0.08] space-y-3">
             <div className="flex flex-wrap items-center justify-between gap-2">
               <div className="flex items-center gap-2">
-                <TrophyIcon className="h-4 w-4 text-[#ebb05d]" strokeWidth={1.75} />
+                <TrophyIcon className="h-4 w-4 text-[#ebb05d]" strokeWidth={1.5} />
                 <span className="text-[14px] font-medium text-[#efe9de]">Connected competitions</span>
               </div>
-              <span className="text-[11px] font-mono text-[#8a847a]">
+              <span className="text-[12px] font-mono text-[#8a847a]">
                 {selectedCompetitionIds.length} linked
               </span>
             </div>
@@ -808,7 +809,7 @@ const CreateEvent = () => {
                         />
                         <div className="min-w-0">
                           <p className="text-[13px] font-medium text-[#efe9de] truncate">{comp.title}</p>
-                          <p className="text-[11px] font-mono text-[#8a847a]">
+                          <p className="text-[12px] font-mono text-[#8a847a]">
                             {comp.type} · {comp.status}
                             {linkedElsewhere && comp.event?.title ? ` · currently on ${comp.event.title}` : ''}
                           </p>
@@ -945,13 +946,16 @@ const CreateEvent = () => {
               Cancel
             </button>
             <button type="submit" disabled={loading} className="btn-primary h-10 px-5 text-[13px]">
-              {loading
-                ? isEditing
-                  ? 'Saving changes...'
-                  : 'Creating...'
-                : isEditing
-                  ? 'Save changes'
-                  : 'Create event'}
+              {loading ? (
+                <>
+                  <AvenorLoader variant="inline" tone="dark" />
+                  <span>{isEditing ? 'Saving changes...' : 'Creating...'}</span>
+                </>
+              ) : isEditing ? (
+                'Save changes'
+              ) : (
+                'Create event'
+              )}
             </button>
           </div>
         </form>

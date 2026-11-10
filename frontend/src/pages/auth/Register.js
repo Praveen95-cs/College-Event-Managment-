@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { useAuth } from '../../contexts/AuthContext';
 import { AvenorMark } from '../../components/layout/AvenorLogo';
+import AvenorLoader from '../../components/common/AvenorLoader';
 import { fetchDepartments } from '../../utils/departments';
 import { CheckBadgeIcon, EnvelopeIcon, ShieldCheckIcon } from '@heroicons/react/24/outline';
 
@@ -153,7 +154,7 @@ const Register = () => {
 
   return (
     <div className="flex items-center justify-center py-8 sm:py-12">
-      <div className="w-full max-w-[460px] rounded-[16px] bg-[#1c1a18] border border-[#efe9de]/[0.08] p-8 space-y-6">
+      <div className="w-full max-w-[460px] rounded-[14px] bg-[#1c1a18] border border-[#efe9de]/[0.08] p-6 sm:p-8 space-y-6">
         <div className="space-y-4">
           <AvenorMark size="md" />
           <div>
@@ -204,20 +205,20 @@ const Register = () => {
                 Email address *
               </label>
               {isEmailVerified && (
-                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-[5px] text-[11px] font-medium bg-[#4cc38a]/15 text-[#4cc38a] border border-[#4cc38a]/30">
-                  <CheckBadgeIcon className="h-3.5 w-3.5" strokeWidth={1.75} />
+                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-[6px] text-[12px] font-medium bg-[#4cc38a]/15 text-[#4cc38a] border border-[#4cc38a]/30">
+                  <CheckBadgeIcon className="h-3.5 w-3.5" strokeWidth={1.5} />
                   <span>Verified</span>
                 </span>
               )}
             </div>
-            <div className="flex gap-2">
+            <div className="flex flex-col sm:flex-row gap-2">
               <input
                 id="email"
                 name="email"
                 type="email"
                 autoComplete="email"
                 required
-                className="input-field flex-1"
+                className="input-field flex-1 min-w-0"
                 placeholder="student@college.edu"
                 value={formData.email}
                 onChange={handleChange}
@@ -229,22 +230,29 @@ const Register = () => {
                   disabled={sendingOtp || resendCooldown > 0}
                   className="btn-secondary h-10 px-3.5 text-[12px] whitespace-nowrap shrink-0"
                 >
-                  <EnvelopeIcon className="h-4 w-4 text-[#ebb05d]" strokeWidth={1.5} />
-                  <span>
-                    {sendingOtp
-                      ? 'Sending...'
-                      : resendCooldown > 0
-                        ? `Resend (${resendCooldown}s)`
-                        : hasActiveOtpForEmail
-                          ? 'Resend OTP'
-                          : 'Send OTP'}
-                  </span>
+                  {sendingOtp ? (
+                    <>
+                      <AvenorLoader variant="inline" tone="light" />
+                      <span>Sending...</span>
+                    </>
+                  ) : (
+                    <>
+                      <EnvelopeIcon className="h-4 w-4 text-[#ebb05d]" strokeWidth={1.5} />
+                      <span>
+                        {resendCooldown > 0
+                          ? `Resend (${resendCooldown}s)`
+                          : hasActiveOtpForEmail
+                            ? 'Resend OTP'
+                            : 'Send OTP'}
+                      </span>
+                    </>
+                  )}
                 </button>
               )}
             </div>
 
               {!isEmailVerified && (
-                <div className="flex items-center justify-between gap-2 text-[11px] text-[#8a847a]">
+                <div className="flex flex-wrap items-center justify-between gap-2 text-[12px] text-[#8a847a]">
                   <span>Check Spam/Promotions if the code does not appear in Primary.</span>
                   {!hasActiveOtpForEmail && (
                     <button
@@ -269,13 +277,13 @@ const Register = () => {
               <div className="p-3.5 rounded-[10px] bg-[#161513] border border-[#e09132]/30 space-y-2.5">
                 <div className="flex items-center justify-between gap-2">
                   <span className="inline-flex items-center gap-1.5 text-[12px] font-medium text-[#efe9de]">
-                    <ShieldCheckIcon className="h-4 w-4 text-[#ebb05d]" strokeWidth={1.75} />
+                    <ShieldCheckIcon className="h-4 w-4 text-[#ebb05d]" strokeWidth={1.5} />
                     <span>Enter 6-digit email OTP</span>
                   </span>
-                  <span className="text-[11px] font-mono text-[#8a847a]">Valid 10 min</span>
+                  <span className="text-[12px] font-mono text-[#8a847a]">Valid 10 min</span>
                 </div>
 
-                <div className="flex gap-2">
+                <div className="flex flex-col sm:flex-row gap-2">
                   <input
                     id="otp"
                     name="otp"
@@ -285,7 +293,7 @@ const Register = () => {
                     value={otpInput}
                     onChange={(e) => setOtpInput(e.target.value.replace(/\D/g, '').slice(0, 6))}
                     placeholder="123456"
-                    className="input-field flex-1 font-mono tracking-[0.25em] text-center"
+                    className="input-field flex-1 min-w-0 font-mono tracking-[0.25em] text-center"
                   />
                   <button
                     type="button"
@@ -293,12 +301,19 @@ const Register = () => {
                     disabled={verifyingOtp || otpInput.trim().length !== 6}
                     className="btn-primary h-10 px-4 text-[12px] shrink-0"
                   >
-                    {verifyingOtp ? 'Verifying...' : 'Verify OTP'}
+                    {verifyingOtp ? (
+                      <>
+                        <AvenorLoader variant="inline" tone="dark" />
+                        <span>Verifying...</span>
+                      </>
+                    ) : (
+                      'Verify OTP'
+                    )}
                   </button>
                 </div>
 
                 {devOtpHint && (
-                  <div className="flex items-center justify-between gap-2 px-2.5 py-1.5 rounded-[6px] bg-[#262421] border border-[#efe9de]/[0.08] text-[11px] text-[#aaa398]">
+                  <div className="flex items-center justify-between gap-2 px-2.5 py-1.5 rounded-[6px] bg-[#262421] border border-[#efe9de]/[0.08] text-[12px] text-[#aaa398]">
                     <span>
                       Dev OTP preview:{' '}
                       <strong className="font-mono text-[#ebb05d]">{devOtpHint}</strong>
@@ -361,11 +376,16 @@ const Register = () => {
               disabled={loading || !isEmailVerified}
               className="btn-primary w-full h-10 text-[14px]"
             >
-              {loading
-                ? 'Creating account...'
-                : isEmailVerified
-                  ? 'Create verified account'
-                  : 'Verify email with OTP first'}
+              {loading ? (
+                <>
+                  <AvenorLoader variant="inline" tone="dark" />
+                  <span>Creating account...</span>
+                </>
+              ) : isEmailVerified ? (
+                'Create verified account'
+              ) : (
+                'Verify email with OTP first'
+              )}
             </button>
           </div>
         </form>

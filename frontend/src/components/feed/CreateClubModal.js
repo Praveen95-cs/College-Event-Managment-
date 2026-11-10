@@ -139,7 +139,7 @@ const CreateClubModal = ({ isOpen, onClose, onCreated, onUpdated, clubToEdit = n
         if (e.target === e.currentTarget) onClose();
       }}
     >
-      <div className="bg-[#1c1a18] border border-[#efe9de]/[0.12] rounded-[16px] p-6 max-w-md w-full max-h-[90vh] overflow-y-auto shadow-[0_16px_48px_rgba(0,0,0,0.55)] relative">
+      <div className="bg-[#1c1a18] border border-[#efe9de]/[0.12] rounded-[14px] p-6 max-w-md w-full max-h-[90vh] overflow-y-auto shadow-[0_16px_48px_rgba(0,0,0,0.55)] relative">
         <button
           type="button"
           onClick={onClose}
@@ -150,7 +150,7 @@ const CreateClubModal = ({ isOpen, onClose, onCreated, onUpdated, clubToEdit = n
         </button>
 
         <div className="flex items-center gap-3 mb-4 pr-8">
-          <div className="h-9 w-9 rounded-[9px] bg-[#262421] border border-[#efe9de]/[0.1] flex items-center justify-center text-[#ebb05d] shrink-0">
+          <div className="h-9 w-9 rounded-[8px] bg-[#262421] border border-[#efe9de]/[0.1] flex items-center justify-center text-[#ebb05d] shrink-0">
             <UserGroupIcon className="h-5 w-5" strokeWidth={1.5} />
           </div>
           <div>
@@ -174,7 +174,7 @@ const CreateClubModal = ({ isOpen, onClose, onCreated, onUpdated, clubToEdit = n
             <ClubLogo club={previewClub} size="lg" />
             <div className="min-w-0 flex-1 space-y-1">
               <p className="text-[12px] font-medium text-[#efe9de]">Logo preview</p>
-              <p className="text-[11px] text-[#8a847a]">Saved directly to database (JPEG, PNG, GIF, WebP up to 2MB).</p>
+              <p className="text-[12px] text-[#8a847a]">Saved directly to database (JPEG, PNG, GIF, WebP up to 2MB).</p>
               {(previewClub.logo || clubToEdit?.logo) && !removeLogo && (
                 <button
                   type="button"
@@ -184,7 +184,7 @@ const CreateClubModal = ({ isOpen, onClose, onCreated, onUpdated, clubToEdit = n
                     setRemoveLogo(true);
                     setForm(prev => ({ ...prev, logoUrl: '' }));
                   }}
-                  className="text-[11px] text-[#e5484d] hover:underline"
+                  className="text-[12px] text-[#e5484d] hover:underline"
                 >
                   Remove current logo
                 </button>

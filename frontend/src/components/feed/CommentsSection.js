@@ -4,6 +4,7 @@ import axios from 'axios';
 import { useAuth } from '../../contexts/AuthContext';
 import { TrashIcon, ChatBubbleLeftIcon } from '@heroicons/react/24/outline';
 import { formatRelativeTime } from '../../utils/eventLifecycle';
+import AvenorLoader from '../common/AvenorLoader';
 
 const CommentsSection = ({ postId, onCommentsCountChange }) => {
   const { user, isAuthenticated } = useAuth();
@@ -155,8 +156,8 @@ const CommentsSection = ({ postId, onCommentsCountChange }) => {
       )}
 
       {loading ? (
-        <div className="py-8 flex justify-center">
-          <div className="w-6 h-6 border-2 border-[#e09132] border-t-transparent rounded-full animate-spin" />
+        <div className="py-6 flex justify-center">
+          <AvenorLoader variant="compact" label="Loading comments..." />
         </div>
       ) : comments.length === 0 ? (
         <div className="py-8 text-center rounded-[10px] bg-[#161513]/70 border border-[#efe9de]/[0.06]">
@@ -178,11 +179,11 @@ const CommentsSection = ({ postId, onCommentsCountChange }) => {
                     <div className="flex flex-wrap items-center gap-2">
                       <span className="text-[13px] font-medium text-[#efe9de]">{authorName}</span>
                       {comment.isOrganizerBadge && (
-                        <span className="px-1.5 py-0.5 rounded-[5px] text-[11px] font-mono bg-[#e09132]/15 text-[#ebb05d] border border-[#e09132]/25">
+                        <span className="px-1.5 py-0.5 rounded-[6px] text-[12px] font-mono bg-[#e09132]/15 text-[#ebb05d] border border-[#e09132]/25">
                           Organizer
                         </span>
                       )}
-                      <span className="text-[11px] font-mono text-[#8a847a] tabular-nums">
+                      <span className="text-[12px] font-mono text-[#8a847a] tabular-nums">
                         {formatRelativeTime(comment.createdAt)}
                       </span>
                     </div>
@@ -217,7 +218,14 @@ const CommentsSection = ({ postId, onCommentsCountChange }) => {
             disabled={loadingMore}
             className="btn-secondary h-8 px-3.5 text-[12px]"
           >
-            {loadingMore ? 'Loading...' : 'Load earlier comments'}
+            {loadingMore ? (
+              <>
+                <AvenorLoader variant="inline" tone="light" />
+                <span>Loading...</span>
+              </>
+            ) : (
+              'Load earlier comments'
+            )}
           </button>
         </div>
       )}

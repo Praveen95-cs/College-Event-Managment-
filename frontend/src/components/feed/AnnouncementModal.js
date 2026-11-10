@@ -93,7 +93,7 @@ const AnnouncementModal = ({ isOpen, onClose, clubs = [], initialClubId = '', on
         if (e.target === e.currentTarget) onClose();
       }}
     >
-      <div className="bg-[#1c1a18] border border-[#efe9de]/[0.12] rounded-[16px] p-6 max-w-lg w-full max-h-[90vh] overflow-y-auto shadow-[0_16px_48px_rgba(0,0,0,0.55)] relative">
+      <div className="bg-[#1c1a18] border border-[#efe9de]/[0.12] rounded-[14px] p-6 max-w-lg w-full max-h-[90vh] overflow-y-auto shadow-[0_16px_48px_rgba(0,0,0,0.55)] relative">
         <button
           type="button"
           onClick={onClose}
@@ -104,7 +104,7 @@ const AnnouncementModal = ({ isOpen, onClose, clubs = [], initialClubId = '', on
         </button>
 
         <div className="flex items-center gap-2.5 mb-4 pr-8">
-          <div className="h-9 w-9 rounded-[9px] bg-[#e09132]/15 border border-[#e09132]/30 flex items-center justify-center text-[#ebb05d]">
+          <div className="h-9 w-9 rounded-[8px] bg-[#e09132]/15 border border-[#e09132]/30 flex items-center justify-center text-[#ebb05d]">
             <MegaphoneIcon className="h-5 w-5" strokeWidth={1.5} />
           </div>
           <div>

@@ -1,5 +1,6 @@
 import React, { createContext, useContext, useState, useEffect } from 'react';
 import axios from 'axios';
+import AvenorLoader from '../components/common/AvenorLoader';
 
 // Set the base URL for all axios requests
 const API_URL = process.env.REACT_APP_API_URL !== undefined
@@ -147,7 +148,13 @@ export const AuthProvider = ({ children }) => {
 
   return (
     <AuthContext.Provider value={value}>
-      {!loading && children}
+      {loading ? (
+        <div className="min-h-screen bg-[#161513] flex items-center justify-center">
+          <AvenorLoader variant="page" label="Opening Avenor..." />
+        </div>
+      ) : (
+        children
+      )}
     </AuthContext.Provider>
   );
 }; 

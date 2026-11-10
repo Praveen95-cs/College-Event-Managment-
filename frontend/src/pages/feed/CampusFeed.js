@@ -7,9 +7,10 @@ import {
   FunnelIcon,
   MegaphoneIcon,
   BookmarkIcon,
-  SparklesIcon,
+  GlobeAltIcon,
   UserGroupIcon,
   PlusIcon,
+  CheckIcon,
   CalendarIcon,
   XMarkIcon,
   ExclamationTriangleIcon,
@@ -21,6 +22,7 @@ import AnnouncementModal from '../../components/feed/AnnouncementModal';
 import CreateClubModal from '../../components/feed/CreateClubModal';
 import ClubLogo from '../../components/feed/ClubLogo';
 import EventRegistration from '../../components/events/EventRegistration';
+import AvenorLoader from '../../components/common/AvenorLoader';
 import { formatEventDate, formatCount } from '../../utils/eventLifecycle';
 
 const CATEGORIES = [
@@ -44,21 +46,21 @@ const INITIAL_FILTERS = {
 };
 
 const FeedSkeletonCard = () => (
-  <div className="rounded-[14px] bg-[#1c1a18] border border-[#efe9de]/[0.08] p-5 space-y-4 animate-pulse">
+  <div className="rounded-[14px] bg-[#1c1a18] border border-[#efe9de]/[0.08] p-5 space-y-4">
     <div className="flex items-center gap-3">
-      <div className="h-10 w-10 rounded-[10px] bg-[#262421]" />
+      <div className="h-10 w-10 rounded-[10px] avenor-shimmer shrink-0" />
       <div className="space-y-2 flex-1">
-        <div className="h-3.5 w-36 rounded bg-[#262421]" />
-        <div className="h-2.5 w-48 rounded bg-[#262421]" />
+        <div className="h-3.5 w-36 rounded avenor-shimmer" />
+        <div className="h-2.5 w-48 rounded avenor-shimmer" />
       </div>
     </div>
-    <div className="h-5 w-3/4 rounded bg-[#262421]" />
-    <div className="aspect-[16/9] w-full rounded-[10px] bg-[#262421]" />
+    <div className="h-5 w-3/4 rounded avenor-shimmer" />
+    <div className="aspect-[16/9] w-full rounded-[10px] avenor-shimmer" />
     <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
-      <div className="h-8 rounded-[8px] bg-[#262421]" />
-      <div className="h-8 rounded-[8px] bg-[#262421]" />
-      <div className="h-8 rounded-[8px] bg-[#262421]" />
-      <div className="h-8 rounded-[8px] bg-[#262421]" />
+      <div className="h-8 rounded-[8px] avenor-shimmer" />
+      <div className="h-8 rounded-[8px] avenor-shimmer" />
+      <div className="h-8 rounded-[8px] avenor-shimmer" />
+      <div className="h-8 rounded-[8px] avenor-shimmer" />
     </div>
   </div>
 );
@@ -417,14 +419,14 @@ const CampusFeed = () => {
           return {
             ...p,
             isRegistered: true,
-            registrationState: 'REGISTERED ✓',
+            registrationState: 'REGISTERED',
             event: {
               ...p.event,
               attendeesCount: nextCount,
               availableSeats: Math.max(0, (p.event.capacity || 0) - nextCount),
               isRegistered: true,
               isPaidRegistration: true,
-              registrationState: 'REGISTERED ✓'
+              registrationState: 'REGISTERED'
             }
           };
         }
@@ -627,7 +629,7 @@ const CampusFeed = () => {
         <aside className="hidden lg:block lg:col-span-3 space-y-5 sticky top-20">
           <div className="rounded-[14px] bg-[#1c1a18] border border-[#efe9de]/[0.08] p-2 space-y-1">
             {[
-              { id: 'discover', label: 'Discover', icon: SparklesIcon },
+              { id: 'discover', label: 'Discover', icon: GlobeAltIcon },
               { id: 'following', label: 'Following', icon: UserGroupIcon, count: followedClubsCount },
               { id: 'saved', label: 'Saved', icon: BookmarkIcon }
             ].map((tabItem) => {
@@ -651,7 +653,7 @@ const CampusFeed = () => {
                     <span>{tabItem.label}</span>
                   </span>
                   {typeof tabItem.count === 'number' && isAuthenticated && (
-                    <span className="text-[11px] font-mono text-[#8a847a] tabular-nums">
+                    <span className="text-[12px] font-mono text-[#8a847a] tabular-nums">
                       {tabItem.count}
                     </span>
                   )}
@@ -670,7 +672,7 @@ const CampusFeed = () => {
                 <button
                   type="button"
                   onClick={handleResetFilters}
-                  className="text-[11px] font-mono text-[#ebb05d] hover:text-[#efe9de]"
+                  className="text-[12px] font-mono text-[#ebb05d] hover:text-[#efe9de]"
                 >
                   Clear
                 </button>
@@ -913,7 +915,14 @@ const CampusFeed = () => {
                     disabled={loadingMore}
                     className="btn-secondary h-9 px-5 text-[13px]"
                   >
-                    {loadingMore ? 'Loading more...' : 'Load more posts'}
+                    {loadingMore ? (
+                      <>
+                        <AvenorLoader variant="inline" tone="light" />
+                        <span>Loading more...</span>
+                      </>
+                    ) : (
+                      'Load more posts'
+                    )}
                   </button>
                 </div>
               )}
@@ -927,7 +936,7 @@ const CampusFeed = () => {
           <div className="rounded-[14px] bg-[#1c1a18] border border-[#efe9de]/[0.08] p-4 space-y-3.5">
             <div className="flex items-center justify-between">
               <h2 className="text-[14px] font-medium text-[#efe9de]">Campus clubs</h2>
-              <span className="text-[11px] font-mono text-[#8a847a] tabular-nums">
+              <span className="text-[12px] font-mono text-[#8a847a] tabular-nums">
                 {clubs.length} active
               </span>
             </div>
@@ -954,10 +963,10 @@ const CampusFeed = () => {
                               {club.name}
                             </span>
                             {club.verified && (
-                              <CheckBadgeIcon className="h-3.5 w-3.5 text-[#ebb05d] shrink-0" strokeWidth={1.75} />
+                              <CheckBadgeIcon className="h-3.5 w-3.5 text-[#ebb05d] shrink-0" strokeWidth={1.5} />
                             )}
                           </div>
-                          <span className="block text-[11px] font-mono text-[#8a847a] tabular-nums">
+                          <span className="block text-[12px] font-mono text-[#8a847a] tabular-nums">
                             {formatCount(club.followersCount)} {club.followersCount === 1 ? 'follower' : 'followers'}
                           </span>
                         </div>
@@ -966,12 +975,22 @@ const CampusFeed = () => {
                       <button
                         type="button"
                         onClick={() => handleToggleFollowClub(club)}
-                        className={`h-7 px-2.5 rounded-[6px] text-[11px] font-medium shrink-0 transition-colors duration-150 ${club.isFollowing
+                        className={`inline-flex items-center gap-1 h-7 px-2.5 rounded-[6px] text-[12px] font-medium shrink-0 transition-colors duration-150 ${club.isFollowing
                             ? 'bg-[#262421] text-[#4cc38a] border border-[#4cc38a]/25'
                             : 'bg-[#262421] text-[#ebb05d] border border-[#efe9de]/[0.1] hover:border-[#e09132]/40'
                           }`}
                       >
-                        {club.isFollowing ? 'Following ✓' : '+ Follow'}
+                        {club.isFollowing ? (
+                          <>
+                            <CheckIcon className="h-3.5 w-3.5" strokeWidth={1.5} />
+                            <span>Following</span>
+                          </>
+                        ) : (
+                          <>
+                            <PlusIcon className="h-3.5 w-3.5" strokeWidth={1.5} />
+                            <span>Follow</span>
+                          </>
+                        )}
                       </button>
                     </div>
                   ))}
@@ -995,14 +1014,14 @@ const CampusFeed = () => {
                     to={`/events/${hl.event._id}`}
                     className="block p-3 rounded-[10px] bg-[#161513] border border-[#efe9de]/[0.06] hover:border-[#efe9de]/[0.16] transition-colors"
                   >
-                    <div className="flex items-center justify-between text-[11px] font-mono text-[#8a847a] tabular-nums">
-                      <span className="text-[#ebb05d]">{hl.club?.name || hl.event.department}</span>
-                      <span>{formatEventDate(hl.event.date)}</span>
+                    <div className="flex items-center justify-between gap-2 text-[12px] font-mono text-[#8a847a] tabular-nums">
+                      <span className="text-[#ebb05d] truncate">{hl.club?.name || hl.event.department}</span>
+                      <span className="shrink-0">{formatEventDate(hl.event.date)}</span>
                     </div>
                     <p className="text-[13px] font-medium text-[#efe9de] line-clamp-1 mt-1">
                       {hl.event.title}
                     </p>
-                    <p className="text-[11px] font-mono text-[#8a847a] mt-1 tabular-nums">
+                    <p className="text-[12px] font-mono text-[#8a847a] mt-1 tabular-nums">
                       {hl.event.availableSeats} seats left
                     </p>
                   </Link>
@@ -1018,16 +1037,16 @@ const CampusFeed = () => {
         <button
           type="button"
           onClick={() => switchTab('discover')}
-          className={`flex flex-col items-center justify-center py-1 rounded-[8px] text-[11px] font-medium ${activeTab === 'discover' ? 'text-[#ebb05d] bg-[#262421]' : 'text-[#8a847a]'
+          className={`flex flex-col items-center justify-center py-1 rounded-[8px] text-[12px] font-medium ${activeTab === 'discover' ? 'text-[#ebb05d] bg-[#262421]' : 'text-[#8a847a]'
             }`}
         >
-          <SparklesIcon className="h-4 w-4 mb-0.5" strokeWidth={1.5} />
+          <GlobeAltIcon className="h-4 w-4 mb-0.5" strokeWidth={1.5} />
           <span>Discover</span>
         </button>
         <button
           type="button"
           onClick={() => switchTab('following')}
-          className={`flex flex-col items-center justify-center py-1 rounded-[8px] text-[11px] font-medium ${activeTab === 'following' ? 'text-[#ebb05d] bg-[#262421]' : 'text-[#8a847a]'
+          className={`flex flex-col items-center justify-center py-1 rounded-[8px] text-[12px] font-medium ${activeTab === 'following' ? 'text-[#ebb05d] bg-[#262421]' : 'text-[#8a847a]'
             }`}
         >
           <UserGroupIcon className="h-4 w-4 mb-0.5" strokeWidth={1.5} />
@@ -1036,7 +1055,7 @@ const CampusFeed = () => {
         <button
           type="button"
           onClick={() => switchTab('saved')}
-          className={`flex flex-col items-center justify-center py-1 rounded-[8px] text-[11px] font-medium ${activeTab === 'saved' ? 'text-[#ebb05d] bg-[#262421]' : 'text-[#8a847a]'
+          className={`flex flex-col items-center justify-center py-1 rounded-[8px] text-[12px] font-medium ${activeTab === 'saved' ? 'text-[#ebb05d] bg-[#262421]' : 'text-[#8a847a]'
             }`}
         >
           <BookmarkIcon className="h-4 w-4 mb-0.5" strokeWidth={1.5} />
@@ -1045,7 +1064,7 @@ const CampusFeed = () => {
         <button
           type="button"
           onClick={() => clubsSectionRef.current?.scrollIntoView({ behavior: 'smooth' })}
-          className="flex flex-col items-center justify-center py-1 rounded-[8px] text-[11px] font-medium text-[#8a847a] hover:text-[#efe9de]"
+          className="flex flex-col items-center justify-center py-1 rounded-[8px] text-[12px] font-medium text-[#8a847a] hover:text-[#efe9de]"
         >
           <CalendarIcon className="h-4 w-4 mb-0.5" strokeWidth={1.5} />
           <span>Clubs</span>

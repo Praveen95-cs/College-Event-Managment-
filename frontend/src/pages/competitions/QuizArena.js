@@ -13,6 +13,7 @@ import {
 } from '@heroicons/react/24/outline';
 import { getBackendUrl } from '../../utils/apiConfig';
 import EventRegistration from '../../components/events/EventRegistration';
+import AvenorLoader from '../../components/common/AvenorLoader';
 
 const QuizArena = () => {
   const { id } = useParams();
@@ -242,9 +243,8 @@ const QuizArena = () => {
 
   if (loading) {
     return (
-      <div className="flex flex-col items-center justify-center min-h-[60vh] space-y-4">
-        <div className="w-8 h-8 border-2 border-[#e09132] border-t-transparent rounded-full animate-spin" />
-        <p className="text-[14px] text-[#aaa398]">Loading assessment questions...</p>
+      <div className="min-h-[60vh] flex items-center justify-center">
+        <AvenorLoader variant="page" label="Loading assessment questions..." />
       </div>
     );
   }
@@ -533,7 +533,7 @@ const QuizArena = () => {
       {/* Submit Confirmation Modal */}
       {showSubmitModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-[#12110f]/80 backdrop-blur-sm">
-          <div className="max-w-md w-full p-6 rounded-[16px] bg-[#1c1a18] border border-[#efe9de]/[0.12] shadow-[0_24px_64px_rgba(0,0,0,0.6)] space-y-5">
+          <div className="max-w-md w-full p-6 rounded-[14px] bg-[#1c1a18] border border-[#efe9de]/[0.12] shadow-[0_24px_64px_rgba(0,0,0,0.6)] space-y-5">
             <div>
               <h3 className="text-[18px] font-medium text-[#efe9de]">Submit quiz</h3>
               <p className="text-[13px] text-[#aaa398] mt-1">
@@ -543,15 +543,15 @@ const QuizArena = () => {
 
             <div className="p-4 rounded-[10px] bg-[#12110f] border border-[#efe9de]/[0.08] grid grid-cols-3 gap-2 text-center font-mono tabular-nums">
               <div>
-                <span className="block font-sans text-[11px] text-[#8a847a]">Answered</span>
+                <span className="block font-sans text-[12px] text-[#8a847a]">Answered</span>
                 <p className="text-[18px] font-medium text-[#4cc38a] mt-1">{answeredCount}</p>
               </div>
               <div>
-                <span className="block font-sans text-[11px] text-[#8a847a]">Review</span>
+                <span className="block font-sans text-[12px] text-[#8a847a]">Review</span>
                 <p className="text-[18px] font-medium text-[#ebb05d] mt-1">{markedCount}</p>
               </div>
               <div>
-                <span className="block font-sans text-[11px] text-[#8a847a]">Unanswered</span>
+                <span className="block font-sans text-[12px] text-[#8a847a]">Unanswered</span>
                 <p className="text-[18px] font-medium text-[#aaa398] mt-1">{unansweredCount}</p>
               </div>
             </div>

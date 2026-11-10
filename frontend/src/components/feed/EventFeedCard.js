@@ -14,6 +14,7 @@ import {
   CheckBadgeIcon,
   TrashIcon,
   CheckIcon,
+  PlusIcon,
   CurrencyRupeeIcon
 } from '@heroicons/react/24/outline';
 import {
@@ -121,10 +122,10 @@ const EventFeedCard = ({
       );
     }
 
-    if (lifecycle.state === 'REGISTERED ✓') {
+    if (lifecycle.state === 'REGISTERED' || lifecycle.state === 'REGISTERED ✓') {
       return (
         <span className="inline-flex items-center gap-1.5 h-9 px-3.5 rounded-[8px] text-[13px] font-medium bg-[#4cc38a]/12 text-[#4cc38a] border border-[#4cc38a]/30 select-none shrink-0">
-          <CheckIcon className="h-4 w-4 shrink-0" strokeWidth={2} />
+          <CheckIcon className="h-4 w-4 shrink-0" strokeWidth={1.5} />
           <span>Registered</span>
         </span>
       );
@@ -198,19 +199,29 @@ const EventFeedCard = ({
                 </span>
               )}
               {club?.verified && (
-                <CheckBadgeIcon className="h-4 w-4 text-[#ebb05d] shrink-0" strokeWidth={1.75} title="Verified campus club" />
+                <CheckBadgeIcon className="h-4 w-4 text-[#ebb05d] shrink-0" strokeWidth={1.5} title="Verified campus club" />
               )}
               {club && (
                 <button
                   type="button"
                   onClick={() => onToggleFollowClub?.(club)}
-                  className={`ml-1 inline-flex items-center gap-1 px-2 py-0.5 rounded-[6px] text-[11px] font-medium transition-colors duration-150 ${
+                  className={`ml-1 inline-flex items-center gap-1 px-2 py-0.5 rounded-[6px] text-[12px] font-medium transition-colors duration-150 ${
                     club.isFollowing
                       ? 'bg-[#262421] text-[#4cc38a] border border-[#4cc38a]/25'
                       : 'bg-[#262421] text-[#ebb05d] border border-[#efe9de]/[0.1] hover:border-[#e09132]/40'
                   }`}
                 >
-                  {club.isFollowing ? 'Following ✓' : '+ Follow'}
+                  {club.isFollowing ? (
+                    <>
+                      <CheckIcon className="h-3.5 w-3.5" strokeWidth={1.5} />
+                      <span>Following</span>
+                    </>
+                  ) : (
+                    <>
+                      <PlusIcon className="h-3.5 w-3.5" strokeWidth={1.5} />
+                      <span>Follow</span>
+                    </>
+                  )}
                 </button>
               )}
             </div>
@@ -232,7 +243,7 @@ const EventFeedCard = ({
         <div className="flex items-center gap-2 shrink-0" ref={menuRef}>
           {isEvent && (
             <span
-              className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-[6px] text-[11px] font-mono ${
+              className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-[6px] text-[12px] font-mono ${
                 isPaidEvent
                   ? 'bg-[#e09132]/12 text-[#ebb05d] border border-[#e09132]/25'
                   : 'bg-[#4cc38a]/10 text-[#4cc38a] border border-[#4cc38a]/25'
@@ -243,7 +254,7 @@ const EventFeedCard = ({
             </span>
           )}
           {!isEvent && (
-            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-[6px] text-[11px] font-mono bg-[#e09132]/12 text-[#ebb05d] border border-[#e09132]/25">
+            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-[6px] text-[12px] font-mono bg-[#e09132]/12 text-[#ebb05d] border border-[#e09132]/25">
               <MegaphoneIcon className="h-3.5 w-3.5" strokeWidth={1.5} />
               <span>Announcement</span>
             </span>
@@ -342,7 +353,7 @@ const EventFeedCard = ({
             className="flex items-center justify-between gap-3 px-3.5 py-2.5 rounded-[10px] bg-[#161513] border border-[#efe9de]/[0.08] hover:border-[#e09132]/40 transition-colors duration-150"
           >
             <div className="min-w-0">
-              <span className="text-[11px] font-mono text-[#ebb05d]">Linked event</span>
+              <span className="text-[12px] font-mono text-[#ebb05d]">Linked event</span>
               <p className="text-[13px] font-medium text-[#efe9de] truncate">{item.relatedEvent.title}</p>
             </div>
             <span className="text-[12px] font-medium text-[#ebb05d] shrink-0">View details</span>
@@ -377,7 +388,7 @@ const EventFeedCard = ({
             {item.tags.slice(0, 4).map((tag) => (
               <span
                 key={tag}
-                className="px-2 py-0.5 rounded-[6px] text-[11px] font-mono bg-[#262421] text-[#8a847a] border border-[#efe9de]/[0.06]"
+                className="px-2 py-0.5 rounded-[6px] text-[12px] font-mono bg-[#262421] text-[#8a847a] border border-[#efe9de]/[0.06]"
               >
                 #{tag}
               </span>
@@ -432,7 +443,7 @@ const EventFeedCard = ({
             ) : (
               <BookmarkIcon className="h-4 w-4 shrink-0" strokeWidth={1.5} />
             )}
-            <span>{item.isSaved ? 'Saved ✓' : 'Save'}</span>
+            <span>{item.isSaved ? 'Saved' : 'Save'}</span>
           </button>
 
           <button
@@ -441,8 +452,12 @@ const EventFeedCard = ({
             className="inline-flex items-center gap-1 h-8 px-2.5 rounded-[8px] text-[12px] font-medium text-[#aaa398] hover:text-[#efe9de] hover:bg-[#262421] transition-colors duration-150"
             aria-label="Share event"
           >
-            <ArrowUpRightIcon className="h-4 w-4 shrink-0" strokeWidth={1.5} />
-            <span>{copiedNotice ? 'Copied ✓' : 'Share'}</span>
+            {copiedNotice ? (
+              <CheckIcon className="h-4 w-4 shrink-0 text-[#4cc38a]" strokeWidth={1.5} />
+            ) : (
+              <ArrowUpRightIcon className="h-4 w-4 shrink-0" strokeWidth={1.5} />
+            )}
+            <span>{copiedNotice ? 'Copied' : 'Share'}</span>
           </button>
         </div>
 
